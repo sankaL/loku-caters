@@ -16,7 +16,8 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
     if item is None:
         raise HTTPException(status_code=400, detail=f"Unknown item: {order_in.item_id}")
 
-    total_price = round(order_in.quantity * item["price"], 2)
+    effective_price = item.get("discounted_price") or item["price"]
+    total_price = round(order_in.quantity * effective_price, 2)
 
     order = Order(
         name=order_in.name,
@@ -44,7 +45,7 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
         "phone_number": order.phone_number,
         "email": order.email,
         "total_price": float(order.total_price),
-        "price_per_item": item["price"],
+        "price_per_item": effective_price,
         "currency": get_currency(),
     }
 

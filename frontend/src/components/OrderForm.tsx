@@ -56,7 +56,8 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
       ? (LOCATIONS.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
       : [];
 
-  const total = (form.quantity * selectedItem.price).toFixed(2);
+  const effectivePrice = selectedItem.discounted_price ?? selectedItem.price;
+  const total = (form.quantity * effectivePrice).toFixed(2);
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -188,7 +189,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
             >
               {ITEMS.map((item) => (
                 <option key={item.id} value={item.id} title={item.description}>
-                  {item.name} - {CURRENCY} ${item.price.toFixed(2)}
+                  {item.name}
                 </option>
               ))}
             </select>
@@ -197,6 +198,21 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                 {selectedItem.description}
               </p>
             )}
+            <div className="mt-2 flex items-baseline gap-2">
+              <span className="text-base font-semibold" style={{ color: "var(--color-forest)" }}>
+                {CURRENCY} ${(selectedItem.discounted_price ?? selectedItem.price).toFixed(2)}
+              </span>
+              {selectedItem.discounted_price != null && (
+                <>
+                  <span className="text-sm line-through" style={{ color: "var(--color-muted)" }}>
+                    {CURRENCY} ${selectedItem.price.toFixed(2)}
+                  </span>
+                  <span className="text-xs font-medium" style={{ color: "var(--color-sage)" }}>
+                    Welcome-back price
+                  </span>
+                </>
+              )}
+            </div>
             {errors.item_id && <p className="mt-1 text-xs text-red-500">{errors.item_id}</p>}
           </div>
 
@@ -347,7 +363,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                   Order Total
                 </p>
                 <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                  {form.quantity} x {selectedItem.name} @ {CURRENCY} ${selectedItem.price.toFixed(2)} each
+                  {form.quantity} x {selectedItem.name} @ {CURRENCY} ${effectivePrice.toFixed(2)} each
                 </p>
               </div>
               <p

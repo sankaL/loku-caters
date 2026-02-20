@@ -15,6 +15,26 @@ export default function HeroSection() {
           }}
         />
 
+        {/* Decorative food image — absolute, out of flow, right-aligned */}
+        <div className="absolute right-0 inset-y-0 w-1/2 md:w-[45%] pointer-events-none select-none" aria-hidden="true">
+          {/* Gradient fade so image dissolves into the dark green on the left */}
+          <div
+            className="absolute inset-y-0 left-0 w-4/5 z-10"
+            style={{ background: "linear-gradient(to right, #12270F, transparent)" }}
+          />
+          {/* Bottom fade so image doesn't hard-clip */}
+          <div
+            className="absolute bottom-0 inset-x-0 h-8 z-10"
+            style={{ background: "linear-gradient(to top, #12270F, transparent)" }}
+          />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/assets/img/background-removed-background-removed.png"
+            alt=""
+            className="absolute inset-0 h-full w-full object-contain object-right-bottom opacity-70"
+          />
+        </div>
+
         <div className="relative px-8 py-10 md:px-14 md:py-16">
           {EVENT_DATE && (
             <p
@@ -39,6 +59,13 @@ export default function HeroSection() {
             style={{ color: "#b8c8a8" }}
           >
             We&apos;re making a fresh batch and we&apos;d love for you to have some.
+          </p>
+
+          <p
+            className="text-base md:text-lg leading-relaxed mb-4 max-w-xl animate-fade-up delay-300"
+            style={{ color: "#b8c8a8" }}
+          >
+            Back after a little while, so we&apos;re offering a special welcome-back price for this batch.
           </p>
 
           <p
