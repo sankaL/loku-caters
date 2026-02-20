@@ -1,11 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { PICKUP_LOCATIONS, LOCATION_NAMES } from "@/config/locations";
-import { PRICE_PER_ITEM, CURRENCY, API_URL } from "@/config/event";
+import { ITEMS, LOCATIONS, API_URL, type Item } from "@/config/event";
 
 interface FormData {
   name: string;
+  item_id: string;
   quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
@@ -17,10 +17,14 @@ interface OrderResult {
   order_id: string;
   order: {
     name: string;
+    item_id: string;
+    item_name: string;
     quantity: number;
     pickup_location: string;
     pickup_time_slot: string;
     total_price: number;
+    price_per_item: number;
+    currency: string;
   };
 }
 
@@ -28,9 +32,12 @@ interface OrderFormProps {
   onSuccess: (result: OrderResult) => void;
 }
 
+const defaultItem = ITEMS[0];
+
 export default function OrderForm({ onSuccess }: OrderFormProps) {
   const [form, setForm] = useState<FormData>({
     name: "",
+    item_id: defaultItem.id,
     quantity: 1,
     pickup_location: "",
     pickup_time_slot: "",
@@ -41,12 +48,15 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState("");
 
+  const selectedItem: Item =
+    ITEMS.find((i) => i.id === form.item_id) ?? defaultItem;
+
   const timeSlots =
-    form.pickup_location && PICKUP_LOCATIONS[form.pickup_location]
-      ? PICKUP_LOCATIONS[form.pickup_location]
+    form.pickup_location
+      ? (LOCATIONS.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
       : [];
 
-  const total = (form.quantity * PRICE_PER_ITEM).toFixed(2);
+  const total = (form.quantity * selectedItem.price).toFixed(2);
 
   function handleChange(
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
@@ -57,6 +67,8 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
 
     if (name === "pickup_location") {
       setForm((prev) => ({ ...prev, pickup_location: value, pickup_time_slot: "" }));
+    } else if (name === "item_id") {
+      setForm((prev) => ({ ...prev, item_id: value }));
     } else {
       setForm((prev) => ({ ...prev, [name]: value }));
     }
@@ -72,6 +84,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
   function validate(): boolean {
     const newErrors: Partial<Record<keyof FormData, string>> = {};
     if (!form.name.trim()) newErrors.name = "Please enter your name.";
+    if (!form.item_id) newErrors.item_id = "Please select an item.";
     if (!form.pickup_location) newErrors.pickup_location = "Please select a pickup location.";
     if (!form.pickup_time_slot) newErrors.pickup_time_slot = "Please select a time slot.";
     if (!form.phone_number.trim()) newErrors.phone_number = "Please enter your phone number.";
@@ -129,18 +142,14 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
     <section className="w-full max-w-2xl mx-auto px-6 pb-16">
       <div
         className="rounded-3xl p-8 md:p-10 shadow-sm animate-scale-in"
-        style={{
-          background: "white",
-          border: "1px solid var(--color-border)",
-        }}
+        style={{ background: "white", border: "1px solid var(--color-border)" }}
       >
-        {/* Form header */}
         <div className="mb-8">
           <h2
             className="text-2xl md:text-3xl font-bold mb-1"
             style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
           >
-            Pre-Order Your Lamprais
+            Place Your Pre-Order
           </h2>
           <p className="text-sm" style={{ color: "var(--color-muted)" }}>
             Fill in your details below. We&apos;ll send a confirmation to your email.
@@ -165,10 +174,47 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
             {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
           </div>
 
+          {/* Item selection */}
+          <div>
+            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
+              What would you like to order?
+            </label>
+            {ITEMS.length === 1 ? (
+              <div
+                className="w-full px-4 py-3 rounded-xl text-sm border"
+                style={{
+                  borderColor: "var(--color-border)",
+                  color: "var(--color-text)",
+                  background: "var(--color-cream)",
+                }}
+              >
+                <span className="font-medium">{ITEMS[0].name}</span>
+                <span className="ml-2" style={{ color: "var(--color-muted)" }}>
+                  - {ITEMS[0].description}
+                </span>
+              </div>
+            ) : (
+              <select
+                name="item_id"
+                value={form.item_id}
+                onChange={handleChange}
+                className={inputClass("item_id")}
+                style={{ color: "var(--color-text)" }}
+              >
+                {ITEMS.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name} - AUD ${item.price.toFixed(2)}
+                  </option>
+                ))}
+              </select>
+            )}
+            {errors.item_id && <p className="mt-1 text-xs text-red-500">{errors.item_id}</p>}
+          </div>
+
           {/* Quantity */}
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
-              How Many Lamprais?
+              How many {selectedItem.name}?
             </label>
             <div className="flex items-center gap-0">
               <button
@@ -183,7 +229,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                 }}
                 aria-label="Decrease quantity"
               >
-                −
+                -
               </button>
               <div
                 className="flex-1 h-12 flex items-center justify-center text-sm font-semibold border-t border-b"
@@ -223,10 +269,10 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
               className={inputClass("pickup_location")}
               style={{ color: form.pickup_location ? "var(--color-text)" : "var(--color-muted)" }}
             >
-              <option value="">Select a location…</option>
-              {LOCATION_NAMES.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
+              <option value="">Select a location</option>
+              {LOCATIONS.map((loc) => (
+                <option key={loc.id} value={loc.name}>
+                  {loc.name}
                 </option>
               ))}
             </select>
@@ -252,7 +298,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
               }}
             >
               <option value="">
-                {form.pickup_location ? "Select a time slot…" : "Select a location first"}
+                {form.pickup_location ? "Select a time slot" : "Select a location first"}
               </option>
               {timeSlots.map((slot) => (
                 <option key={slot} value={slot}>
@@ -304,10 +350,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
           {/* Order Summary */}
           <div
             className="rounded-2xl p-5 mt-2"
-            style={{
-              background: "var(--color-cream)",
-              border: "1px solid var(--color-border)",
-            }}
+            style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
           >
             <div className="flex items-center justify-between">
               <div>
@@ -315,34 +358,29 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                   Order Total
                 </p>
                 <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                  {form.quantity} × {CURRENCY} ${PRICE_PER_ITEM.toFixed(2)} per Lamprais
+                  {form.quantity} x {selectedItem.name} @ AUD ${selectedItem.price.toFixed(2)} each
                 </p>
               </div>
               <p
                 className="text-3xl font-bold"
                 style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
               >
-                {CURRENCY} ${total}
+                AUD ${total}
               </p>
             </div>
           </div>
 
-          {/* Server error */}
           {serverError && (
             <div className="rounded-xl px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200">
               {serverError}
             </div>
           )}
 
-          {/* Submit */}
           <button
             type="submit"
             disabled={submitting}
             className="w-full py-4 rounded-2xl text-base font-semibold tracking-wide transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{
-              background: "var(--color-forest)",
-              color: "var(--color-cream)",
-            }}
+            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
             onMouseEnter={(e) => {
               if (!submitting) (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
             }}
@@ -364,7 +402,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                   <circle cx="12" cy="12" r="10" opacity="0.3" />
                   <path d="M12 2a10 10 0 0 1 10 10" />
                 </svg>
-                Placing your order…
+                Placing your order...
               </span>
             ) : (
               "Place Pre-Order"

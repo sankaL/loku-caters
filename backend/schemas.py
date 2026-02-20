@@ -3,6 +3,7 @@ from pydantic import BaseModel, EmailStr, field_validator
 
 class OrderCreate(BaseModel):
     name: str
+    item_id: str
     quantity: int
     pickup_location: str
     pickup_time_slot: str
@@ -16,7 +17,7 @@ class OrderCreate(BaseModel):
             raise ValueError("Quantity must be at least 1")
         return v
 
-    @field_validator("name", "pickup_location", "pickup_time_slot", "phone_number")
+    @field_validator("name", "item_id", "pickup_location", "pickup_time_slot", "phone_number")
     @classmethod
     def must_not_be_empty(cls, v: str) -> str:
         if not v.strip():

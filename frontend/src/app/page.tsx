@@ -10,10 +10,14 @@ interface OrderResult {
   order_id: string;
   order: {
     name: string;
+    item_id: string;
+    item_name: string;
     quantity: number;
     pickup_location: string;
     pickup_time_slot: string;
     total_price: number;
+    price_per_item: number;
+    currency: string;
   };
 }
 

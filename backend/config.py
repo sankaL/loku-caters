@@ -8,8 +8,6 @@ class Settings(BaseSettings):
     resend_api_key: str
     from_email: str = "orders@lokucaters.com"
     frontend_url: str = "http://localhost:3000"
-    price_per_item: float = 20.0
-    currency: str = "AUD"
 
 
 settings = Settings()

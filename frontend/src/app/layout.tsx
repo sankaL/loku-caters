@@ -17,10 +17,10 @@ const playfair = Playfair_Display({
 export const metadata: Metadata = {
   title: "Loku Caters | Authentic Sri Lankan Lamprais",
   description:
-    "Pre-order authentic Sri Lankan Lamprais, lovingly prepared and available for pickup. Limited quantities — reserve yours today.",
+    "Pre-order authentic Sri Lankan Lamprais, lovingly prepared and available for pickup. Limited quantities - reserve yours today.",
   openGraph: {
     title: "Loku Caters | Authentic Sri Lankan Lamprais",
-    description: "Pre-order authentic Sri Lankan Lamprais. Limited quantities — reserve yours today.",
+    description: "Pre-order authentic Sri Lankan Lamprais. Limited quantities - reserve yours today.",
     type: "website",
   },
 };
@@ -32,7 +32,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${inter.variable} ${playfair.variable}`}>
-      <body>{children}</body>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

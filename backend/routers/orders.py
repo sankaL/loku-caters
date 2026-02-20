@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from config import settings
 from database import get_db
+from event_config import get_item
 from models import Order
 from schemas import OrderCreate, OrderResponse
 from services.email import send_confirmation
@@ -12,10 +12,16 @@ router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 @router.post("", response_model=OrderResponse, status_code=201)
 def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
-    total_price = round(order_in.quantity * settings.price_per_item, 2)
+    item = get_item(order_in.item_id)
+    if item is None:
+        raise HTTPException(status_code=400, detail=f"Unknown item: {order_in.item_id}")
+
+    total_price = round(order_in.quantity * item["price"], 2)
 
     order = Order(
         name=order_in.name,
+        item_id=item["id"],
+        item_name=item["name"],
         quantity=order_in.quantity,
         pickup_location=order_in.pickup_location,
         pickup_time_slot=order_in.pickup_time_slot,
@@ -30,18 +36,21 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
 
     order_data = {
         "name": order.name,
+        "item_id": order.item_id,
+        "item_name": order.item_name,
         "quantity": order.quantity,
         "pickup_location": order.pickup_location,
         "pickup_time_slot": order.pickup_time_slot,
         "phone_number": order.phone_number,
         "email": order.email,
         "total_price": float(order.total_price),
+        "price_per_item": item["price"],
+        "currency": item.get("currency", "AUD"),
     }
 
     try:
         send_confirmation(order_data)
     except Exception as exc:
-        # Don't fail the order if email sending fails; log the error
         print(f"[email] Failed to send confirmation to {order.email}: {exc}")
 
     return OrderResponse(
