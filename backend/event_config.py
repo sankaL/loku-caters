@@ -20,3 +20,7 @@ def get_all_items() -> list[dict]:
 
 def get_event_date() -> str:
     return _config["event"]["date"]
+
+
+def get_currency() -> str:
+    return _config.get("currency", "CAD")

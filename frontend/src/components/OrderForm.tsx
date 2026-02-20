@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ITEMS, LOCATIONS, API_URL, type Item } from "@/config/event";
+import { ITEMS, LOCATIONS, API_URL, CURRENCY, type Item } from "@/config/event";
 
 interface FormData {
   name: string;
@@ -179,34 +179,23 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               What would you like to order?
             </label>
-            {ITEMS.length === 1 ? (
-              <div
-                className="w-full px-4 py-3 rounded-xl text-sm border"
-                style={{
-                  borderColor: "var(--color-border)",
-                  color: "var(--color-text)",
-                  background: "var(--color-cream)",
-                }}
-              >
-                <span className="font-medium">{ITEMS[0].name}</span>
-                <span className="ml-2" style={{ color: "var(--color-muted)" }}>
-                  - {ITEMS[0].description}
-                </span>
-              </div>
-            ) : (
-              <select
-                name="item_id"
-                value={form.item_id}
-                onChange={handleChange}
-                className={inputClass("item_id")}
-                style={{ color: "var(--color-text)" }}
-              >
-                {ITEMS.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.name} - AUD ${item.price.toFixed(2)}
-                  </option>
-                ))}
-              </select>
+            <select
+              name="item_id"
+              value={form.item_id}
+              onChange={handleChange}
+              className={inputClass("item_id")}
+              style={{ color: "var(--color-text)" }}
+            >
+              {ITEMS.map((item) => (
+                <option key={item.id} value={item.id} title={item.description}>
+                  {item.name} - {CURRENCY} ${item.price.toFixed(2)}
+                </option>
+              ))}
+            </select>
+            {selectedItem.description && (
+              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--color-muted)" }}>
+                {selectedItem.description}
+              </p>
             )}
             {errors.item_id && <p className="mt-1 text-xs text-red-500">{errors.item_id}</p>}
           </div>
@@ -321,7 +310,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
               name="phone_number"
               value={form.phone_number}
               onChange={handleChange}
-              placeholder="+61 4XX XXX XXX"
+              placeholder="+1 (XXX) XXX-XXXX"
               className={inputClass("phone_number")}
               style={{ color: "var(--color-text)" }}
             />
@@ -358,14 +347,14 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                   Order Total
                 </p>
                 <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                  {form.quantity} x {selectedItem.name} @ AUD ${selectedItem.price.toFixed(2)} each
+                  {form.quantity} x {selectedItem.name} @ {CURRENCY} ${selectedItem.price.toFixed(2)} each
                 </p>
               </div>
               <p
                 className="text-3xl font-bold"
                 style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
               >
-                AUD ${total}
+                {CURRENCY} ${total}
               </p>
             </div>
           </div>

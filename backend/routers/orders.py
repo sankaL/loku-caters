@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from event_config import get_item
+from event_config import get_currency, get_item
 from models import Order
 from schemas import OrderCreate, OrderResponse
 from services.email import send_confirmation
@@ -45,7 +45,7 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
         "email": order.email,
         "total_price": float(order.total_price),
         "price_per_item": item["price"],
-        "currency": item.get("currency", "AUD"),
+        "currency": get_currency(),
     }
 
     try:

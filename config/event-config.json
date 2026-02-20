@@ -2,6 +2,7 @@
   "event": {
     "date": "February 28th, 2026"
   },
+  "currency": "CAD",
   "items": [
     {
       "id": "lamprais",
@@ -12,8 +13,8 @@
   ],
   "locations": [
     {
-      "id": "colombo-03",
-      "name": "Colombo 03",
+      "id": "scarborough",
+      "name": "Scarborough",
       "timeSlots": [
         "11:00 AM - 12:00 PM",
         "12:00 PM - 1:00 PM",
@@ -21,8 +22,8 @@
       ]
     },
     {
-      "id": "mount-lavinia",
-      "name": "Mount Lavinia",
+      "id": "north-york",
+      "name": "North York",
       "timeSlots": [
         "12:00 PM - 1:00 PM",
         "1:00 PM - 2:00 PM",
