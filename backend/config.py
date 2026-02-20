@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     reply_to_email: str | None = None
     email_enabled: bool = True
     frontend_url: str = "http://localhost:3000"
+    dev_mode: bool = False
 
 
 settings = Settings()

@@ -3,6 +3,9 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { API_URL } from "@/config/event";
+
+const DEV_MODE = process.env.NEXT_PUBLIC_DEV_MODE === "true";
 
 export default function AdminLoginPage() {
   const router = useRouter();
@@ -30,6 +33,23 @@ export default function AdminLoginPage() {
     }
   }
 
+  async function handleDevLogin() {
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/dev-login`, { method: "POST" });
+      if (!res.ok) throw new Error("Dev login endpoint not available");
+      const { access_token } = await res.json();
+      // Store in cookie so middleware can read it
+      document.cookie = `dev-admin-token=${encodeURIComponent(access_token)}; path=/; max-age=${7 * 24 * 3600}`;
+      router.push("/admin/orders");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Dev login failed");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <main
       className="min-h-screen flex items-center justify-center px-6"
@@ -50,13 +70,41 @@ export default function AdminLoginPage() {
           >
             Admin Portal
           </h1>
+          {DEV_MODE && (
+            <p className="mt-2 text-xs px-3 py-1 rounded-full inline-block" style={{ background: "#fef3c7", color: "#92400e" }}>
+              Dev Mode
+            </p>
+          )}
         </div>
 
         <div
           className="rounded-3xl p-8 shadow-sm"
           style={{ background: "white", border: "1px solid var(--color-border)" }}
         >
+          {/* Dev login shortcut */}
+          {DEV_MODE && (
+            <div className="mb-6 pb-6" style={{ borderBottom: "1px solid var(--color-border)" }}>
+              <p className="text-xs mb-3" style={{ color: "var(--color-muted)" }}>
+                Local testing
+              </p>
+              <button
+                type="button"
+                onClick={handleDevLogin}
+                disabled={loading}
+                className="w-full py-3 rounded-2xl text-sm font-semibold tracking-wide transition-all active:scale-[0.98] disabled:opacity-60"
+                style={{ background: "var(--color-sage)", color: "white" }}
+              >
+                {loading ? "Signing in..." : "Sign in as Dev Admin"}
+              </button>
+            </div>
+          )}
+
           <form onSubmit={handleLogin} className="space-y-5">
+            {!DEV_MODE && (
+              <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                Supabase credentials
+              </p>
+            )}
             <div>
               <label
                 className="block text-sm font-medium mb-1.5"

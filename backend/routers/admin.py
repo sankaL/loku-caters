@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -35,6 +35,26 @@ def verify_admin_token(authorization: str = Header(...)) -> dict:
         return payload
     except JWTError as exc:
         raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
+
+
+# ---------------------------------------------------------------------------
+# Dev login (local testing only -- requires DEV_MODE=true in .env)
+# ---------------------------------------------------------------------------
+
+@router.post("/dev-login")
+def dev_login():
+    if not settings.dev_mode:
+        raise HTTPException(status_code=404, detail="Not found")
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": "dev-admin",
+        "email": "admin@dev.local",
+        "role": "authenticated",
+        "iat": int(now.timestamp()),
+        "exp": int((now + timedelta(days=7)).timestamp()),
+    }
+    token = jwt.encode(payload, settings.supabase_jwt_secret, algorithm="HS256")
+    return {"access_token": token}
 
 
 # ---------------------------------------------------------------------------

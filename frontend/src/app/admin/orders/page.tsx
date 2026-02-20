@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { supabase } from "@/lib/supabase";
 import { API_URL } from "@/config/event";
+import { getAdminToken } from "@/lib/auth";
 
 interface Order {
   id: string;
@@ -44,8 +44,7 @@ export default function AdminOrdersPage() {
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getAdminToken();
       if (!token) return;
 
       const params = filter !== "all" ? `?status=${filter}` : "";
@@ -68,8 +67,7 @@ export default function AdminOrdersPage() {
   async function handleConfirm(orderId: string) {
     setConfirming(orderId);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getAdminToken();
       if (!token) return;
 
       const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/confirm`, {

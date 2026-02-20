@@ -1,8 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
 import { API_URL, type Item, type Location } from "@/config/event";
+import { getAdminToken } from "@/lib/auth";
 
 interface ConfigState {
   event_date: string;
@@ -48,8 +48,7 @@ export default function AdminConfigPage() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        const token = session?.access_token;
+        const token = await getAdminToken();
         if (!token) return;
         const res = await fetch(`${API_URL}/api/admin/config`, {
           headers: { Authorization: `Bearer ${token}` },
