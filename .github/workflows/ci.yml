@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check config sync
+        run: ./scripts/check-config-sync.sh
+
+      - name: Require migration when backend model changes
+        run: |
+          set -euo pipefail
+
+          base_sha="${{ github.event.pull_request.base.sha }}"
+          head_sha="${{ github.event.pull_request.head.sha }}"
+          changed_files="$(git diff --name-only "$base_sha" "$head_sha")"
+
+          echo "Changed files:"
+          echo "$changed_files"
+
+          model_changed="false"
+          migration_changed="false"
+
+          while IFS= read -r file; do
+            if [ "$file" = "backend/models.py" ]; then
+              model_changed="true"
+            fi
+
+            case "$file" in
+              backend/alembic/versions/*)
+                migration_changed="true"
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          if [ "$model_changed" = "true" ] && [ "$migration_changed" != "true" ]; then
+            echo "backend/models.py changed without a migration in backend/alembic/versions/"
+            exit 1
+          fi

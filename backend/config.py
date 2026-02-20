@@ -7,6 +7,8 @@ class Settings(BaseSettings):
     database_url: str
     resend_api_key: str
     from_email: str = "orders@lokucaters.com"
+    reply_to_email: str | None = None
+    email_enabled: bool = True
     frontend_url: str = "http://localhost:3000"
 
 

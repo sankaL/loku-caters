@@ -37,3 +37,6 @@ build/
 .idea/
 *.swp
 *.swo
+
+# Railway CLI artifacts
+.railway/

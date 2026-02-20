@@ -1,10 +1,15 @@
 import resend
 from config import settings
+from event_config import get_currency
 
 resend.api_key = settings.resend_api_key
 
 
 def send_confirmation(order_data: dict) -> None:
+    if not settings.email_enabled:
+        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
+        return
+
     name = order_data["name"]
     item_name = order_data["item_name"]
     quantity = order_data["quantity"]
@@ -12,7 +17,7 @@ def send_confirmation(order_data: dict) -> None:
     pickup_time_slot = order_data["pickup_time_slot"]
     total_price = order_data["total_price"]
     price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency", "AUD")
+    currency = order_data.get("currency") or get_currency()
     email = order_data["email"]
 
     html_body = f"""
@@ -109,9 +114,14 @@ def send_confirmation(order_data: dict) -> None:
 </html>
 """
 
-    resend.Emails.send({
+    message_payload = {
         "from": f"Loku Caters <{settings.from_email}>",
         "to": [email],
         "subject": f"Your {item_name} Pre-Order is Confirmed",
         "html": html_body,
-    })
+    }
+
+    if settings.reply_to_email:
+        message_payload["reply_to"] = settings.reply_to_email
+
+    resend.Emails.send(message_payload)

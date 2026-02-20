@@ -1,6 +1,7 @@
 fastapi==0.115.6
 uvicorn[standard]==0.32.1
 sqlalchemy==2.0.36
+alembic==1.14.1
 pg8000==1.31.2
 pydantic[email]==2.10.3
 pydantic-settings==2.7.0
