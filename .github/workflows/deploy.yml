@@ -52,9 +52,10 @@ jobs:
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT: production
         run: |
           set -euo pipefail
-          npx -y @railway/cli up --ci --detach --path-as-root -p "$RAILWAY_PROJECT_ID" -s loku-caters-backend backend
+          npx -y @railway/cli up --ci --detach --path-as-root -p "$RAILWAY_PROJECT_ID" -e "$RAILWAY_ENVIRONMENT" -s loku-caters-backend backend
 
   deploy-frontend:
     name: Deploy frontend
@@ -74,6 +75,7 @@ jobs:
         env:
           RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
           RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_ENVIRONMENT: production
         run: |
           set -euo pipefail
-          npx -y @railway/cli up --ci --detach --path-as-root -p "$RAILWAY_PROJECT_ID" -s loku-caters-frontend frontend
+          npx -y @railway/cli up --ci --detach --path-as-root -p "$RAILWAY_PROJECT_ID" -e "$RAILWAY_ENVIRONMENT" -s loku-caters-frontend frontend
