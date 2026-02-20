@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" fill="none">
+  <!-- Forest green rounded square background -->
+  <rect width="120" height="120" rx="28" fill="#12270F"/>
+  <!-- Leaf fill -->
+  <path d="M60 18 C44 28, 22 52, 26 80 C30 100, 52 106, 66 98 C82 88, 96 64, 88 44 C80 24, 68 14, 60 18 Z"
+        fill="#729152" opacity="0.35"/>
+  <!-- Leaf outline -->
+  <path d="M60 18 C44 28, 22 52, 26 80 C30 100, 52 106, 66 98 C82 88, 96 64, 88 44 C80 24, 68 14, 60 18 Z"
+        stroke="#729152" stroke-width="3" fill="none"/>
+  <!-- Midrib -->
+  <path d="M60 18 C62 42, 58 70, 54 98"
+        stroke="#a8c882" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <!-- Veins left -->
+  <path d="M60 32 C52 38, 44 46, 38 56" stroke="#729152" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.8"/>
+  <path d="M59 50 C50 56, 43 62, 37 72" stroke="#729152" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <path d="M57 68 C50 72, 45 78, 42 88" stroke="#729152" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.6"/>
+  <!-- Veins right -->
+  <path d="M61 32 C70 38, 78 46, 82 56" stroke="#729152" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.8"/>
+  <path d="M60 50 C70 56, 77 62, 81 72" stroke="#729152" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.7"/>
+  <path d="M58 68 C67 72, 73 78, 75 88" stroke="#729152" stroke-width="1.5" stroke-linecap="round" fill="none" opacity="0.6"/>
+</svg>

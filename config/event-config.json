@@ -9,22 +9,27 @@
       "name": "Lamprais",
       "description": "Authentic Sri Lankan rice cooked in rich stock, wrapped in a banana leaf with fragrant accompaniments",
       "price": 23.00,
-      "discounted_price": 18.00
+      "discounted_price": 20.00
     }
   ],
   "locations": [
     {
-      "id": "scarborough",
-      "name": "Scarborough",
+      "id": "welland",
+      "name": "Welland",
       "timeSlots": [
         "11:00 AM - 12:00 PM",
         "12:00 PM - 1:00 PM",
-        "1:00 PM - 2:00 PM"
+        "1:00 PM - 2:00 PM",
+        "3:00 PM - 4:00 PM",
+        "4:00 PM - 5:00 PM",
+        "5:00 PM - 6:00 PM",
+        "6:00 PM - 7:00 PM",
+        "7:00 PM - 8:00 PM"
       ]
     },
     {
-      "id": "north-york",
-      "name": "North York",
+      "id": "woodbridge",
+      "name": "Woodbridge",
       "timeSlots": [
         "12:00 PM - 1:00 PM",
         "1:00 PM - 2:00 PM",

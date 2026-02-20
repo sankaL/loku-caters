@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from sqlalchemy import String, Integer, Numeric, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
+from constants import OrderStatus
 from database import Base
 
 
@@ -20,7 +21,7 @@ class Order(Base):
     phone_number: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, nullable=False)
     total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    status: Mapped[str] = mapped_column(String, default="pending")
+    status: Mapped[str] = mapped_column(String, default=OrderStatus.PENDING)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )

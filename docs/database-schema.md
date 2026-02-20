@@ -18,7 +18,7 @@ Hosted on **Supabase (PostgreSQL)**.
 | `phone_number` | `TEXT` | NOT NULL | |
 | `email` | `TEXT` | NOT NULL | Used to send Resend confirmation |
 | `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from config price |
-| `status` | `TEXT` | default `'pending'` | Lifecycle: `pending` → `confirmed` → `fulfilled` |
+| `status` | `TEXT` | default `'pending'` | See valid values below — updated manually or via admin portal |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
 
 ### SQL (run in Supabase SQL editor)
@@ -38,6 +38,25 @@ CREATE TABLE orders (
   status           TEXT DEFAULT 'pending',
   created_at       TIMESTAMPTZ DEFAULT NOW()
 );
+```
+
+### Order status values
+
+| Value | Meaning |
+|---|---|
+| `pending` | Order submitted, awaiting confirmation |
+| `confirmed` | Confirmed by admin, customer notified |
+| `paid` | Payment received |
+| `picked_up` | Customer collected the order |
+| `no_show` | Customer did not pick up |
+| `cancelled` | Order cancelled |
+
+To enforce valid values in Supabase, run this migration in the SQL editor:
+
+```sql
+ALTER TABLE orders
+  ADD CONSTRAINT orders_status_check
+  CHECK (status IN ('pending','confirmed','paid','picked_up','no_show','cancelled'));
 ```
 
 ---

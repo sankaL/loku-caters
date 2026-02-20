@@ -198,17 +198,20 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                 {selectedItem.description}
               </p>
             )}
-            <div className="mt-2 flex items-baseline gap-2">
-              <span className="text-base font-semibold" style={{ color: "var(--color-forest)" }}>
+            <div className="mt-2 flex items-center gap-3 flex-wrap">
+              <span className="text-lg font-bold" style={{ color: "var(--color-forest)" }}>
                 {CURRENCY} ${(selectedItem.discounted_price ?? selectedItem.price).toFixed(2)}
               </span>
               {selectedItem.discounted_price != null && (
                 <>
-                  <span className="text-sm line-through" style={{ color: "var(--color-muted)" }}>
+                  <span className="text-sm line-through font-medium" style={{ color: "#e05252" }}>
                     {CURRENCY} ${selectedItem.price.toFixed(2)}
                   </span>
-                  <span className="text-xs font-medium" style={{ color: "var(--color-sage)" }}>
-                    Welcome-back price
+                  <span
+                    className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={{ background: "#fef2f2", color: "#c53030", border: "1px solid #fecaca" }}
+                  >
+                    Save {CURRENCY} ${(selectedItem.price - selectedItem.discounted_price).toFixed(2)}
                   </span>
                 </>
               )}
@@ -375,12 +378,6 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
             </div>
           </div>
 
-          {serverError && (
-            <div className="rounded-xl px-4 py-3 text-sm text-red-700 bg-red-50 border border-red-200">
-              {serverError}
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={submitting}
@@ -413,6 +410,17 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
               "Place Pre-Order"
             )}
           </button>
+
+          {serverError && (
+            <div className="rounded-xl px-4 py-3 text-sm font-medium text-red-700 bg-red-50 border border-red-200 flex items-start gap-2">
+              <svg className="shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              {serverError}
+            </div>
+          )}
 
           <p className="text-xs text-center" style={{ color: "var(--color-muted)" }}>
             By submitting, you agree that we may contact you via email to confirm your order.
