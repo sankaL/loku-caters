@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 
@@ -19,19 +19,22 @@ interface Order {
 }
 
 const STATUS_FILTERS = ["all", "pending", "confirmed"] as const;
+const PAGE_SIZE = 15;
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
-  pending: { bg: "#fef3c7", color: "#92400e", label: "Pending" },
+  pending:   { bg: "#fef3c7", color: "#92400e", label: "Pending" },
   confirmed: { bg: "#d1fae5", color: "#065f46", label: "Confirmed" },
-  paid: { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
+  paid:      { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
-  no_show: { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
+  no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
   cancelled: { bg: "#f3f4f6", color: "#374151", label: "Cancelled" },
 };
 
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<string>("pending");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -46,13 +49,13 @@ export default function AdminOrdersPage() {
     try {
       const token = await getAdminToken();
       if (!token) return;
-
       const params = filter !== "all" ? `?status=${filter}` : "";
       const res = await fetch(`${API_URL}/api/admin/orders${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to fetch orders");
       setOrders(await res.json());
+      setPage(1);
     } catch {
       showToast("Failed to load orders", "error");
     } finally {
@@ -60,26 +63,39 @@ export default function AdminOrdersPage() {
     }
   }, [filter]);
 
-  useEffect(() => {
-    fetchOrders();
-  }, [fetchOrders]);
+  useEffect(() => { fetchOrders(); }, [fetchOrders]);
+
+  // Reset to page 1 whenever search changes
+  useEffect(() => { setPage(1); }, [search]);
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter(
+      (o) =>
+        o.name.toLowerCase().includes(q) ||
+        o.email.toLowerCase().includes(q) ||
+        o.phone_number.toLowerCase().includes(q) ||
+        o.pickup_location.toLowerCase().includes(q)
+    );
+  }, [orders, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   async function handleConfirm(orderId: string) {
     setConfirming(orderId);
     try {
       const token = await getAdminToken();
       if (!token) return;
-
       const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/confirm`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.detail || "Failed to confirm order");
       }
-
       showToast("Confirmation email sent!", "success");
       await fetchOrders();
     } catch (err) {
@@ -123,12 +139,12 @@ export default function AdminOrdersPage() {
           Orders
         </h1>
         <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-          Review and confirm customer orders. Confirmation emails include pickup address.
+          Clicking Send Confirmation emails the customer and marks the order confirmed automatically.
         </p>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-2 mb-6">
+      {/* Status filters + search + refresh */}
+      <div className="flex flex-wrap items-center gap-2 mb-4">
         {STATUS_FILTERS.map((f) => (
           <button
             key={f}
@@ -143,9 +159,49 @@ export default function AdminOrdersPage() {
             {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
+
+        {/* Search */}
+        <div className="relative flex-1 min-w-48">
+          <svg
+            className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+            width="14"
+            height="14"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            style={{ color: "var(--color-muted)" }}
+          >
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search name, email, phone, location..."
+            className="w-full pl-9 pr-4 py-2 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]"
+            style={{ color: "var(--color-text)" }}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-3 top-1/2 -translate-y-1/2"
+              style={{ color: "var(--color-muted)" }}
+              aria-label="Clear search"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          )}
+        </div>
+
         <button
           onClick={fetchOrders}
-          className="ml-auto px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2"
+          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 shrink-0"
           style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -154,6 +210,16 @@ export default function AdminOrdersPage() {
           Refresh
         </button>
       </div>
+
+      {/* Result count */}
+      {!loading && (
+        <p className="text-xs mb-3" style={{ color: "var(--color-muted)" }}>
+          {search
+            ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""} for "${search}"`
+            : `${filtered.length} order${filtered.length !== 1 ? "s" : ""}`}
+          {totalPages > 1 && ` — page ${page} of ${totalPages}`}
+        </p>
+      )}
 
       {/* Table */}
       <div
@@ -167,10 +233,10 @@ export default function AdminOrdersPage() {
               <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
             </svg>
           </div>
-        ) : orders.length === 0 ? (
+        ) : paginated.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-              No {filter !== "all" ? filter : ""} orders found.
+              {search ? `No orders match "${search}".` : `No ${filter !== "all" ? filter : ""} orders found.`}
             </p>
           </div>
         ) : (
@@ -190,13 +256,13 @@ export default function AdminOrdersPage() {
                 </tr>
               </thead>
               <tbody>
-                {orders.map((order, idx) => {
+                {paginated.map((order, idx) => {
                   const statusStyle = STATUS_STYLES[order.status] ?? STATUS_STYLES.pending;
                   const isConfirming = confirming === order.id;
                   return (
                     <tr
                       key={order.id}
-                      style={{ borderBottom: idx < orders.length - 1 ? "1px solid var(--color-border)" : "none" }}
+                      style={{ borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none" }}
                     >
                       <td className="px-4 py-3 font-medium" style={{ color: "var(--color-text)" }}>
                         {order.name}
@@ -233,11 +299,8 @@ export default function AdminOrdersPage() {
                           <button
                             onClick={() => handleConfirm(order.id)}
                             disabled={isConfirming}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
-                            style={{
-                              background: "var(--color-forest)",
-                              color: "var(--color-cream)",
-                            }}
+                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap"
+                            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
                           >
                             {isConfirming ? "Sending..." : "Send Confirmation"}
                           </button>
@@ -251,6 +314,57 @@ export default function AdminOrdersPage() {
           </div>
         )}
       </div>
+
+      {/* Pagination */}
+      {!loading && totalPages > 1 && (
+        <div className="flex items-center justify-center gap-1 mt-4">
+          <button
+            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            disabled={page === 1}
+            className="px-3 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-30"
+            style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+          >
+            Previous
+          </button>
+
+          {Array.from({ length: totalPages }, (_, i) => i + 1)
+            .filter((p) => p === 1 || p === totalPages || Math.abs(p - page) <= 1)
+            .reduce<(number | "...")[]>((acc, p, i, arr) => {
+              if (i > 0 && p - (arr[i - 1] as number) > 1) acc.push("...");
+              acc.push(p);
+              return acc;
+            }, [])
+            .map((p, i) =>
+              p === "..." ? (
+                <span key={`ellipsis-${i}`} className="px-2 text-sm" style={{ color: "var(--color-muted)" }}>
+                  ...
+                </span>
+              ) : (
+                <button
+                  key={p}
+                  onClick={() => setPage(p as number)}
+                  className="w-9 h-9 rounded-xl text-sm font-medium transition-all"
+                  style={{
+                    background: page === p ? "var(--color-forest)" : "white",
+                    color: page === p ? "var(--color-cream)" : "var(--color-text)",
+                    border: `1px solid ${page === p ? "var(--color-forest)" : "var(--color-border)"}`,
+                  }}
+                >
+                  {p}
+                </button>
+              )
+            )}
+
+          <button
+            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            disabled={page === totalPages}
+            className="px-3 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-30"
+            style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+          >
+            Next
+          </button>
+        </div>
+      )}
     </div>
   );
 }
