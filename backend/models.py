@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
 
 from sqlalchemy import String, Integer, Numeric, DateTime, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column
@@ -17,7 +20,7 @@ class EventConfig(Base):
     currency: Mapped[str] = mapped_column(Text, nullable=False, default="CAD")
     items: Mapped[list] = mapped_column(JSONB, nullable=False)
     locations: Mapped[list] = mapped_column(JSONB, nullable=False)
-    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Order(Base):
