@@ -1,6 +1,8 @@
-import { EVENT_DATE } from "@/config/event";
+interface HeroSectionProps {
+  eventDate: string;
+}
 
-export default function HeroSection() {
+export default function HeroSection({ eventDate }: HeroSectionProps) {
   return (
     <section className="w-full max-w-5xl mx-auto px-6 pt-4 pb-12">
       <div
@@ -15,7 +17,7 @@ export default function HeroSection() {
           }}
         />
 
-        {/* Decorative food image — absolute, out of flow, right-aligned */}
+        {/* Decorative food image */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src="/assets/img/background-removed-background-removed.png"
@@ -29,12 +31,12 @@ export default function HeroSection() {
         />
 
         <div className="relative px-8 py-10 md:px-14 md:py-16">
-          {EVENT_DATE && (
+          {eventDate && (
             <p
               className="text-xs font-semibold tracking-widest uppercase mb-4 animate-fade-up"
               style={{ color: "var(--color-sage)" }}
             >
-              {EVENT_DATE}
+              {eventDate}
             </p>
           )}
 

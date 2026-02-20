@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ITEMS, LOCATIONS, API_URL, CURRENCY, type Item } from "@/config/event";
+import { API_URL, type Item, type Location } from "@/config/event";
 
 interface FormData {
   name: string;
@@ -29,15 +29,18 @@ interface OrderResult {
 }
 
 interface OrderFormProps {
+  items: Item[];
+  locations: Location[];
+  currency: string;
   onSuccess: (result: OrderResult) => void;
 }
 
-const defaultItem = ITEMS[0];
+export default function OrderForm({ items, locations, currency, onSuccess }: OrderFormProps) {
+  const defaultItem = items[0];
 
-export default function OrderForm({ onSuccess }: OrderFormProps) {
   const [form, setForm] = useState<FormData>({
     name: "",
-    item_id: defaultItem.id,
+    item_id: defaultItem?.id ?? "",
     quantity: 1,
     pickup_location: "",
     pickup_time_slot: "",
@@ -49,14 +52,14 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
   const [serverError, setServerError] = useState("");
 
   const selectedItem: Item =
-    ITEMS.find((i) => i.id === form.item_id) ?? defaultItem;
+    items.find((i) => i.id === form.item_id) ?? defaultItem;
 
   const timeSlots =
     form.pickup_location
-      ? (LOCATIONS.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
+      ? (locations.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
       : [];
 
-  const effectivePrice = selectedItem.discounted_price ?? selectedItem.price;
+  const effectivePrice = selectedItem?.discounted_price ?? selectedItem?.price ?? 0;
   const total = (form.quantity * effectivePrice).toFixed(2);
 
   function handleChange(
@@ -153,7 +156,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
             Place Your Pre-Order
           </h2>
           <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            Fill in your details below. We&apos;ll send a confirmation to your email.
+            Fill in your details below. We&apos;ll send a confirmation to your email once we verify your order.
           </p>
         </div>
 
@@ -187,31 +190,31 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
               className={inputClass("item_id")}
               style={{ color: "var(--color-text)" }}
             >
-              {ITEMS.map((item) => (
+              {items.map((item) => (
                 <option key={item.id} value={item.id} title={item.description}>
                   {item.name}
                 </option>
               ))}
             </select>
-            {selectedItem.description && (
+            {selectedItem?.description && (
               <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--color-muted)" }}>
                 {selectedItem.description}
               </p>
             )}
             <div className="mt-2 flex items-center gap-3 flex-wrap">
               <span className="text-lg font-bold" style={{ color: "var(--color-forest)" }}>
-                {CURRENCY} ${(selectedItem.discounted_price ?? selectedItem.price).toFixed(2)}
+                {currency} ${effectivePrice.toFixed(2)}
               </span>
-              {selectedItem.discounted_price != null && (
+              {selectedItem?.discounted_price != null && (
                 <>
                   <span className="text-sm line-through font-medium" style={{ color: "#e05252" }}>
-                    {CURRENCY} ${selectedItem.price.toFixed(2)}
+                    {currency} ${selectedItem.price.toFixed(2)}
                   </span>
                   <span
                     className="text-xs font-semibold px-2 py-0.5 rounded-full"
                     style={{ background: "#fef2f2", color: "#c53030", border: "1px solid #fecaca" }}
                   >
-                    Save {CURRENCY} ${(selectedItem.price - selectedItem.discounted_price).toFixed(2)}
+                    Save {currency} ${(selectedItem.price - selectedItem.discounted_price).toFixed(2)}
                   </span>
                 </>
               )}
@@ -222,7 +225,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
           {/* Quantity */}
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
-              How many {selectedItem.name}?
+              How many {selectedItem?.name}?
             </label>
             <div className="flex items-center gap-0">
               <button
@@ -278,7 +281,7 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
               style={{ color: form.pickup_location ? "var(--color-text)" : "var(--color-muted)" }}
             >
               <option value="">Select a location</option>
-              {LOCATIONS.map((loc) => (
+              {locations.map((loc) => (
                 <option key={loc.id} value={loc.name}>
                   {loc.name}
                 </option>
@@ -366,14 +369,14 @@ export default function OrderForm({ onSuccess }: OrderFormProps) {
                   Order Total
                 </p>
                 <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                  {form.quantity} x {selectedItem.name} @ {CURRENCY} ${effectivePrice.toFixed(2)} each
+                  {form.quantity} x {selectedItem?.name} @ {currency} ${effectivePrice.toFixed(2)} each
                 </p>
               </div>
               <p
                 className="text-3xl font-bold"
                 style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
               >
-                {CURRENCY} ${total}
+                {currency} ${total}
               </p>
             </div>
           </div>

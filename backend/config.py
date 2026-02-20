@@ -6,6 +6,7 @@ class Settings(BaseSettings):
 
     database_url: str
     resend_api_key: str
+    supabase_jwt_secret: str
     from_email: str = "orders@lokucaters.com"
     reply_to_email: str | None = None
     email_enabled: bool = True

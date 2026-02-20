@@ -1,11 +1,23 @@
 import uuid
 from datetime import datetime, timezone
 
-from sqlalchemy import String, Integer, Numeric, DateTime
+from sqlalchemy import String, Integer, Numeric, DateTime, Text, JSON
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
 
 from constants import OrderStatus
 from database import Base
+
+
+class EventConfig(Base):
+    __tablename__ = "event_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    event_date: Mapped[str] = mapped_column(Text, nullable=False)
+    currency: Mapped[str] = mapped_column(Text, nullable=False, default="CAD")
+    items: Mapped[list] = mapped_column(JSONB, nullable=False)
+    locations: Mapped[list] = mapped_column(JSONB, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class Order(Base):

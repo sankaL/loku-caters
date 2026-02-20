@@ -2,17 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from event_config import get_currency, get_item
+from event_config import get_currency_from_db, get_item_from_db
 from models import Order
 from schemas import OrderCreate, OrderResponse
-from services.email import send_confirmation
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
 @router.post("", response_model=OrderResponse, status_code=201)
 def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
-    item = get_item(order_in.item_id)
+    item = get_item_from_db(db, order_in.item_id)
     if item is None:
         raise HTTPException(status_code=400, detail=f"Unknown item: {order_in.item_id}")
 
@@ -46,17 +45,12 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
         "email": order.email,
         "total_price": float(order.total_price),
         "price_per_item": effective_price,
-        "currency": get_currency(),
+        "currency": get_currency_from_db(db),
     }
-
-    try:
-        send_confirmation(order_data)
-    except Exception as exc:
-        print(f"[email] Failed to send confirmation to {order.email}: {exc}")
 
     return OrderResponse(
         success=True,
         order_id=str(order.id),
-        message="Your pre-order has been placed! Check your email for confirmation.",
+        message="Your pre-order has been placed! We will send a confirmation email once we verify your order.",
         order=order_data,
     )

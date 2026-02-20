@@ -1,6 +1,5 @@
 import resend
 from config import settings
-from event_config import get_currency
 
 resend.api_key = settings.resend_api_key
 
@@ -17,8 +16,13 @@ def send_confirmation(order_data: dict) -> None:
     pickup_time_slot = order_data["pickup_time_slot"]
     total_price = order_data["total_price"]
     price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency") or get_currency()
+    currency = order_data.get("currency", "CAD")
     email = order_data["email"]
+    address = order_data.get("address", "")
+
+    location_display = pickup_location
+    if address:
+        location_display = f"{pickup_location} - {address}"
 
     html_body = f"""
 <!DOCTYPE html>
@@ -47,8 +51,8 @@ def send_confirmation(order_data: dict) -> None:
             <td style="padding:40px;">
               <p style="margin:0 0 8px;font-size:16px;color:#1C1C1A;">Hi <strong>{name}</strong>,</p>
               <p style="margin:0 0 28px;font-size:15px;color:#4a4a4a;line-height:1.6;">
-                Thank you for your pre-order! We have received your request and are so excited to cook this up for you.
-                We will be in touch shortly via email to confirm your order and provide the pickup address.
+                Great news! Your Lamprais pre-order has been confirmed. We are so excited to cook this up for you.
+                Please see your order details and pickup information below.
               </p>
 
               <!-- Order Summary -->
@@ -71,7 +75,7 @@ def send_confirmation(order_data: dict) -> None:
                       </tr>
                       <tr>
                         <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Location</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{pickup_location}</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{location_display}</td>
                       </tr>
                       <tr>
                         <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Time Slot</td>
@@ -88,10 +92,6 @@ def send_confirmation(order_data: dict) -> None:
                   </td>
                 </tr>
               </table>
-
-              <p style="margin:0 0 16px;font-size:15px;color:#4a4a4a;line-height:1.6;">
-                <strong style="color:#12270F;">What is next?</strong> We will send you a follow-up email confirming your order with the pickup address before your scheduled pickup time. Please keep an eye on your inbox.
-              </p>
 
               <p style="margin:0;font-size:15px;color:#4a4a4a;line-height:1.6;">
                 We look forward to serving you! If you have any questions, simply reply to this email.
