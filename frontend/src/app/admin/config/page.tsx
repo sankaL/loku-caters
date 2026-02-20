@@ -73,8 +73,7 @@ export default function AdminConfigPage() {
   async function handleSave() {
     setSaving(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token;
+      const token = await getAdminToken();
       if (!token) return;
 
       const res = await fetch(`${API_URL}/api/admin/config`, {

@@ -171,15 +171,19 @@ def admin_confirm_order(
         "address": address,
     }
 
+    email_sent = True
     try:
         send_confirmation(order_data)
     except Exception as exc:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to send confirmation email: {exc}",
-        )
+        email_sent = False
+        print(f"[email] Failed to send confirmation to {order.email}: {exc}")
 
     order.status = OrderStatus.CONFIRMED
     db.commit()
 
-    return {"success": True, "order_id": order_id, "status": order.status}
+    return {
+        "success": True,
+        "order_id": order_id,
+        "status": order.status,
+        "email_sent": email_sent,
+    }
