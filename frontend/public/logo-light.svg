@@ -1,0 +1,22 @@
+<svg width="200" height="200" viewBox="0 0 200 200" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Lotus/Banana Leaf Abstract Shape -->
+  <path d="M100 20C40 20 20 80 20 140C20 160 30 180 50 180C100 180 180 160 180 100C180 40 140 20 100 20Z" fill="url(#paint0_linear)"/>
+  <path d="M100 20C40 20 20 80 20 140C20 160 30 180 50 180C100 180 180 160 180 100C180 40 140 20 100 20Z" stroke="black" stroke-opacity="0.1" stroke-width="2"/>
+  
+  <!-- Inner Line / Vein -->
+  <path d="M50 180C75 160 100 130 100 20" stroke="white" stroke-width="4" stroke-linecap="round"/>
+  <path d="M75 100C85 90 95 80 100 70" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <path d="M60 130C75 120 85 110 100 100" stroke="white" stroke-width="3" stroke-linecap="round"/>
+  <path d="M125 100C115 110 105 120 100 130" stroke="white" stroke-width="3" stroke-linecap="round"/>
+
+  <!-- Text -->
+  <text x="100" y="165" font-family="'Inter', sans-serif" font-weight="800" font-size="28" fill="#1A202C" text-anchor="middle" letter-spacing="0.05em">LOKU</text>
+  <text x="100" y="185" font-family="'Inter', sans-serif" font-weight="500" font-size="14" fill="#4A5568" text-anchor="middle" letter-spacing="0.2em">CATERS</text>
+
+  <defs>
+    <linearGradient id="paint0_linear" x1="20" y1="20" x2="180" y2="180" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#E2E8F0"/>
+      <stop offset="1" stop-color="#CBD5E1"/>
+    </linearGradient>
+  </defs>
+</svg>
