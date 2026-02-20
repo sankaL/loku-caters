@@ -93,11 +93,11 @@ export default function SuccessView({ result }: SuccessViewProps) {
           </div>
           <div>
             <p className="text-sm font-semibold mb-1" style={{ color: "#2d5a18" }}>
-              Check your inbox
+              Confirmation coming soon
             </p>
             <p className="text-sm leading-relaxed" style={{ color: "#4a7a28" }}>
-              We have sent a confirmation to your email. We will follow up to confirm your order and
-              provide the <strong>pickup address</strong> before your scheduled time. Please do not hesitate to reply if you have any questions.
+              Once we have reviewed your order we will send a confirmation email with your
+              <strong> pickup address</strong>. Please keep an eye on your inbox before your scheduled time.
             </p>
           </div>
         </div>

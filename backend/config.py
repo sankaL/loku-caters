@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -6,10 +8,12 @@ class Settings(BaseSettings):
 
     database_url: str
     resend_api_key: str
+    supabase_jwt_secret: str
     from_email: str = "orders@lokucaters.com"
     reply_to_email: str | None = None
     email_enabled: bool = True
     frontend_url: str = "http://localhost:3000"
+    dev_mode: bool = False
 
 
 settings = Settings()
