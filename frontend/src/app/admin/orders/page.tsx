@@ -18,6 +18,8 @@ interface Order {
   created_at: string;
 }
 
+type SortCol = "status" | "total" | "date";
+
 const STATUS_FILTERS = ["all", "pending", "confirmed"] as const;
 const PAGE_SIZE = 15;
 
@@ -30,6 +32,25 @@ const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }
   cancelled: { bg: "#f3f4f6", color: "#374151", label: "Cancelled" },
 };
 
+function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
+  if (!active) {
+    return (
+      <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ opacity: 0.3 }}>
+        <path d="M5 9L10 5L15 9" strokeLinecap="round" strokeLinejoin="round"/>
+        <path d="M5 11L10 15L15 11" strokeLinecap="round" strokeLinejoin="round"/>
+      </svg>
+    );
+  }
+  return (
+    <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
+      {dir === "asc"
+        ? <path d="M15 12.5L10 7.5L5 12.5" strokeLinecap="round" strokeLinejoin="round"/>
+        : <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
+      }
+    </svg>
+  );
+}
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<string>("pending");
@@ -37,6 +58,9 @@ export default function AdminOrdersPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ col: SortCol | null; dir: "asc" | "desc" }>({ col: null, dir: "asc" });
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error") => {
@@ -80,8 +104,32 @@ export default function AdminOrdersPage() {
     );
   }, [orders, search]);
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const sorted = useMemo(() => {
+    if (!sort.col) return filtered;
+    return [...filtered].sort((a, b) => {
+      if (sort.col === "total") return sort.dir === "asc" ? a.total_price - b.total_price : b.total_price - a.total_price;
+      if (sort.col === "date") {
+        const diff = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+        return sort.dir === "asc" ? diff : -diff;
+      }
+      if (sort.col === "status") {
+        return sort.dir === "asc" ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
+      }
+      return 0;
+    });
+  }, [filtered, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  useEffect(() => { setPage((prev) => Math.min(prev, totalPages)); }, [totalPages]);
+
+  function toggleSort(col: SortCol) {
+    setSort((prev) => prev.col === col
+      ? { col, dir: prev.dir === "asc" ? "desc" : "asc" }
+      : { col, dir: "asc" }
+    );
+    setPage(1);
+  }
 
   async function handleConfirm(orderId: string) {
     setConfirming(orderId);
@@ -105,6 +153,57 @@ export default function AdminOrdersPage() {
     }
   }
 
+  async function handleStatusChange(orderId: string, newStatus: string) {
+    setUpdatingStatus(orderId);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/status`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ status: newStatus }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to update status");
+      }
+      setOrders((prev) => {
+        if (filter !== "all" && newStatus !== filter) {
+          return prev.filter((o) => o.id !== orderId);
+        }
+        return prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o));
+      });
+      showToast("Status updated", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update status", "error");
+    } finally {
+      setUpdatingStatus(null);
+    }
+  }
+
+  async function handleDelete(orderId: string) {
+    if (!window.confirm("Delete this order? This cannot be undone.")) return;
+    setDeleting(orderId);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to delete order");
+      }
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      showToast("Order deleted", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to delete order", "error");
+    } finally {
+      setDeleting(null);
+    }
+  }
+
   function formatDate(iso: string) {
     return new Date(iso).toLocaleString("en-CA", {
       month: "short",
@@ -113,6 +212,8 @@ export default function AdminOrdersPage() {
       minute: "2-digit",
     });
   }
+
+  const thBase = "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider";
 
   return (
     <div className="p-8">
@@ -217,7 +318,7 @@ export default function AdminOrdersPage() {
           {search
             ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""} for "${search}"`
             : `${filtered.length} order${filtered.length !== 1 ? "s" : ""}`}
-          {totalPages > 1 && ` — page ${page} of ${totalPages}`}
+          {totalPages > 1 && ` - page ${page} of ${totalPages}`}
         </p>
       )}
 
@@ -244,21 +345,44 @@ export default function AdminOrdersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "var(--color-cream)", borderBottom: "1px solid var(--color-border)" }}>
-                  {["Name", "Contact", "Item", "Location", "Time Slot", "Total", "Status", "Date", "Action"].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider"
-                      style={{ color: "var(--color-muted)" }}
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Name</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Item</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Location</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Time Slot</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                    <button
+                      onClick={() => toggleSort("total")}
+                      className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
                     >
-                      {h}
-                    </th>
-                  ))}
+                      Total <SortIcon active={sort.col === "total"} dir={sort.dir} />
+                    </button>
+                  </th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                    <button
+                      onClick={() => toggleSort("status")}
+                      className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
+                    >
+                      Status <SortIcon active={sort.col === "status"} dir={sort.dir} />
+                    </button>
+                  </th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                    <button
+                      onClick={() => toggleSort("date")}
+                      className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
+                    >
+                      Date <SortIcon active={sort.col === "date"} dir={sort.dir} />
+                    </button>
+                  </th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.map((order, idx) => {
                   const statusStyle = STATUS_STYLES[order.status] ?? STATUS_STYLES.pending;
                   const isConfirming = confirming === order.id;
+                  const isUpdatingStatus = updatingStatus === order.id;
+                  const isDeleting = deleting === order.id;
                   return (
                     <tr
                       key={order.id}
@@ -284,27 +408,63 @@ export default function AdminOrdersPage() {
                         ${order.total_price.toFixed(2)}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className="px-2.5 py-1 rounded-full text-xs font-semibold"
-                          style={{ background: statusStyle.bg, color: statusStyle.color }}
-                        >
-                          {statusStyle.label}
-                        </span>
+                        <div className="relative inline-block">
+                          <select
+                            value={order.status}
+                            disabled={isUpdatingStatus}
+                            onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                            className="appearance-none pl-2.5 pr-6 py-1 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-sage)] disabled:opacity-60 transition-opacity"
+                            style={{ background: statusStyle.bg, color: statusStyle.color }}
+                          >
+                            {Object.entries(STATUS_STYLES).map(([val, s]) => (
+                              <option key={val} value={val}>{s.label}</option>
+                            ))}
+                          </select>
+                          <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center" style={{ color: statusStyle.color }}>
+                            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: "var(--color-muted)" }}>
                         {formatDate(order.created_at)}
                       </td>
                       <td className="px-4 py-3">
-                        {order.status === "pending" && (
+                        <div className="flex items-center gap-2">
+                          {order.status === "pending" && (
+                            <button
+                              onClick={() => handleConfirm(order.id)}
+                              disabled={isConfirming}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap"
+                              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                            >
+                              {isConfirming ? "Sending..." : "Send Confirmation"}
+                            </button>
+                          )}
                           <button
-                            onClick={() => handleConfirm(order.id)}
-                            disabled={isConfirming}
-                            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap"
-                            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                            onClick={() => handleDelete(order.id)}
+                            disabled={isDeleting}
+                            className="p-1.5 rounded-lg transition-all disabled:opacity-60"
+                            style={{ color: "#991b1b", background: "#fee2e2", border: "1px solid #fca5a5" }}
+                            aria-label="Delete order"
+                            title="Delete order"
                           >
-                            {isConfirming ? "Sending..." : "Send Confirmation"}
+                            {isDeleting ? (
+                              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                <circle cx="12" cy="12" r="10" opacity="0.3" />
+                                <path d="M12 2a10 10 0 0 1 10 10" />
+                              </svg>
+                            ) : (
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v6M14 11v6" />
+                                <path d="M9 6V4h6v2" />
+                              </svg>
+                            )}
                           </button>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );

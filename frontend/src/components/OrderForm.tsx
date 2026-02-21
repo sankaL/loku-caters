@@ -183,19 +183,26 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               What would you like to order?
             </label>
-            <select
-              name="item_id"
-              value={form.item_id}
-              onChange={handleChange}
-              className={inputClass("item_id")}
-              style={{ color: "var(--color-text)" }}
-            >
-              {items.map((item) => (
-                <option key={item.id} value={item.id} title={item.description}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                name="item_id"
+                value={form.item_id}
+                onChange={handleChange}
+                className={`${inputClass("item_id")} appearance-none pr-10`}
+                style={{ color: "var(--color-text)" }}
+              >
+                {items.map((item) => (
+                  <option key={item.id} value={item.id} title={item.description}>
+                    {item.name}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center" style={{ color: "var(--color-muted)" }}>
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </span>
+            </div>
             {selectedItem?.description && (
               <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--color-muted)" }}>
                 {selectedItem.description}
@@ -273,20 +280,27 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               Pickup Location
             </label>
-            <select
-              name="pickup_location"
-              value={form.pickup_location}
-              onChange={handleChange}
-              className={inputClass("pickup_location")}
-              style={{ color: form.pickup_location ? "var(--color-text)" : "var(--color-muted)" }}
-            >
-              <option value="">Select a location</option>
-              {locations.map((loc) => (
-                <option key={loc.id} value={loc.name}>
-                  {loc.name}
-                </option>
-              ))}
-            </select>
+            <div className="relative">
+              <select
+                name="pickup_location"
+                value={form.pickup_location}
+                onChange={handleChange}
+                className={`${inputClass("pickup_location")} appearance-none pr-10`}
+                style={{ color: form.pickup_location ? "var(--color-text)" : "var(--color-muted)" }}
+              >
+                <option value="">Select a location</option>
+                {locations.map((loc) => (
+                  <option key={loc.id} value={loc.name}>
+                    {loc.name}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center" style={{ color: "var(--color-muted)" }}>
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </span>
+            </div>
             {errors.pickup_location && (
               <p className="mt-1 text-xs text-red-500">{errors.pickup_location}</p>
             )}
@@ -297,26 +311,33 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               Pickup Time Slot
             </label>
-            <select
-              name="pickup_time_slot"
-              value={form.pickup_time_slot}
-              onChange={handleChange}
-              disabled={!form.pickup_location}
-              className={inputClass("pickup_time_slot")}
-              style={{
-                color: form.pickup_time_slot ? "var(--color-text)" : "var(--color-muted)",
-                opacity: !form.pickup_location ? 0.6 : 1,
-              }}
-            >
-              <option value="">
-                {form.pickup_location ? "Select a time slot" : "Select a location first"}
-              </option>
-              {timeSlots.map((slot) => (
-                <option key={slot} value={slot}>
-                  {slot}
+            <div className="relative">
+              <select
+                name="pickup_time_slot"
+                value={form.pickup_time_slot}
+                onChange={handleChange}
+                disabled={!form.pickup_location}
+                className={`${inputClass("pickup_time_slot")} appearance-none pr-10`}
+                style={{
+                  color: form.pickup_time_slot ? "var(--color-text)" : "var(--color-muted)",
+                  opacity: !form.pickup_location ? 0.6 : 1,
+                }}
+              >
+                <option value="">
+                  {form.pickup_location ? "Select a time slot" : "Select a location first"}
                 </option>
-              ))}
-            </select>
+                {timeSlots.map((slot) => (
+                  <option key={slot} value={slot}>
+                    {slot}
+                  </option>
+                ))}
+              </select>
+              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center" style={{ color: "var(--color-muted)", opacity: !form.pickup_location ? 0.6 : 1 }}>
+                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
+                </svg>
+              </span>
+            </div>
             {errors.pickup_time_slot && (
               <p className="mt-1 text-xs text-red-500">{errors.pickup_time_slot}</p>
             )}

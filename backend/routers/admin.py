@@ -109,6 +109,10 @@ class EventConfigUpdate(BaseModel):
     locations: list[dict]
 
 
+class StatusUpdate(BaseModel):
+    status: str
+
+
 # ---------------------------------------------------------------------------
 # Config endpoints
 # ---------------------------------------------------------------------------
@@ -228,3 +232,34 @@ def admin_confirm_order(
         "status": order.status,
         "email_sent": email_sent,
     }
+
+
+@router.patch("/orders/{order_id}/status")
+def update_order_status(
+    order_id: str,
+    body: StatusUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    if body.status not in OrderStatus.ALL:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    order.status = body.status
+    db.commit()
+    return {"success": True, "status": order.status}
+
+
+@router.delete("/orders/{order_id}")
+def delete_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    db.delete(order)
+    db.commit()
+    return {"success": True}
