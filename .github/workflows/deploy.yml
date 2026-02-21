@@ -41,6 +41,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
+    environment:
+      name: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,10 +52,23 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Validate Railway credentials
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || vars.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID || vars.RAILWAY_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_API_TOKEN:-}" ] || [ -z "${RAILWAY_PROJECT_ID:-}" ]; then
+            echo "Missing Railway credentials."
+            echo "Set RAILWAY_API_TOKEN and RAILWAY_PROJECT_ID as repository secrets,"
+            echo "or as environment secrets/variables in the production environment."
+            exit 1
+          fi
+
       - name: Deploy backend service
         env:
-          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || vars.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID || vars.RAILWAY_PROJECT_ID }}
           RAILWAY_ENVIRONMENT: production
         run: |
           set -euo pipefail
@@ -64,6 +79,8 @@ jobs:
     needs: changes
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
+    environment:
+      name: production
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -73,10 +90,23 @@ jobs:
         with:
           node-version: "20"
 
+      - name: Validate Railway credentials
+        env:
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || vars.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID || vars.RAILWAY_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -z "${RAILWAY_API_TOKEN:-}" ] || [ -z "${RAILWAY_PROJECT_ID:-}" ]; then
+            echo "Missing Railway credentials."
+            echo "Set RAILWAY_API_TOKEN and RAILWAY_PROJECT_ID as repository secrets,"
+            echo "or as environment secrets/variables in the production environment."
+            exit 1
+          fi
+
       - name: Deploy frontend service
         env:
-          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
-          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+          RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN || vars.RAILWAY_API_TOKEN }}
+          RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID || vars.RAILWAY_PROJECT_ID }}
           RAILWAY_ENVIRONMENT: production
         run: |
           set -euo pipefail
