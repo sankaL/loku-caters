@@ -38,7 +38,7 @@ export async function middleware(request: NextRequest) {
   try {
     const [, payload] = accessToken.split(".");
     if (!payload) throw new Error("malformed");
-    const decoded = JSON.parse(Buffer.from(payload, "base64").toString("utf-8"));
+    const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
     if (!decoded.exp || decoded.exp * 1000 < Date.now()) throw new Error("expired");
     return NextResponse.next();
   } catch {

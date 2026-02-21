@@ -19,7 +19,7 @@ export default function AdminLoginPage() {
     setError("");
     setLoading(true);
     try {
-      const { error: authError } = await supabase.auth.signInWithPassword({
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
@@ -27,7 +27,14 @@ export default function AdminLoginPage() {
         setError(authError.message);
         return;
       }
+      // Mirror the Supabase access token into a cookie so Next middleware
+      // can authorize /admin routes on server-side navigations.
+      if (data.session?.access_token) {
+        const maxAge = data.session.expires_in ?? 3600;
+        document.cookie = `sb-access-token=${encodeURIComponent(data.session.access_token)}; path=/; max-age=${maxAge}; samesite=lax`;
+      }
       router.push("/admin/orders");
+      router.refresh();
     } finally {
       setLoading(false);
     }

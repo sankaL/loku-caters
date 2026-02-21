@@ -8,7 +8,9 @@ class Settings(BaseSettings):
 
     database_url: str
     resend_api_key: str
-    supabase_jwt_secret: str
+    # Optional for modern Supabase projects using asymmetric JWTs (RS256/ES256).
+    # Still used for legacy HS256 verification and local dev token minting.
+    supabase_jwt_secret: str = ""
     from_email: str = "orders@lokucaters.com"
     reply_to_email: str | None = None
     email_enabled: bool = True

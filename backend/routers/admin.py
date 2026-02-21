@@ -1,5 +1,8 @@
 from datetime import datetime, timedelta, timezone
+import json
+from urllib.request import urlopen
 from typing import Optional
+from functools import lru_cache
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from jose import JWTError, jwt
@@ -20,19 +23,55 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 # Auth
 # ---------------------------------------------------------------------------
 
+@lru_cache(maxsize=8)
+def _fetch_jwks(issuer: str) -> dict:
+    url = issuer.rstrip("/") + "/.well-known/jwks.json"
+    with urlopen(url, timeout=5) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
 def verify_admin_token(authorization: str = Header(...)) -> dict:
     """Verify that the request carries a valid Supabase-issued JWT."""
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     token = authorization[len("Bearer "):]
     try:
-        payload = jwt.decode(
-            token,
-            settings.supabase_jwt_secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
-        )
-        return payload
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg")
+
+        # Legacy/shared-secret projects
+        if alg == "HS256":
+            if not settings.supabase_jwt_secret:
+                raise HTTPException(status_code=401, detail="Server missing JWT secret")
+            return jwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=["HS256"],
+                options={"verify_aud": False},
+            )
+
+        # Modern Supabase projects (asymmetric JWT signing)
+        if alg in {"RS256", "ES256"}:
+            unverified_claims = jwt.get_unverified_claims(token)
+            issuer = unverified_claims.get("iss")
+            if not issuer:
+                raise HTTPException(status_code=401, detail="Token missing issuer")
+
+            jwks = _fetch_jwks(issuer)
+            kid = header.get("kid")
+            key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+            if key is None:
+                raise HTTPException(status_code=401, detail="Signing key not found")
+
+            return jwt.decode(
+                token,
+                key,
+                algorithms=[alg],
+                issuer=issuer,
+                options={"verify_aud": False},
+            )
+
+        raise HTTPException(status_code=401, detail=f"Unsupported token algorithm: {alg}")
     except JWTError as exc:
         raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
 
@@ -45,6 +84,8 @@ def verify_admin_token(authorization: str = Header(...)) -> dict:
 def dev_login():
     if not settings.dev_mode:
         raise HTTPException(status_code=404, detail="Not found")
+    if not settings.supabase_jwt_secret:
+        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET is required for dev login")
     now = datetime.now(timezone.utc)
     payload = {
         "sub": "dev-admin",
