@@ -6,6 +6,7 @@ import HeroSection from "@/components/HeroSection";
 import OrderForm from "@/components/OrderForm";
 import SuccessView from "@/components/SuccessView";
 import { fetchEventConfig, type EventConfig } from "@/config/event";
+import { captureEvent } from "@/lib/analytics";
 
 interface OrderResult {
   order_id: string;
@@ -33,6 +34,20 @@ export default function Home() {
       .then(setEventConfig)
       .catch(() => setConfigError(true));
   }, []);
+
+  function handleOrderSuccess(result: OrderResult) {
+    captureEvent("order_submitted", {
+      order_id: result.order_id,
+      item_id: result.order.item_id,
+      quantity: result.order.quantity,
+      total_price: result.order.total_price,
+      currency: result.order.currency,
+      pickup_location: result.order.pickup_location,
+      pickup_time_slot: result.order.pickup_time_slot,
+    });
+
+    setOrderResult(result);
+  }
 
   return (
     <main
@@ -80,7 +95,7 @@ export default function Home() {
           items={eventConfig.items}
           locations={eventConfig.locations}
           currency={eventConfig.currency}
-          onSuccess={setOrderResult}
+          onSuccess={handleOrderSuccess}
         />
       )}
 
