@@ -6,9 +6,11 @@ from routers import admin, config, orders
 
 app = FastAPI(title="Loku Caters API", version="2.0.0")
 
+_local_origins = [f"http://localhost:{p}" for p in range(3000, 3010)]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.frontend_url, "http://localhost:3000"],
+    allow_origins=list({settings.frontend_url} | set(_local_origins)),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

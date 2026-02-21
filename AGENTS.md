@@ -54,3 +54,6 @@ cd backend && python3 -m uvicorn main:app --reload --port 8000
 # Frontend
 cd frontend && npm run dev
 ```
+
+## Local Testing
+Use the makefile scripts for # Local dev (local Postgres container, DEV_MODE=true, real Resend) when testing
