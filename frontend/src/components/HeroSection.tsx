@@ -44,7 +44,7 @@ export default function HeroSection({ eventDate }: HeroSectionProps) {
             className="text-4xl md:text-5xl font-bold leading-tight mb-4 animate-fade-up delay-100"
             style={{ color: "var(--color-cream)", fontFamily: "var(--font-serif)" }}
           >
-            We&apos;re Cooking
+            We&apos;re Making
             <br />
             <span style={{ color: "#a8c882" }}>Lamprais</span>
           </h1>
