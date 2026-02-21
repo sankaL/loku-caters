@@ -19,6 +19,7 @@ def send_confirmation(order_data: dict) -> None:
     currency = order_data.get("currency", "CAD")
     email = order_data["email"]
     address = order_data.get("address", "")
+    event_date = order_data.get("event_date", "")
 
     location_display = pickup_location
     if address:
@@ -72,6 +73,10 @@ def send_confirmation(order_data: dict) -> None:
                       <tr>
                         <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Price per item</td>
                         <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${price_per_item:.2f}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Date</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{event_date}</td>
                       </tr>
                       <tr>
                         <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Location</td>

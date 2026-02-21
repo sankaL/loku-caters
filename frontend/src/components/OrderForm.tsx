@@ -25,6 +25,7 @@ interface OrderResult {
     total_price: number;
     price_per_item: number;
     currency: string;
+    event_date: string;
   };
 }
 

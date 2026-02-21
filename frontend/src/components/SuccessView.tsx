@@ -10,6 +10,7 @@ interface OrderResult {
     total_price: number;
     price_per_item: number;
     currency: string;
+    event_date: string;
   };
 }
 
@@ -66,6 +67,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
           {[
             { label: "Item", value: order.item_name },
             { label: "Quantity", value: `${order.quantity} ${order.quantity === 1 ? "portion" : "portions"}` },
+            { label: "Pickup Date", value: order.event_date },
             { label: "Pickup Location", value: order.pickup_location },
             { label: "Time Slot", value: order.pickup_time_slot },
             { label: "Order Total", value: `${order.currency} $${order.total_price.toFixed(2)}` },

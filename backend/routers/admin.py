@@ -214,6 +214,7 @@ def admin_confirm_order(
         "price_per_item": effective_price,
         "currency": config.get("currency", "CAD"),
         "address": address,
+        "event_date": config["event"]["date"],
     }
 
     email_sent = True

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from event_config import get_currency_from_db, get_item_from_db
+from event_config import get_config_from_db, get_item_from_db
 from models import Order
 from schemas import OrderCreate, OrderResponse
 
@@ -34,6 +34,7 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(order)
 
+    config = get_config_from_db(db)
     order_data = {
         "name": order.name,
         "item_id": order.item_id,
@@ -45,7 +46,8 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
         "email": order.email,
         "total_price": float(order.total_price),
         "price_per_item": effective_price,
-        "currency": get_currency_from_db(db),
+        "currency": config.get("currency", "CAD"),
+        "event_date": config["event"]["date"],
     }
 
     return OrderResponse(
