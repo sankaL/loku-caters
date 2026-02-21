@@ -30,9 +30,11 @@ jobs:
             backend:
               - 'backend/**'
               - 'config/**'
+              - '.github/workflows/deploy.yml'
             frontend:
               - 'frontend/**'
               - 'config/**'
+              - '.github/workflows/deploy.yml'
 
   deploy-backend:
     name: Deploy backend
