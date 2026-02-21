@@ -51,6 +51,12 @@ function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
   );
 }
 
+function csvEscape(value: string | number): string {
+  const normalized = String(value).replace(/"/g, "\"\"");
+  if (/[",\n\r]/.test(normalized)) return `"${normalized}"`;
+  return normalized;
+}
+
 export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<string>("pending");
@@ -213,6 +219,59 @@ export default function AdminOrdersPage() {
     });
   }
 
+  function handleExportCsv() {
+    if (sorted.length === 0) {
+      showToast("No orders to export", "error");
+      return;
+    }
+
+    const headers = [
+      "Order ID",
+      "Name",
+      "Email",
+      "Phone",
+      "Item",
+      "Quantity",
+      "Pickup Location",
+      "Pickup Time Slot",
+      "Total Price",
+      "Status",
+      "Created At",
+    ];
+
+    const rows = sorted.map((order) => [
+      order.id,
+      order.name,
+      order.email,
+      order.phone_number,
+      order.item_name,
+      order.quantity,
+      order.pickup_location,
+      order.pickup_time_slot,
+      order.total_price.toFixed(2),
+      order.status,
+      order.created_at,
+    ]);
+
+    const csv = [headers, ...rows]
+      .map((row) => row.map((value) => csvEscape(value)).join(","))
+      .join("\n");
+
+    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+
+    link.href = url;
+    link.download = `orders-${filter}-${timestamp}.csv`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+
+    showToast(`Exported ${sorted.length} order${sorted.length === 1 ? "" : "s"}`, "success");
+  }
+
   const thBase = "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider";
 
   return (
@@ -309,6 +368,20 @@ export default function AdminOrdersPage() {
             <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
           </svg>
           Refresh
+        </button>
+
+        <button
+          onClick={handleExportCsv}
+          disabled={loading || sorted.length === 0}
+          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3v12" />
+            <path d="M7 10l5 5 5-5" />
+            <path d="M4 21h16" />
+          </svg>
+          Export CSV
         </button>
       </div>
 
