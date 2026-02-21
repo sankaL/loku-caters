@@ -79,7 +79,7 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "INSERT INTO event_config (id, event_date, currency, items, locations)"
-            " VALUES (:id, :event_date, :currency, :items::jsonb, :locations::jsonb)"
+            " VALUES (:id, :event_date, :currency, CAST(:items AS jsonb), CAST(:locations AS jsonb))"
         ).bindparams(
             id=1,
             event_date="February 28th, 2026",

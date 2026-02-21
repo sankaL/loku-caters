@@ -120,8 +120,9 @@ Using `SUPABASE_ACCESS_TOKEN`:
    - `db_pass`: auto-generated strong password
    - region selection: choose recommended `us-east-1` (from the “available regions” endpoint you already have access to)
 3) Poll `GET /v1/projects/{ref}` until status is ready.
-4) Construct backend `DATABASE_URL` as:
-   - `postgresql://postgres:<db_pass>@db.<ref>.supabase.co:5432/postgres`
+4) Construct backend `DATABASE_URL` from Supabase "Connect > Session pooler" as:
+   - `postgresql://postgres.<ref>:<db_pass>@aws-0-<region>.pooler.supabase.com:5432/postgres`
+   - Do not use `db.<ref>.supabase.co:5432` on Railway. That direct endpoint is IPv6 and Railway outbound networking is IPv4-only.
 
 ### B) Railway: create project + two services + domains + vars
 Using `RAILWAY_API_TOKEN` (via `npx @railway/cli`):
