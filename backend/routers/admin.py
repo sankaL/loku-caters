@@ -180,6 +180,31 @@ def admin_list_orders(
     ]
 
 
+@router.get("/orders/{order_id}")
+def admin_get_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    return {
+        "id": order.id,
+        "name": order.name,
+        "email": order.email,
+        "phone_number": order.phone_number,
+        "item_id": order.item_id,
+        "item_name": order.item_name,
+        "quantity": order.quantity,
+        "pickup_location": order.pickup_location,
+        "pickup_time_slot": order.pickup_time_slot,
+        "total_price": float(order.total_price),
+        "status": order.status,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+    }
+
+
 @router.post("/orders/{order_id}/confirm")
 def admin_confirm_order(
     order_id: str,

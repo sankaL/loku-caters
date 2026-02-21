@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import Modal from "@/components/ui/Modal";
 
 interface Order {
   id: string;
@@ -58,6 +60,7 @@ function csvEscape(value: string | number): string {
 }
 
 export default function AdminOrdersPage() {
+  const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<string>("pending");
   const [search, setSearch] = useState("");
@@ -68,6 +71,19 @@ export default function AdminOrdersPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [sort, setSort] = useState<{ col: SortCol | null; dir: "asc" | "desc" }>({ col: null, dir: "asc" });
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  // Single delete modal
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showBulkConfirmModal, setShowBulkConfirmModal] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkConfirming, setBulkConfirming] = useState(false);
+
+  // Reset selection when filter/orders change
+  useEffect(() => { setSelectedIds(new Set()); }, [filter, orders]);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -94,8 +110,6 @@ export default function AdminOrdersPage() {
   }, [filter]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
-
-  // Reset to page 1 whenever search changes
   useEffect(() => { setPage(1); }, [search]);
 
   const filtered = useMemo(() => {
@@ -187,8 +201,7 @@ export default function AdminOrdersPage() {
     }
   }
 
-  async function handleDelete(orderId: string) {
-    if (!window.confirm("Delete this order? This cannot be undone.")) return;
+  async function executeDelete(orderId: string) {
     setDeleting(orderId);
     try {
       const token = await getAdminToken();
@@ -207,6 +220,75 @@ export default function AdminOrdersPage() {
       showToast(err instanceof Error ? err.message : "Failed to delete order", "error");
     } finally {
       setDeleting(null);
+    }
+  }
+
+  async function executeBulkDelete() {
+    setBulkDeleting(true);
+    setShowBulkDeleteModal(false);
+    const ids = Array.from(selectedIds);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const results = await Promise.allSettled(
+        ids.map(async (id) => {
+          const res = await fetch(`${API_URL}/api/admin/orders/${id}`, {
+            method: "DELETE",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          return { id, ok: res.ok };
+        })
+      );
+      const succeededIds = results.flatMap((result) =>
+        result.status === "fulfilled" && result.value.ok ? [result.value.id] : []
+      );
+      const succeededSet = new Set(succeededIds);
+      setOrders((prev) => prev.filter((o) => !succeededSet.has(o.id)));
+      setSelectedIds(new Set());
+      const failed = ids.length - succeededIds.length;
+      if (failed > 0) {
+        showToast(`Deleted ${succeededIds.length}, failed ${failed}`, "error");
+      } else {
+        showToast(`Deleted ${succeededIds.length} order${succeededIds.length !== 1 ? "s" : ""}`, "success");
+      }
+    } catch {
+      showToast("Bulk delete failed", "error");
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
+
+  async function executeBulkConfirm() {
+    setBulkConfirming(true);
+    setShowBulkConfirmModal(false);
+    const ids = Array.from(selectedIds);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const results = await Promise.allSettled(
+        ids.map(async (id) => {
+          const res = await fetch(`${API_URL}/api/admin/orders/${id}/confirm`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          return res.ok;
+        })
+      );
+      const succeeded = results.reduce((count, result) => {
+        return result.status === "fulfilled" && result.value ? count + 1 : count;
+      }, 0);
+      const failed = ids.length - succeeded;
+      setSelectedIds(new Set());
+      await fetchOrders();
+      if (failed > 0) {
+        showToast(`Confirmed ${succeeded}, failed ${failed}`, "error");
+      } else {
+        showToast(`Confirmed ${succeeded} order${succeeded !== 1 ? "s" : ""}`, "success");
+      }
+    } catch {
+      showToast("Bulk confirm failed", "error");
+    } finally {
+      setBulkConfirming(false);
     }
   }
 
@@ -270,6 +352,43 @@ export default function AdminOrdersPage() {
     URL.revokeObjectURL(url);
 
     showToast(`Exported ${sorted.length} order${sorted.length === 1 ? "" : "s"}`, "success");
+  }
+
+  // Checkbox select-all (current page)
+  const pageIds = paginated.map((o) => o.id);
+  const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
+  const somePageSelected = pageIds.some((id) => selectedIds.has(id)) && !allPageSelected;
+
+  const selectAllRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = somePageSelected;
+    }
+  }, [somePageSelected]);
+
+  function toggleSelectAll() {
+    if (allPageSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        pageIds.forEach((id) => next.delete(id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        pageIds.forEach((id) => next.add(id));
+        return next;
+      });
+    }
+  }
+
+  function toggleSelectOne(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   }
 
   const thBase = "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider";
@@ -395,6 +514,39 @@ export default function AdminOrdersPage() {
         </p>
       )}
 
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div
+          className="flex items-center gap-3 px-4 py-3 rounded-xl mb-3 text-sm font-medium"
+          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+        >
+          <span className="flex-1">{selectedIds.size} order{selectedIds.size !== 1 ? "s" : ""} selected</span>
+          <button
+            onClick={() => setShowBulkConfirmModal(true)}
+            disabled={bulkConfirming}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+            style={{ background: "rgba(255,255,255,0.15)", color: "var(--color-cream)" }}
+          >
+            {bulkConfirming ? "Confirming..." : "Confirm Selected"}
+          </button>
+          <button
+            onClick={() => setShowBulkDeleteModal(true)}
+            disabled={bulkDeleting}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+            style={{ background: "rgba(220,38,38,0.3)", color: "#fca5a5" }}
+          >
+            {bulkDeleting ? "Deleting..." : "Delete Selected"}
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all"
+            style={{ background: "rgba(255,255,255,0.1)", color: "rgba(247,245,240,0.7)" }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <div
         className="rounded-2xl overflow-hidden"
@@ -418,6 +570,16 @@ export default function AdminOrdersPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "var(--color-cream)", borderBottom: "1px solid var(--color-border)" }}>
+                  <th className="px-4 py-3 w-10">
+                    <input
+                      ref={selectAllRef}
+                      type="checkbox"
+                      checked={allPageSelected}
+                      onChange={toggleSelectAll}
+                      className="cursor-pointer"
+                      aria-label="Select all on page"
+                    />
+                  </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Name</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Item</th>
@@ -456,11 +618,32 @@ export default function AdminOrdersPage() {
                   const isConfirming = confirming === order.id;
                   const isUpdatingStatus = updatingStatus === order.id;
                   const isDeleting = deleting === order.id;
+                  const isSelected = selectedIds.has(order.id);
                   return (
                     <tr
                       key={order.id}
-                      style={{ borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none" }}
+                      onClick={() => router.push(`/admin/orders/${order.id}`)}
+                      className="cursor-pointer transition-colors"
+                      style={{
+                        borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none",
+                        background: isSelected ? "rgba(114,145,82,0.06)" : "transparent",
+                      }}
+                      onMouseEnter={(e) => {
+                        if (!isSelected) (e.currentTarget as HTMLTableRowElement).style.background = "var(--color-cream)";
+                      }}
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLTableRowElement).style.background = isSelected ? "rgba(114,145,82,0.06)" : "transparent";
+                      }}
                     >
+                      <td className="px-4 py-3 w-10" onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => toggleSelectOne(order.id)}
+                          className="cursor-pointer"
+                          aria-label={`Select order ${order.id}`}
+                        />
+                      </td>
                       <td className="px-4 py-3 font-medium" style={{ color: "var(--color-text)" }}>
                         {order.name}
                       </td>
@@ -480,7 +663,7 @@ export default function AdminOrdersPage() {
                       <td className="px-4 py-3 font-semibold" style={{ color: "var(--color-forest)" }}>
                         ${order.total_price.toFixed(2)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="relative inline-block">
                           <select
                             value={order.status}
@@ -503,7 +686,7 @@ export default function AdminOrdersPage() {
                       <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: "var(--color-muted)" }}>
                         {formatDate(order.created_at)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
                           {order.status === "pending" && (
                             <button
@@ -516,7 +699,7 @@ export default function AdminOrdersPage() {
                             </button>
                           )}
                           <button
-                            onClick={() => handleDelete(order.id)}
+                            onClick={() => setDeleteTarget(order.id)}
                             disabled={isDeleting}
                             className="p-1.5 rounded-lg transition-all disabled:opacity-60"
                             style={{ color: "#991b1b", background: "#fee2e2", border: "1px solid #fca5a5" }}
@@ -598,6 +781,93 @@ export default function AdminOrdersPage() {
           </button>
         </div>
       )}
+
+      {/* Single delete modal */}
+      <Modal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete Order"
+        variant="danger"
+        actions={
+          <>
+            <button
+              onClick={() => setDeleteTarget(null)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                const id = deleteTarget!;
+                setDeleteTarget(null);
+                executeDelete(id);
+              }}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "#dc2626", color: "white" }}
+            >
+              Delete
+            </button>
+          </>
+        }
+      >
+        This order will be permanently deleted. This cannot be undone.
+      </Modal>
+
+      {/* Bulk delete modal */}
+      <Modal
+        isOpen={showBulkDeleteModal}
+        onClose={() => setShowBulkDeleteModal(false)}
+        title={`Delete ${selectedIds.size} Order${selectedIds.size !== 1 ? "s" : ""}?`}
+        variant="danger"
+        actions={
+          <>
+            <button
+              onClick={() => setShowBulkDeleteModal(false)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={executeBulkDelete}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "#dc2626", color: "white" }}
+            >
+              Delete All
+            </button>
+          </>
+        }
+      >
+        {selectedIds.size} order{selectedIds.size !== 1 ? "s" : ""} will be permanently deleted. This cannot be undone.
+      </Modal>
+
+      {/* Bulk confirm modal */}
+      <Modal
+        isOpen={showBulkConfirmModal}
+        onClose={() => setShowBulkConfirmModal(false)}
+        title={`Confirm ${selectedIds.size} Order${selectedIds.size !== 1 ? "s" : ""}?`}
+        actions={
+          <>
+            <button
+              onClick={() => setShowBulkConfirmModal(false)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={executeBulkConfirm}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Send Confirmations
+            </button>
+          </>
+        }
+      >
+        Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed.
+      </Modal>
     </div>
   );
 }

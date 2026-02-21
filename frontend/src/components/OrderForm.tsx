@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { API_URL, type Item, type Location } from "@/config/event";
+import CustomSelect from "@/components/ui/CustomSelect";
+import Modal from "@/components/ui/Modal";
 
 interface FormData {
   name: string;
@@ -51,6 +53,7 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
   const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState("");
+  const [showErrorModal, setShowErrorModal] = useState(false);
 
   const selectedItem: Item =
     items.find((i) => i.id === form.item_id) ?? defaultItem;
@@ -74,6 +77,16 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
       setForm((prev) => ({ ...prev, pickup_location: value, pickup_time_slot: "" }));
     } else if (name === "item_id") {
       setForm((prev) => ({ ...prev, item_id: value }));
+    } else {
+      setForm((prev) => ({ ...prev, [name]: value }));
+    }
+  }
+
+  function handleSelectChange(name: keyof FormData, value: string) {
+    setErrors((prev) => ({ ...prev, [name]: "" }));
+    setServerError("");
+    if (name === "pickup_location") {
+      setForm((prev) => ({ ...prev, pickup_location: value, pickup_time_slot: "" }));
     } else {
       setForm((prev) => ({ ...prev, [name]: value }));
     }
@@ -120,17 +133,18 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
 
       if (!res.ok) {
         const detail = data?.detail;
-        if (Array.isArray(detail)) {
-          setServerError(detail.map((d: { msg: string }) => d.msg).join(", "));
-        } else {
-          setServerError(detail || "Something went wrong. Please try again.");
-        }
+        const msg = Array.isArray(detail)
+          ? detail.map((d: { msg: string }) => d.msg).join(", ")
+          : (detail || "Something went wrong. Please try again.");
+        setServerError(msg);
+        setShowErrorModal(true);
         return;
       }
 
       onSuccess(data);
     } catch {
       setServerError("Unable to connect. Please check your connection and try again.");
+      setShowErrorModal(true);
     } finally {
       setSubmitting(false);
     }
@@ -184,26 +198,12 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               What would you like to order?
             </label>
-            <div className="relative">
-              <select
-                name="item_id"
-                value={form.item_id}
-                onChange={handleChange}
-                className={`${inputClass("item_id")} appearance-none pr-10`}
-                style={{ color: "var(--color-text)" }}
-              >
-                {items.map((item) => (
-                  <option key={item.id} value={item.id} title={item.description}>
-                    {item.name}
-                  </option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center" style={{ color: "var(--color-muted)" }}>
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </span>
-            </div>
+            <CustomSelect
+              options={items.map((item) => ({ value: item.id, label: item.name }))}
+              value={form.item_id}
+              onChange={(val) => handleSelectChange("item_id", val)}
+              hasError={!!errors.item_id}
+            />
             {selectedItem?.description && (
               <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--color-muted)" }}>
                 {selectedItem.description}
@@ -211,18 +211,18 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             )}
             <div className="mt-2 flex items-center gap-3 flex-wrap">
               <span className="text-lg font-bold" style={{ color: "var(--color-forest)" }}>
-                {currency} ${effectivePrice.toFixed(2)}
+                ${effectivePrice.toFixed(2)}
               </span>
               {selectedItem?.discounted_price != null && (
                 <>
                   <span className="text-sm line-through font-medium" style={{ color: "#e05252" }}>
-                    {currency} ${selectedItem.price.toFixed(2)}
+                    ${selectedItem.price.toFixed(2)}
                   </span>
                   <span
                     className="text-xs font-semibold px-2 py-0.5 rounded-full"
                     style={{ background: "#fef2f2", color: "#c53030", border: "1px solid #fecaca" }}
                   >
-                    Save {currency} ${(selectedItem.price - selectedItem.discounted_price).toFixed(2)}
+                    Save ${(selectedItem.price - selectedItem.discounted_price).toFixed(2)}
                   </span>
                 </>
               )}
@@ -281,27 +281,13 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               Pickup Location
             </label>
-            <div className="relative">
-              <select
-                name="pickup_location"
-                value={form.pickup_location}
-                onChange={handleChange}
-                className={`${inputClass("pickup_location")} appearance-none pr-10`}
-                style={{ color: form.pickup_location ? "var(--color-text)" : "var(--color-muted)" }}
-              >
-                <option value="">Select a location</option>
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.name}>
-                    {loc.name}
-                  </option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center" style={{ color: "var(--color-muted)" }}>
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </span>
-            </div>
+            <CustomSelect
+              options={locations.map((loc) => ({ value: loc.name, label: loc.name }))}
+              value={form.pickup_location}
+              onChange={(val) => handleSelectChange("pickup_location", val)}
+              placeholder="Select a location"
+              hasError={!!errors.pickup_location}
+            />
             {errors.pickup_location && (
               <p className="mt-1 text-xs text-red-500">{errors.pickup_location}</p>
             )}
@@ -312,33 +298,14 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               Pickup Time Slot
             </label>
-            <div className="relative">
-              <select
-                name="pickup_time_slot"
-                value={form.pickup_time_slot}
-                onChange={handleChange}
-                disabled={!form.pickup_location}
-                className={`${inputClass("pickup_time_slot")} appearance-none pr-10`}
-                style={{
-                  color: form.pickup_time_slot ? "var(--color-text)" : "var(--color-muted)",
-                  opacity: !form.pickup_location ? 0.6 : 1,
-                }}
-              >
-                <option value="">
-                  {form.pickup_location ? "Select a time slot" : "Select a location first"}
-                </option>
-                {timeSlots.map((slot) => (
-                  <option key={slot} value={slot}>
-                    {slot}
-                  </option>
-                ))}
-              </select>
-              <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center" style={{ color: "var(--color-muted)", opacity: !form.pickup_location ? 0.6 : 1 }}>
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
-                </svg>
-              </span>
-            </div>
+            <CustomSelect
+              options={timeSlots.map((slot) => ({ value: slot, label: slot }))}
+              value={form.pickup_time_slot}
+              onChange={(val) => handleSelectChange("pickup_time_slot", val)}
+              placeholder={form.pickup_location ? "Select a time slot" : "Select a location first"}
+              disabled={!form.pickup_location}
+              hasError={!!errors.pickup_time_slot}
+            />
             {errors.pickup_time_slot && (
               <p className="mt-1 text-xs text-red-500">{errors.pickup_time_slot}</p>
             )}
@@ -391,14 +358,14 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
                   Order Total
                 </p>
                 <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                  {form.quantity} x {selectedItem?.name} @ {currency} ${effectivePrice.toFixed(2)} each
+                  {form.quantity} x {selectedItem?.name} @ ${effectivePrice.toFixed(2)} each
                 </p>
               </div>
               <p
                 className="text-3xl font-bold"
                 style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
               >
-                {currency} ${total}
+                ${total}
               </p>
             </div>
           </div>
@@ -436,22 +403,30 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             )}
           </button>
 
-          {serverError && (
-            <div className="rounded-xl px-4 py-3 text-sm font-medium text-red-700 bg-red-50 border border-red-200 flex items-start gap-2">
-              <svg className="shrink-0 mt-0.5" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              {serverError}
-            </div>
-          )}
-
           <p className="text-xs text-center" style={{ color: "var(--color-muted)" }}>
             By submitting, you agree that we may contact you via email to confirm your order.
           </p>
         </form>
       </div>
+
+      <Modal
+        isOpen={showErrorModal}
+        onClose={() => setShowErrorModal(false)}
+        title="Order Failed"
+        variant="danger"
+        actions={
+          <button
+            type="button"
+            onClick={() => setShowErrorModal(false)}
+            className="px-5 py-2.5 rounded-xl text-sm font-semibold"
+            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+          >
+            OK
+          </button>
+        }
+      >
+        {serverError}
+      </Modal>
     </section>
   );
 }
