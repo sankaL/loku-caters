@@ -89,7 +89,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const sidebarWidth = isCollapsed ? 56 : 224;
 
   return (
-    <div className="flex min-h-screen" style={{ background: "var(--color-cream)" }}>
+    <div className="flex h-screen overflow-hidden" style={{ background: "var(--color-cream)" }}>
       {/* Mobile backdrop */}
       {mobileOpen && (
         <div
@@ -101,27 +101,29 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       {/* Sidebar */}
       <aside
-        className={`fixed md:static inset-y-0 left-0 z-40 flex flex-col flex-shrink-0 md:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
+        className={`fixed md:relative inset-y-0 left-0 z-40 flex flex-col flex-shrink-0 md:translate-x-0 ${mobileOpen ? "translate-x-0" : "-translate-x-full"}`}
         style={{
           width: `${sidebarWidth}px`,
+          height: "100%",
           background: "var(--color-forest)",
           borderRight: "1px solid rgba(255,255,255,0.08)",
           transition: "width 0.2s ease, transform 0.2s ease",
         }}
       >
 
-        {/* Brand */}
+        {/* Brand + collapse toggle */}
         <div
-          className="px-4 py-5 border-b flex items-center gap-3 overflow-hidden"
-          style={{ borderColor: "rgba(255,255,255,0.08)" }}
+          className="px-4 py-5 border-b flex items-center overflow-hidden"
+          style={{ borderColor: "rgba(255,255,255,0.08)", gap: isCollapsed ? 0 : 12 }}
         >
-          <div className="shrink-0">
+          {/* Logo icon — hidden on desktop when collapsed to give room for the toggle */}
+          <div className={`shrink-0 ${isCollapsed ? "md:hidden" : ""}`}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-sage)" }}>
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
             </svg>
           </div>
           {!isCollapsed && (
-            <div className="overflow-hidden">
+            <div className="flex-1 overflow-hidden">
               <p
                 className="text-xs font-semibold tracking-widest uppercase mb-0.5 truncate"
                 style={{ color: "var(--color-sage)" }}
@@ -133,6 +135,42 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </p>
             </div>
           )}
+          {/* Collapse toggle (desktop only) */}
+          <button
+            onClick={toggleCollapsed}
+            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="hidden md:flex shrink-0 items-center justify-center rounded-lg transition-all"
+            style={{
+              color: "rgba(247,245,240,0.35)",
+              padding: "4px",
+              marginLeft: isCollapsed ? "auto" : undefined,
+            }}
+            onMouseEnter={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "rgba(247,245,240,0.7)";
+              (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.08)";
+            }}
+            onMouseLeave={(e) => {
+              (e.currentTarget as HTMLButtonElement).style.color = "rgba(247,245,240,0.35)";
+              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
+            }}
+          >
+            <svg
+              width="15"
+              height="15"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              style={{
+                transform: isCollapsed ? "rotate(180deg)" : "rotate(0deg)",
+                transition: "transform 0.2s ease",
+              }}
+            >
+              <path d="M15 18l-6-6 6-6" />
+            </svg>
+          </button>
         </div>
 
         {/* Nav */}
@@ -161,7 +199,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </nav>
 
         {/* Sign out */}
-        <div className="px-2 pb-2 overflow-hidden">
+        <div className="px-2 pb-4 overflow-hidden">
           <button
             onClick={handleSignOut}
             title={isCollapsed ? "Sign Out" : undefined}
@@ -187,41 +225,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </svg>
             </span>
             {!isCollapsed && <span className="truncate">Sign Out</span>}
-          </button>
-        </div>
-
-        {/* Collapse toggle (desktop only) */}
-        <div className="hidden md:flex px-2 pb-4">
-          <button
-            onClick={toggleCollapsed}
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="flex items-center justify-center w-full px-3 py-2 rounded-xl transition-all"
-            style={{ color: "rgba(247,245,240,0.3)" }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "rgba(247,245,240,0.6)";
-              (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.06)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "rgba(247,245,240,0.3)";
-              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-            }}
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{
-                transform: isCollapsed ? "rotate(180deg)" : "rotate(0deg)",
-                transition: "transform 0.2s ease",
-              }}
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
           </button>
         </div>
       </aside>
