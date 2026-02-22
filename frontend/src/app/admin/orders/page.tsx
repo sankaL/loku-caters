@@ -694,7 +694,7 @@ export default function AdminOrdersPage() {
   };
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-8">
       {/* Toast */}
       {toast && (
         <div
@@ -710,7 +710,7 @@ export default function AdminOrdersPage() {
       )}
 
       {/* Header */}
-      <div className="flex items-start justify-between mb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between mb-6">
         <div>
           <h1
             className="text-2xl font-bold mb-1"
@@ -722,7 +722,7 @@ export default function AdminOrdersPage() {
             Clicking Send Confirmation emails the customer and marks the order confirmed automatically.
           </p>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => {
               const confirmed = orders.filter((o) => o.status === "confirmed");
@@ -766,11 +766,11 @@ export default function AdminOrdersPage() {
       {/* Filters + search + actions */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
         {/* Status dropdown */}
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <select
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            style={dropdownStyle}
+            style={{ ...dropdownStyle, width: "100%" }}
           >
             <option value="all">All Statuses</option>
             {Object.entries(STATUS_STYLES).map(([val, s]) => (
@@ -781,11 +781,11 @@ export default function AdminOrdersPage() {
         </div>
 
         {/* Location dropdown */}
-        <div className="relative">
+        <div className="relative w-full sm:w-auto">
           <select
             value={locationFilter}
             onChange={(e) => setLocationFilter(e.target.value)}
-            style={dropdownStyle}
+            style={{ ...dropdownStyle, width: "100%" }}
           >
             <option value="all">All Locations</option>
             {eventConfig?.locations.map((loc) => (
@@ -810,7 +810,7 @@ export default function AdminOrdersPage() {
         )}
 
         {/* Search */}
-        <div className="relative flex-1 min-w-48">
+        <div className="relative w-full sm:flex-1 sm:min-w-48">
           <svg
             className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
             width="14"
@@ -850,7 +850,7 @@ export default function AdminOrdersPage() {
 
         <button
           onClick={fetchOrders}
-          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 shrink-0"
+          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 w-full sm:w-auto"
           style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -862,7 +862,7 @@ export default function AdminOrdersPage() {
         <button
           onClick={handleExportCsv}
           disabled={loading || sorted.length === 0}
-          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2 shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
           style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
