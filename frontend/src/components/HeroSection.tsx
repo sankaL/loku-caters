@@ -1,8 +1,9 @@
 interface HeroSectionProps {
   eventDate: string;
+  onFeedbackClick?: () => void;
 }
 
-export default function HeroSection({ eventDate }: HeroSectionProps) {
+export default function HeroSection({ eventDate, onFeedbackClick }: HeroSectionProps) {
   return (
     <section className="w-full max-w-5xl mx-auto px-6 pt-4 pb-12">
       <div
@@ -69,6 +70,50 @@ export default function HeroSection({ eventDate }: HeroSectionProps) {
           >
             Scroll down to pre-order and we&apos;ll confirm via email before pickup.
           </p>
+
+          {onFeedbackClick && (
+            <button
+              type="button"
+              onClick={onFeedbackClick}
+              className="animate-fade-up delay-300"
+              style={{
+                marginTop: "16px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "7px 14px",
+                borderRadius: "999px",
+                border: "1px solid var(--color-bark)",
+                background: "var(--color-bark)",
+                fontSize: "12px",
+                color: "white",
+                cursor: "pointer",
+                transition: "background 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "#7a5234";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "var(--color-bark)";
+              }}
+            >
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              Can&apos;t join this batch?
+            </button>
+          )}
         </div>
       </div>
     </section>
