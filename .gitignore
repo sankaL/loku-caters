@@ -40,3 +40,6 @@ build/
 
 # Railway CLI artifacts
 .railway/
+
+#reference files
+.ref*
