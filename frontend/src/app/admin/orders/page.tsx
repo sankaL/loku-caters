@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL } from "@/config/event";
+import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 
@@ -12,6 +12,7 @@ interface Order {
   email: string;
   phone_number: string;
   item_name: string;
+  item_id: string;
   quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
@@ -22,12 +23,12 @@ interface Order {
 
 type SortCol = "status" | "total" | "date";
 
-const STATUS_FILTERS = ["all", "pending", "confirmed"] as const;
 const PAGE_SIZE = 15;
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fef3c7", color: "#92400e", label: "Pending" },
   confirmed: { bg: "#d1fae5", color: "#065f46", label: "Confirmed" },
+  reminded:  { bg: "#fdf0e8", color: "#7a3f1e", label: "Reminded" },
   paid:      { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
@@ -59,10 +60,88 @@ function csvEscape(value: string | number): string {
   return normalized;
 }
 
+const dropdownStyle: React.CSSProperties = {
+  appearance: "none" as const,
+  WebkitAppearance: "none" as const,
+  background: "white",
+  color: "var(--color-text)",
+  border: "1px solid var(--color-border)",
+  borderRadius: "0.75rem",
+  padding: "0.5rem 2rem 0.5rem 0.75rem",
+  fontSize: "0.875rem",
+  cursor: "pointer",
+  outline: "none",
+};
+
+function SelectChevron() {
+  return (
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 20 20"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ pointerEvents: "none", position: "absolute", right: "0.625rem", top: "50%", transform: "translateY(-50%)", color: "var(--color-muted)" }}
+    >
+      <path d="M5 7.5L10 12.5L15 7.5" />
+    </svg>
+  );
+}
+
+interface AddOrderForm {
+  name: string;
+  email: string;
+  phone_number: string;
+  item_id: string;
+  quantity: number;
+  pickup_location: string;
+  pickup_time_slot: string;
+}
+
+const EMPTY_ADD_FORM: AddOrderForm = {
+  name: "", email: "", phone_number: "",
+  item_id: "", quantity: 1,
+  pickup_location: "", pickup_time_slot: "",
+};
+
+interface BulkRow {
+  name: string;
+  email: string;
+  phone_number: string;
+  item_id: string;
+  quantity: number;
+  pickup_location: string;
+  pickup_time_slot: string;
+  _rowNum: number;
+  _error?: string;
+}
+
+function normalizeCsvHeader(value: string): string {
+  return value.trim().toLowerCase().replace(/[_-]/g, " ").replace(/\s+/g, " ");
+}
+
+function isExpectedCsvHeaderRow(columns: string[]): boolean {
+  const normalized = columns.map(normalizeCsvHeader);
+  const expected: Array<Set<string>> = [
+    new Set(["name"]),
+    new Set(["email"]),
+    new Set(["phone", "phone number"]),
+    new Set(["item id", "item"]),
+    new Set(["quantity", "qty"]),
+    new Set(["pickup location", "location"]),
+    new Set(["time slot", "pickup time slot"]),
+  ];
+  return expected.every((allowed, idx) => allowed.has(normalized[idx] ?? ""));
+}
+
 export default function AdminOrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
-  const [filter, setFilter] = useState<string>("pending");
+  const [filter, setFilter] = useState<string>("all");
+  const [locationFilter, setLocationFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
@@ -71,6 +150,7 @@ export default function AdminOrdersPage() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [sort, setSort] = useState<{ col: SortCol | null; dir: "asc" | "desc" }>({ col: null, dir: "asc" });
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
 
   // Single delete modal
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -82,13 +162,34 @@ export default function AdminOrdersPage() {
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkConfirming, setBulkConfirming] = useState(false);
 
+  // Add order modal
+  const [showAddOrderModal, setShowAddOrderModal] = useState(false);
+  const [addOrderForm, setAddOrderForm] = useState<AddOrderForm>(EMPTY_ADD_FORM);
+  const [addingOrder, setAddingOrder] = useState(false);
+
+  // Bulk import modal
+  const [showBulkImportModal, setShowBulkImportModal] = useState(false);
+  const [bulkImportRows, setBulkImportRows] = useState<BulkRow[]>([]);
+  const [bulkImporting, setBulkImporting] = useState(false);
+
+  // Remind modal
+  const [showRemindModal, setShowRemindModal] = useState(false);
+  const [remindSelections, setRemindSelections] = useState<Set<string>>(new Set());
+  const [remindLoading, setRemindLoading] = useState(false);
+
   // Reset selection when filter/orders change
-  useEffect(() => { setSelectedIds(new Set()); }, [filter, orders]);
+  useEffect(() => { setSelectedIds(new Set()); }, [filter, locationFilter, orders]);
+  useEffect(() => { setPage(1); }, [locationFilter]);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
+
+  // Fetch event config for location/item dropdowns
+  useEffect(() => {
+    fetchEventConfig().then(setEventConfig).catch(() => {});
+  }, []);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
@@ -113,16 +214,20 @@ export default function AdminOrdersPage() {
   useEffect(() => { setPage(1); }, [search]);
 
   const filtered = useMemo(() => {
+    let result = orders;
+    if (locationFilter !== "all") {
+      result = result.filter((o) => o.pickup_location === locationFilter);
+    }
     const q = search.trim().toLowerCase();
-    if (!q) return orders;
-    return orders.filter(
+    if (!q) return result;
+    return result.filter(
       (o) =>
         o.name.toLowerCase().includes(q) ||
         o.email.toLowerCase().includes(q) ||
         o.phone_number.toLowerCase().includes(q) ||
         o.pickup_location.toLowerCase().includes(q)
     );
-  }, [orders, search]);
+  }, [orders, locationFilter, search]);
 
   const sorted = useMemo(() => {
     if (!sort.col) return filtered;
@@ -292,6 +397,180 @@ export default function AdminOrdersPage() {
     }
   }
 
+  async function handleSendReminders() {
+    const ids = Array.from(remindSelections);
+    if (ids.length === 0) return;
+    setRemindLoading(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/orders/remind`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to send reminders");
+      }
+      const data = await res.json();
+      if (data.failed_emails > 0) {
+        showToast(
+          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, failed ${data.failed_emails}`,
+          "error"
+        );
+      } else {
+        showToast(
+          `Reminder${data.reminded !== 1 ? "s" : ""} sent to ${data.reminded} customer${data.reminded !== 1 ? "s" : ""}`,
+          "success"
+        );
+      }
+      setShowRemindModal(false);
+      await fetchOrders();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to send reminders", "error");
+    } finally {
+      setRemindLoading(false);
+    }
+  }
+
+  async function handleAddOrder(e: React.FormEvent) {
+    e.preventDefault();
+    setAddingOrder(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/orders`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(addOrderForm),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to create order");
+      }
+      showToast("Order created successfully", "success");
+      setShowAddOrderModal(false);
+      setAddOrderForm(EMPTY_ADD_FORM);
+      await fetchOrders();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to create order", "error");
+    } finally {
+      setAddingOrder(false);
+    }
+  }
+
+  function downloadCsvTemplate() {
+    const headers = "Name,Email,Phone,Item ID,Quantity,Pickup Location,Time Slot";
+    const example = eventConfig
+      ? `John Smith,john@example.com,905-555-0123,${eventConfig.items[0]?.id ?? "lamprais-01"},2,${eventConfig.locations[0]?.name ?? "Welland"},${eventConfig.locations[0]?.timeSlots[0] ?? "11:00 AM - 12:00 PM"}`
+      : "John Smith,john@example.com,905-555-0123,lamprais-01,2,Welland,11:00 AM - 12:00 PM";
+    const blob = new Blob([headers + "\n" + example], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "order-import-template.csv";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function parseCsvForImport(text: string): BulkRow[] {
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
+    if (lines.length === 0) return [];
+    const firstLineCols = lines[0].split(",").map((c) => c.trim());
+    const hasHeader = isExpectedCsvHeaderRow(firstLineCols);
+    const dataLines = hasHeader ? lines.slice(1) : lines;
+    const rowNumberOffset = hasHeader ? 2 : 1;
+    const rows: BulkRow[] = dataLines.map((line, idx) => {
+      const cols = line.split(",").map((c) => c.trim());
+      const [name, email, phone_number, item_id, quantityStr, pickup_location, ...timeSlotParts] = cols;
+      const pickup_time_slot = timeSlotParts.join(",").trim();
+      const quantity = parseInt(quantityStr ?? "0", 10);
+      const row: BulkRow = {
+        name: name ?? "",
+        email: email ?? "",
+        phone_number: phone_number ?? "",
+        item_id: item_id ?? "",
+        quantity: isNaN(quantity) ? 0 : quantity,
+        pickup_location: pickup_location ?? "",
+        pickup_time_slot,
+        _rowNum: idx + rowNumberOffset,
+      };
+      const errors: string[] = [];
+      if (!row.name) errors.push("name is required");
+      if (!row.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) errors.push("valid email required");
+      if (!row.phone_number) errors.push("phone is required");
+      if (row.quantity < 1) errors.push("quantity must be >= 1");
+      if (eventConfig) {
+        const validItem = eventConfig.items.find((i) => i.id === row.item_id);
+        if (!validItem) errors.push(`unknown item_id "${row.item_id}"`);
+        const validLoc = eventConfig.locations.find((l) => l.name === row.pickup_location);
+        if (!validLoc) errors.push(`unknown location "${row.pickup_location}"`);
+        else if (validItem && !validLoc.timeSlots.includes(row.pickup_time_slot)) {
+          errors.push(`time slot "${row.pickup_time_slot}" not available at ${row.pickup_location}`);
+        }
+      }
+      if (errors.length > 0) row._error = errors.join("; ");
+      return row;
+    });
+    return rows;
+  }
+
+  function handleCsvFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string;
+      setBulkImportRows(parseCsvForImport(text));
+    };
+    reader.readAsText(file);
+    e.target.value = "";
+  }
+
+  async function executeBulkImport() {
+    const validRows = bulkImportRows.filter((r) => !r._error);
+    if (validRows.length === 0) return;
+    setBulkImporting(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const results = await Promise.allSettled(
+        validRows.map((row) =>
+          fetch(`${API_URL}/api/admin/orders`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: row.name,
+              email: row.email,
+              phone_number: row.phone_number,
+              item_id: row.item_id,
+              quantity: row.quantity,
+              pickup_location: row.pickup_location,
+              pickup_time_slot: row.pickup_time_slot,
+            }),
+          }).then((r) => r.ok)
+        )
+      );
+      const succeeded = results.filter((r) => r.status === "fulfilled" && r.value).length;
+      const failed = validRows.length - succeeded;
+      setShowBulkImportModal(false);
+      setBulkImportRows([]);
+      await fetchOrders();
+      if (failed > 0) {
+        showToast(`Imported ${succeeded}, failed ${failed}`, "error");
+      } else {
+        showToast(`Imported ${succeeded} order${succeeded !== 1 ? "s" : ""}`, "success");
+      }
+    } catch {
+      showToast("Bulk import failed", "error");
+    } finally {
+      setBulkImporting(false);
+    }
+  }
+
   function formatDate(iso: string) {
     return new Date(iso).toLocaleString("en-CA", {
       month: "short",
@@ -393,6 +672,27 @@ export default function AdminOrdersPage() {
 
   const thBase = "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider";
 
+  // Time slots for selected location in the add order form
+  const addOrderTimeSlots = useMemo(() => {
+    if (!eventConfig || !addOrderForm.pickup_location) return [];
+    const loc = eventConfig.locations.find((l) => l.name === addOrderForm.pickup_location);
+    return loc?.timeSlots ?? [];
+  }, [eventConfig, addOrderForm.pickup_location]);
+
+  const validBulkRows = bulkImportRows.filter((r) => !r._error);
+  const invalidBulkRows = bulkImportRows.filter((r) => r._error);
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "0.5rem 0.75rem",
+    borderRadius: "0.75rem",
+    border: "1px solid var(--color-border)",
+    fontSize: "0.875rem",
+    color: "var(--color-text)",
+    background: "white",
+    outline: "none",
+  };
+
   return (
     <div className="p-8">
       {/* Toast */}
@@ -410,34 +710,104 @@ export default function AdminOrdersPage() {
       )}
 
       {/* Header */}
-      <div className="mb-6">
-        <h1
-          className="text-2xl font-bold mb-1"
-          style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
-        >
-          Orders
-        </h1>
-        <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-          Clicking Send Confirmation emails the customer and marks the order confirmed automatically.
-        </p>
+      <div className="flex items-start justify-between mb-6">
+        <div>
+          <h1
+            className="text-2xl font-bold mb-1"
+            style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
+          >
+            Orders
+          </h1>
+          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+            Clicking Send Confirmation emails the customer and marks the order confirmed automatically.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => {
+              const confirmed = orders.filter((o) => o.status === "confirmed");
+              setRemindSelections(new Set(confirmed.map((o) => o.id)));
+              setShowRemindModal(true);
+            }}
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
+            style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            Remind
+          </button>
+          <button
+            onClick={() => { setShowAddOrderModal(true); setAddOrderForm(EMPTY_ADD_FORM); }}
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
+            style={{ background: "var(--color-forest)", color: "var(--color-cream)", border: "1px solid var(--color-forest)" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Add Order
+          </button>
+          <button
+            onClick={() => { setShowBulkImportModal(true); setBulkImportRows([]); }}
+            className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2"
+            style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
+            </svg>
+            Bulk Import
+          </button>
+        </div>
       </div>
 
-      {/* Status filters + search + refresh */}
+      {/* Filters + search + actions */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        {STATUS_FILTERS.map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className="px-4 py-2 rounded-xl text-sm font-medium capitalize transition-all"
-            style={{
-              background: filter === f ? "var(--color-forest)" : "white",
-              color: filter === f ? "var(--color-cream)" : "var(--color-text)",
-              border: `1px solid ${filter === f ? "var(--color-forest)" : "var(--color-border)"}`,
-            }}
+        {/* Status dropdown */}
+        <div className="relative">
+          <select
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            style={dropdownStyle}
           >
-            {f === "all" ? "All" : f.charAt(0).toUpperCase() + f.slice(1)}
+            <option value="all">All Statuses</option>
+            {Object.entries(STATUS_STYLES).map(([val, s]) => (
+              <option key={val} value={val}>{s.label}</option>
+            ))}
+          </select>
+          <SelectChevron />
+        </div>
+
+        {/* Location dropdown */}
+        <div className="relative">
+          <select
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            style={dropdownStyle}
+          >
+            <option value="all">All Locations</option>
+            {eventConfig?.locations.map((loc) => (
+              <option key={loc.id} value={loc.name}>{loc.name}</option>
+            ))}
+          </select>
+          <SelectChevron />
+        </div>
+
+        {/* Clear filters */}
+        {(filter !== "all" || locationFilter !== "all" || search) && (
+          <button
+            onClick={() => { setFilter("all"); setLocationFilter("all"); setSearch(""); }}
+            className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
+            style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+            Clear filters
           </button>
-        ))}
+        )}
 
         {/* Search */}
         <div className="relative flex-1 min-w-48">
@@ -562,7 +932,7 @@ export default function AdminOrdersPage() {
         ) : paginated.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-              {search ? `No orders match "${search}".` : `No ${filter !== "all" ? filter : ""} orders found.`}
+              {search ? `No orders match "${search}".` : "No orders found."}
             </p>
           </div>
         ) : (
@@ -868,6 +1238,364 @@ export default function AdminOrdersPage() {
       >
         Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed.
       </Modal>
+
+      {/* Add Order Modal */}
+      {showAddOrderModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAddOrderModal(false); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "580px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-5" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              Add Order
+            </h2>
+            <form onSubmit={handleAddOrder} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={addOrderForm.name}
+                    onChange={(e) => setAddOrderForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="Full name"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Email</label>
+                  <input
+                    required
+                    type="email"
+                    value={addOrderForm.email}
+                    onChange={(e) => setAddOrderForm((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="email@example.com"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone</label>
+                  <input
+                    required
+                    type="tel"
+                    value={addOrderForm.phone_number}
+                    onChange={(e) => setAddOrderForm((f) => ({ ...f, phone_number: e.target.value }))}
+                    placeholder="905-555-0123"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Quantity</label>
+                  <input
+                    required
+                    type="number"
+                    min={1}
+                    value={addOrderForm.quantity}
+                    onChange={(e) => setAddOrderForm((f) => ({ ...f, quantity: parseInt(e.target.value, 10) || 1 }))}
+                    style={inputStyle}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Item</label>
+                <div className="relative">
+                  <select
+                    required
+                    value={addOrderForm.item_id}
+                    onChange={(e) => setAddOrderForm((f) => ({ ...f, item_id: e.target.value }))}
+                    style={{ ...inputStyle, paddingRight: "2rem" }}
+                  >
+                    <option value="">Select item...</option>
+                    {eventConfig?.items.map((item) => (
+                      <option key={item.id} value={item.id}>{item.name}</option>
+                    ))}
+                  </select>
+                  <SelectChevron />
+                </div>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Location</label>
+                  <div className="relative">
+                    <select
+                      required
+                      value={addOrderForm.pickup_location}
+                      onChange={(e) => setAddOrderForm((f) => ({ ...f, pickup_location: e.target.value, pickup_time_slot: "" }))}
+                      style={{ ...inputStyle, paddingRight: "2rem" }}
+                    >
+                      <option value="">Select location...</option>
+                      {eventConfig?.locations.map((loc) => (
+                        <option key={loc.id} value={loc.name}>{loc.name}</option>
+                      ))}
+                    </select>
+                    <SelectChevron />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Time Slot</label>
+                  <div className="relative">
+                    <select
+                      required
+                      value={addOrderForm.pickup_time_slot}
+                      onChange={(e) => setAddOrderForm((f) => ({ ...f, pickup_time_slot: e.target.value }))}
+                      disabled={!addOrderForm.pickup_location}
+                      style={{ ...inputStyle, paddingRight: "2rem", opacity: addOrderForm.pickup_location ? 1 : 0.5 }}
+                    >
+                      <option value="">Select time slot...</option>
+                      {addOrderTimeSlots.map((slot) => (
+                        <option key={slot} value={slot}>{slot}</option>
+                      ))}
+                    </select>
+                    <SelectChevron />
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                Price will be computed server-side. Order will be created with status: Pending.
+              </p>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddOrderModal(false)}
+                  className="px-4 py-2 rounded-xl text-sm font-medium"
+                  style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingOrder}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                  style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                >
+                  {addingOrder ? "Creating..." : "Create Order"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Import Modal */}
+      {showBulkImportModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowBulkImportModal(false); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "720px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-1" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              Bulk Import Orders
+            </h2>
+            <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
+              Upload a CSV file to create multiple orders at once. All imported orders will be set to Pending.
+            </p>
+
+            <div
+              className="rounded-xl p-4 mb-4 text-xs"
+              style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
+            >
+              <p className="font-semibold mb-1" style={{ color: "var(--color-text)" }}>Required CSV columns (in order):</p>
+              <p style={{ color: "var(--color-muted)", fontFamily: "monospace" }}>
+                Name, Email, Phone, Item ID, Quantity, Pickup Location, Time Slot
+              </p>
+              {eventConfig && (
+                <p className="mt-2" style={{ color: "var(--color-muted)" }}>
+                  Valid Item IDs: {eventConfig.items.map((i) => i.id).join(", ")} |{" "}
+                  Valid Locations: {eventConfig.locations.map((l) => l.name).join(", ")}
+                </p>
+              )}
+            </div>
+
+            <div className="flex items-center gap-3 mb-5">
+              <label
+                className="px-4 py-2 rounded-xl text-sm font-medium cursor-pointer transition-all flex items-center gap-2"
+                style={{ background: "var(--color-forest)", color: "var(--color-cream)", border: "1px solid var(--color-forest)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <polyline points="17 8 12 3 7 8" />
+                  <line x1="12" y1="3" x2="12" y2="15" />
+                </svg>
+                Choose CSV File
+                <input type="file" accept=".csv" onChange={handleCsvFile} className="hidden" />
+              </label>
+              <button
+                onClick={downloadCsvTemplate}
+                className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2"
+                style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 3v12" /><path d="M7 10l5 5 5-5" /><path d="M4 21h16" />
+                </svg>
+                Download Template
+              </button>
+            </div>
+
+            {bulkImportRows.length > 0 && (
+              <>
+                <div className="flex items-center gap-3 mb-3">
+                  <span className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+                    {bulkImportRows.length} row{bulkImportRows.length !== 1 ? "s" : ""} parsed
+                  </span>
+                  {validBulkRows.length > 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "#d1fae5", color: "#065f46" }}>
+                      {validBulkRows.length} valid
+                    </span>
+                  )}
+                  {invalidBulkRows.length > 0 && (
+                    <span className="text-xs px-2 py-0.5 rounded-full font-medium" style={{ background: "#fee2e2", color: "#991b1b" }}>
+                      {invalidBulkRows.length} invalid
+                    </span>
+                  )}
+                </div>
+                <div className="rounded-xl overflow-hidden mb-5" style={{ border: "1px solid var(--color-border)", maxHeight: "260px", overflowY: "auto" }}>
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr style={{ background: "var(--color-cream)", borderBottom: "1px solid var(--color-border)" }}>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--color-muted)" }}>#</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--color-muted)" }}>Name</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--color-muted)" }}>Email</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--color-muted)" }}>Item / Qty</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--color-muted)" }}>Location</th>
+                        <th className="px-3 py-2 text-left font-semibold" style={{ color: "var(--color-muted)" }}>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {bulkImportRows.map((row) => (
+                        <tr
+                          key={row._rowNum}
+                          style={{
+                            borderBottom: "1px solid var(--color-border)",
+                            background: row._error ? "#fff5f5" : "white",
+                          }}
+                        >
+                          <td className="px-3 py-2" style={{ color: "var(--color-muted)" }}>{row._rowNum}</td>
+                          <td className="px-3 py-2" style={{ color: "var(--color-text)" }}>{row.name || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "var(--color-muted)" }}>{row.email || "-"}</td>
+                          <td className="px-3 py-2" style={{ color: "var(--color-text)" }}>{row.item_id} x{row.quantity}</td>
+                          <td className="px-3 py-2" style={{ color: "var(--color-text)" }}>{row.pickup_location || "-"}</td>
+                          <td className="px-3 py-2">
+                            {row._error
+                              ? <span style={{ color: "#991b1b" }} title={row._error}>Error: {row._error}</span>
+                              : <span style={{ color: "#065f46" }}>OK</span>
+                            }
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={() => setShowBulkImportModal(false)}
+                className="px-4 py-2 rounded-xl text-sm font-medium"
+                style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={executeBulkImport}
+                disabled={bulkImporting || validBulkRows.length === 0}
+                className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+              >
+                {bulkImporting ? "Importing..." : `Import ${validBulkRows.length} Order${validBulkRows.length !== 1 ? "s" : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remind Modal */}
+      {showRemindModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowRemindModal(false); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: "540px", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+          >
+            <h2 className="text-xl font-bold mb-1" style={{ color: "var(--color-bark)", fontFamily: "var(--font-serif)" }}>
+              Send Pickup Reminders
+            </h2>
+            <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
+              Reminder emails will be sent to all selected customers and their orders will be marked as Reminded. Uncheck anyone you want to exclude.
+            </p>
+
+            {orders.filter((o) => o.status === "confirmed").length === 0 ? (
+              <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
+                No confirmed orders to remind.
+              </p>
+            ) : (
+              <div style={{ overflowY: "auto", flex: 1, marginBottom: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" }}>
+                {orders.filter((o) => o.status === "confirmed").map((order) => (
+                  <label
+                    key={order.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "0.75rem",
+                      padding: "0.875rem 1rem",
+                      borderBottom: "1px solid var(--color-border)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={remindSelections.has(order.id)}
+                      onChange={(e) => {
+                        setRemindSelections((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(order.id);
+                          else next.delete(order.id);
+                          return next;
+                        });
+                      }}
+                      style={{ marginTop: "2px", accentColor: "var(--color-bark)", width: "15px", height: "15px", flexShrink: 0 }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{order.name}</p>
+                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email}</p>
+                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{order.pickup_location} - {order.pickup_time_slot}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
+              <button
+                onClick={() => setShowRemindModal(false)}
+                className="px-4 py-2 rounded-xl text-sm font-medium"
+                style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendReminders}
+                disabled={remindLoading || remindSelections.size === 0}
+                className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+              >
+                {remindLoading ? "Sending..." : `Send Reminder${remindSelections.size !== 1 ? "s" : ""} (${remindSelections.size})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

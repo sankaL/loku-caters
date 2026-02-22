@@ -1,4 +1,7 @@
+import EVENT_CONFIG from "./event-config.json";
+
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+export const CURRENCY = EVENT_CONFIG.currency;
 
 export interface Item {
   id: string;

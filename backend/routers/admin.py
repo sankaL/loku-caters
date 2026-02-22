@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import json
+import uuid
 from urllib.request import urlopen
 from typing import Optional
 from functools import lru_cache
@@ -14,7 +15,7 @@ from constants import OrderStatus
 from database import get_db
 from event_config import get_config_from_db
 from models import EventConfig, Order
-from services.email import send_confirmation
+from services.email import send_confirmation, send_reminder
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -113,6 +114,20 @@ class StatusUpdate(BaseModel):
     status: str
 
 
+class AdminOrderCreate(BaseModel):
+    name: str
+    email: str
+    phone_number: str
+    item_id: str
+    quantity: int
+    pickup_location: str
+    pickup_time_slot: str
+
+
+class BulkRemindRequest(BaseModel):
+    order_ids: list[str]
+
+
 # ---------------------------------------------------------------------------
 # Config endpoints
 # ---------------------------------------------------------------------------
@@ -151,6 +166,70 @@ def admin_update_config(
 # Order endpoints
 # ---------------------------------------------------------------------------
 
+@router.post("/orders", status_code=201)
+def admin_create_order(
+    body: AdminOrderCreate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    config = get_config_from_db(db)
+    item = next((i for i in config.get("items", []) if i["id"] == body.item_id), None)
+    if not item:
+        raise HTTPException(status_code=400, detail="Invalid item_id")
+    if body.quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+
+    pickup_location = body.pickup_location.strip()
+    pickup_time_slot = body.pickup_time_slot.strip()
+    location = next(
+        (
+            loc
+            for loc in config.get("locations", [])
+            if loc.get("name") == pickup_location or loc.get("id") == pickup_location
+        ),
+        None,
+    )
+    if not location:
+        raise HTTPException(status_code=400, detail="Invalid pickup_location")
+    if pickup_time_slot not in location.get("timeSlots", []):
+        raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
+
+    price = item.get("discounted_price") or item["price"]
+    total_price = price * body.quantity
+
+    order = Order(
+        id=str(uuid.uuid4()),
+        name=body.name.strip(),
+        email=body.email.strip(),
+        phone_number=body.phone_number.strip(),
+        item_id=body.item_id,
+        item_name=item["name"],
+        quantity=body.quantity,
+        pickup_location=pickup_location,
+        pickup_time_slot=pickup_time_slot,
+        total_price=total_price,
+        status=OrderStatus.PENDING,
+    )
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+
+    return {
+        "id": order.id,
+        "name": order.name,
+        "email": order.email,
+        "phone_number": order.phone_number,
+        "item_id": order.item_id,
+        "item_name": order.item_name,
+        "quantity": order.quantity,
+        "pickup_location": order.pickup_location,
+        "pickup_time_slot": order.pickup_time_slot,
+        "total_price": float(order.total_price),
+        "status": order.status,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+    }
+
+
 @router.get("/orders")
 def admin_list_orders(
     status: Optional[str] = Query(None),
@@ -178,6 +257,59 @@ def admin_list_orders(
         }
         for o in orders
     ]
+
+
+@router.post("/orders/remind")
+def admin_bulk_remind(
+    body: BulkRemindRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    config = get_config_from_db(db)
+    reminded_count = 0
+    failed_emails = 0
+
+    for order_id in body.order_ids:
+        order = db.query(Order).filter(Order.id == order_id).first()
+        if order is None:
+            continue
+        if order.status != OrderStatus.CONFIRMED:
+            continue
+
+        address = ""
+        for loc in config.get("locations", []):
+            if loc.get("name") == order.pickup_location or loc.get("id") == order.pickup_location:
+                address = loc.get("address", "")
+                break
+
+        effective_price = float(order.total_price) / order.quantity
+
+        order_data = {
+            "name": order.name,
+            "item_name": order.item_name,
+            "quantity": order.quantity,
+            "pickup_location": order.pickup_location,
+            "pickup_time_slot": order.pickup_time_slot,
+            "email": order.email,
+            "total_price": float(order.total_price),
+            "price_per_item": effective_price,
+            "currency": config.get("currency", "CAD"),
+            "address": address,
+            "event_date": config["event"]["date"],
+        }
+
+        try:
+            send_reminder(order_data)
+        except Exception as exc:
+            failed_emails += 1
+            print(f"[email] Failed to send reminder to {order.email}: {exc}")
+            continue
+
+        order.status = OrderStatus.REMINDED
+        reminded_count += 1
+
+    db.commit()
+    return {"success": True, "reminded": reminded_count, "failed_emails": failed_emails}
 
 
 @router.get("/orders/{order_id}")
