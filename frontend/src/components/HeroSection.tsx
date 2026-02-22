@@ -112,7 +112,7 @@ function LampraisModal({ onClose }: { onClose: () => void }) {
         {/* Image */}
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src="/assets/img/lumprais-how-its-made-original-compressed.jpg"
+          src="/assets/img/lumprais-how-its-made-compressed.png"
           alt="How Lamprais is made - a traditional Sri Lankan dish of rice and accompaniments wrapped in banana leaf"
           style={{ display: "block", width: "100%", height: "auto" }}
         />
