@@ -7,11 +7,14 @@ import OrderForm from "@/components/OrderForm";
 import SuccessView from "@/components/SuccessView";
 import { fetchEventConfig, type EventConfig } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
+import FeedbackModal from "@/components/FeedbackModal";
 
 interface OrderResult {
   order_id: string;
   order: {
     name: string;
+    email: string;
+    phone_number: string;
     item_id: string;
     item_name: string;
     quantity: number;
@@ -28,6 +31,7 @@ export default function Home() {
   const [orderResult, setOrderResult] = useState<OrderResult | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [configError, setConfigError] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     fetchEventConfig()
@@ -55,7 +59,15 @@ export default function Home() {
       style={{ background: "var(--color-cream)" }}
     >
       <Header />
-      <HeroSection eventDate={eventConfig?.event.date ?? ""} />
+      {!orderResult && (
+        <HeroSection
+          eventDate={eventConfig?.event.date ?? ""}
+          onFeedbackClick={() => {
+            captureEvent("feedback_modal_opened");
+            setFeedbackOpen(true);
+          }}
+        />
+      )}
 
       {/* Section divider */}
       <div className="max-w-2xl mx-auto px-6 mb-8">
@@ -65,7 +77,7 @@ export default function Home() {
             className="text-xs font-semibold tracking-widest uppercase"
             style={{ color: "var(--color-sage)" }}
           >
-            {orderResult ? "Order Confirmed" : "Pre-Order Below"}
+            {orderResult ? "Order Placed" : "Pre-Order Below"}
           </p>
           <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
         </div>
@@ -98,6 +110,8 @@ export default function Home() {
           onSuccess={handleOrderSuccess}
         />
       )}
+
+      <FeedbackModal isOpen={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
 
       {/* Footer */}
       <footer

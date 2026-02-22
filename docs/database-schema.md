@@ -80,6 +80,36 @@ Single-row table (`id = 1` always). Stores all event configuration that was prev
 
 ---
 
+## Table: `feedback`
+
+Stores visitor feedback from users who cannot participate in the current batch. Name is optional; all submissions may be anonymous.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `feedback_type` | `TEXT` | NOT NULL, default `non_customer` | `non_customer` (pre-order badge) or `customer` (post-order confirmation page) |
+| `order_id` | `TEXT` | nullable | Links to `orders.id` for customer feedback |
+| `name` | `TEXT` | nullable | Auto-filled from order for customers; optional for non-customers |
+| `contact` | `TEXT` | nullable | Auto-filled from order email for customers; optional for non-customers |
+| `reason` | `TEXT` | nullable | Machine-readable key; only set for non-customer feedback (see allowed values below) |
+| `other_details` | `TEXT` | nullable | Free text; populated only when `reason = 'other'` |
+| `message` | `TEXT` | nullable | Free-form feedback message; primarily used for customer feedback |
+| `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+
+### Allowed `reason` values
+
+| Value | Display label |
+|---|---|
+| `price_too_high` | Price too high |
+| `location_not_convenient` | Pickup location not convenient |
+| `dietary_needs` | Food does not meet dietary needs |
+| `not_available` | Not available on the event date |
+| `different_menu` | Prefer a different menu item |
+| `not_interested` | Not interested at this time |
+| `other` | Other |
+
+---
+
 ## Applying migrations
 
 Migrations live in `backend/alembic/versions/`. To apply all pending migrations:
@@ -93,6 +123,9 @@ alembic upgrade head
 |---|---|
 | `0001_create_orders` | `orders` table |
 | `0002_create_event_config` | `event_config` table, seeded with values from the original `event-config.json` |
+| `0003_create_feedback` | `feedback` table |
+| `0004_add_feedback_contact` | adds `contact` column to `feedback` |
+| `0005_feedback_type_and_message` | adds `feedback_type`, `order_id`, `message`; makes `reason` nullable |
 
 ---
 

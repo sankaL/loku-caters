@@ -98,6 +98,20 @@ def send_confirmation(order_data: dict) -> None:
                 </tr>
               </table>
 
+              <!-- E-Transfer -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf8f0;border-radius:12px;overflow:hidden;margin-bottom:24px;border:1px solid #e8d9b8;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#7a5a1a;">Payment by e-Transfer</p>
+                    <p style="margin:0;font-size:14px;color:#8a6a2a;line-height:1.6;">
+                      If you would like to pay by e-Transfer, you are welcome to send your payment to
+                      <strong>jlokuliyana@yahoo.com</strong> at your convenience - any time before your scheduled pickup.
+                      If you have already sent your payment, please disregard this notice.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+
               <p style="margin:0;font-size:15px;color:#4a4a4a;line-height:1.6;">
                 We look forward to serving you! If you have any questions, simply reply to this email.
               </p>
@@ -222,6 +236,20 @@ def send_reminder(order_data: dict) -> None:
                         <td style="font-size:16px;color:#12270F;font-weight:700;text-align:right;padding:4px 0;">{currency} ${total_price:.2f}</td>
                       </tr>
                     </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- E-Transfer -->
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf8f0;border-radius:12px;overflow:hidden;margin-bottom:24px;border:1px solid #e8d9b8;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#7a5a1a;">Payment by e-Transfer</p>
+                    <p style="margin:0;font-size:14px;color:#8a6a2a;line-height:1.6;">
+                      If you have not yet sent your e-Transfer payment, you are welcome to do so at any time before your pickup by sending to
+                      <strong>jlokuliyana@yahoo.com</strong>.
+                      If you have already sent your payment, please disregard this notice.
+                    </p>
                   </td>
                 </tr>
               </table>
