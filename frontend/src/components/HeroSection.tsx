@@ -1,8 +1,11 @@
 interface HeroSectionProps {
   eventDate: string;
+  heroHeader: string;
+  heroSubheader: string;
+  promoDetails?: string | null;
 }
 
-export default function HeroSection({ eventDate }: HeroSectionProps) {
+export default function HeroSection({ eventDate, heroHeader, heroSubheader, promoDetails }: HeroSectionProps) {
   return (
     <section className="w-full max-w-5xl mx-auto px-6 pt-4 pb-12">
       <div
@@ -44,24 +47,30 @@ export default function HeroSection({ eventDate }: HeroSectionProps) {
             className="text-4xl md:text-5xl font-bold leading-tight mb-4 animate-fade-up delay-100"
             style={{ color: "var(--color-cream)", fontFamily: "var(--font-serif)" }}
           >
-            We&apos;re Making
-            <br />
-            <span style={{ color: "#a8c882" }}>Lamprais</span>
+            {heroHeader || (
+              <>
+                We&apos;re Making
+                <br />
+                <span style={{ color: "#a8c882" }}>Lamprais</span>
+              </>
+            )}
           </h1>
 
           <p
             className="text-base md:text-lg leading-relaxed mb-2 max-w-xl animate-fade-up delay-200"
             style={{ color: "#b8c8a8" }}
           >
-            We&apos;re making a fresh batch and we&apos;d love for you to have some.
+            {heroSubheader || "We\u2019re making a fresh batch and we\u2019d love for you to have some."}
           </p>
 
-          <p
-            className="text-sm mb-4 max-w-xl animate-fade-up delay-300"
-            style={{ color: "#a8c882" }}
-          >
-            Back after a little while, so we&apos;re offering a special welcome-back price for this batch.
-          </p>
+          {promoDetails && (
+            <p
+              className="text-sm mb-4 max-w-xl animate-fade-up delay-300"
+              style={{ color: "#a8c882" }}
+            >
+              {promoDetails}
+            </p>
+          )}
 
           <p
             className="text-sm animate-fade-up delay-300"

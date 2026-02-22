@@ -1,5 +1,6 @@
 import resend
 from config import settings
+from event_config import CURRENCY
 
 resend.api_key = settings.resend_api_key
 
@@ -16,7 +17,7 @@ def send_confirmation(order_data: dict) -> None:
     pickup_time_slot = order_data["pickup_time_slot"]
     total_price = order_data["total_price"]
     price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency", "CAD")
+    currency = order_data.get("currency") or CURRENCY
     email = order_data["email"]
     address = order_data.get("address", "")
     event_date = order_data.get("event_date", "")
@@ -144,7 +145,7 @@ def send_reminder(order_data: dict) -> None:
     pickup_time_slot = order_data["pickup_time_slot"]
     total_price = order_data["total_price"]
     price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency", "CAD")
+    currency = order_data.get("currency") or CURRENCY
     email = order_data["email"]
     address = order_data.get("address", "")
     event_date = order_data.get("event_date", "")

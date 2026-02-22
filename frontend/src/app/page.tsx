@@ -7,25 +7,10 @@ import OrderForm from "@/components/OrderForm";
 import SuccessView from "@/components/SuccessView";
 import { fetchEventConfig, type EventConfig } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
-
-interface OrderResult {
-  order_id: string;
-  order: {
-    name: string;
-    item_id: string;
-    item_name: string;
-    quantity: number;
-    pickup_location: string;
-    pickup_time_slot: string;
-    total_price: number;
-    price_per_item: number;
-    currency: string;
-    event_date: string;
-  };
-}
+import type { OrderResult } from "@/components/OrderForm";
 
 export default function Home() {
-  const [orderResult, setOrderResult] = useState<OrderResult | null>(null);
+  const [orderResults, setOrderResults] = useState<OrderResult[] | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [configError, setConfigError] = useState(false);
 
@@ -35,18 +20,19 @@ export default function Home() {
       .catch(() => setConfigError(true));
   }, []);
 
-  function handleOrderSuccess(result: OrderResult) {
-    captureEvent("order_submitted", {
-      order_id: result.order_id,
-      item_id: result.order.item_id,
-      quantity: result.order.quantity,
-      total_price: result.order.total_price,
-      currency: result.order.currency,
-      pickup_location: result.order.pickup_location,
-      pickup_time_slot: result.order.pickup_time_slot,
+  function handleOrderSuccess(results: OrderResult[]) {
+    results.forEach((result) => {
+      captureEvent("order_submitted", {
+        order_id: result.order_id,
+        item_id: result.order.item_id,
+        quantity: result.order.quantity,
+        total_price: result.order.total_price,
+        currency: result.order.currency,
+        pickup_location: result.order.pickup_location,
+        pickup_time_slot: result.order.pickup_time_slot,
+      });
     });
-
-    setOrderResult(result);
+    setOrderResults(results);
   }
 
   return (
@@ -55,7 +41,12 @@ export default function Home() {
       style={{ background: "var(--color-cream)" }}
     >
       <Header />
-      <HeroSection eventDate={eventConfig?.event.date ?? ""} />
+      <HeroSection
+          eventDate={eventConfig?.event.date ?? ""}
+          heroHeader={eventConfig?.hero_header ?? ""}
+          heroSubheader={eventConfig?.hero_subheader ?? ""}
+          promoDetails={eventConfig?.promo_details}
+        />
 
       {/* Section divider */}
       <div className="max-w-2xl mx-auto px-6 mb-8">
@@ -65,7 +56,7 @@ export default function Home() {
             className="text-xs font-semibold tracking-widest uppercase"
             style={{ color: "var(--color-sage)" }}
           >
-            {orderResult ? "Order Confirmed" : "Pre-Order Below"}
+            {orderResults ? "Order Confirmed" : "Pre-Order Below"}
           </p>
           <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
         </div>
@@ -88,13 +79,12 @@ export default function Home() {
             </svg>
           </div>
         </div>
-      ) : orderResult ? (
-        <SuccessView result={orderResult} />
+      ) : orderResults ? (
+        <SuccessView results={orderResults} />
       ) : (
         <OrderForm
           items={eventConfig.items}
           locations={eventConfig.locations}
-          currency={eventConfig.currency}
           onSuccess={handleOrderSuccess}
         />
       )}

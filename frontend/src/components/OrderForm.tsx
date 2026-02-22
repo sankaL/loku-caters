@@ -5,17 +5,7 @@ import { API_URL, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
 import Modal from "@/components/ui/Modal";
 
-interface FormData {
-  name: string;
-  item_id: string;
-  quantity: number;
-  pickup_location: string;
-  pickup_time_slot: string;
-  phone_number: string;
-  email: string;
-}
-
-interface OrderResult {
+export interface OrderResult {
   order_id: string;
   order: {
     name: string;
@@ -31,58 +21,62 @@ interface OrderResult {
   };
 }
 
+interface ContactForm {
+  name: string;
+  pickup_location: string;
+  pickup_time_slot: string;
+  phone_number: string;
+  email: string;
+}
+
 interface OrderFormProps {
   items: Item[];
   locations: Location[];
-  currency: string;
-  onSuccess: (result: OrderResult) => void;
+  onSuccess: (results: OrderResult[]) => void;
 }
 
-export default function OrderForm({ items, locations, currency, onSuccess }: OrderFormProps) {
-  const defaultItem = items[0];
-
-  const [form, setForm] = useState<FormData>({
+export default function OrderForm({ items, locations, onSuccess }: OrderFormProps) {
+  const [quantities, setQuantities] = useState<Record<string, number>>({});
+  const [form, setForm] = useState<ContactForm>({
     name: "",
-    item_id: defaultItem?.id ?? "",
-    quantity: 1,
     pickup_location: "",
     pickup_time_slot: "",
     phone_number: "",
     email: "",
   });
-  const [errors, setErrors] = useState<Partial<Record<keyof FormData, string>>>({});
+  const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState("");
   const [showErrorModal, setShowErrorModal] = useState(false);
 
-  const selectedItem: Item =
-    items.find((i) => i.id === form.item_id) ?? defaultItem;
+  const timeSlots = form.pickup_location
+    ? (locations.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
+    : [];
 
-  const timeSlots =
-    form.pickup_location
-      ? (locations.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
-      : [];
+  const selectedLines = items
+    .filter((i) => (quantities[i.id] ?? 0) > 0)
+    .map((i) => ({ item: i, qty: quantities[i.id] }));
 
-  const effectivePrice = selectedItem?.discounted_price ?? selectedItem?.price ?? 0;
-  const total = (form.quantity * effectivePrice).toFixed(2);
+  const grandTotal = selectedLines.reduce((sum, { item, qty }) => {
+    return sum + (item.discounted_price ?? item.price) * qty;
+  }, 0);
 
-  function handleChange(
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
-  ) {
+  function changeQty(itemId: string, delta: number) {
+    setQuantities((prev) => ({
+      ...prev,
+      [itemId]: Math.max(0, (prev[itemId] ?? 0) + delta),
+    }));
+    setErrors((prev) => ({ ...prev, items: "" }));
+  }
+
+  function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
     const { name, value } = e.target;
     setErrors((prev) => ({ ...prev, [name]: "" }));
     setServerError("");
-
-    if (name === "pickup_location") {
-      setForm((prev) => ({ ...prev, pickup_location: value, pickup_time_slot: "" }));
-    } else if (name === "item_id") {
-      setForm((prev) => ({ ...prev, item_id: value }));
-    } else {
-      setForm((prev) => ({ ...prev, [name]: value }));
-    }
+    setForm((prev) => ({ ...prev, [name]: value }));
   }
 
-  function handleSelectChange(name: keyof FormData, value: string) {
+  function handleSelectChange(name: keyof ContactForm, value: string) {
     setErrors((prev) => ({ ...prev, [name]: "" }));
     setServerError("");
     if (name === "pickup_location") {
@@ -92,17 +86,10 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
     }
   }
 
-  function changeQuantity(delta: number) {
-    setForm((prev) => ({
-      ...prev,
-      quantity: Math.max(1, prev.quantity + delta),
-    }));
-  }
-
   function validate(): boolean {
-    const newErrors: Partial<Record<keyof FormData, string>> = {};
+    const newErrors: Record<string, string> = {};
+    if (selectedLines.length === 0) newErrors.items = "Please add at least one item.";
     if (!form.name.trim()) newErrors.name = "Please enter your name.";
-    if (!form.item_id) newErrors.item_id = "Please select an item.";
     if (!form.pickup_location) newErrors.pickup_location = "Please select a pickup location.";
     if (!form.pickup_time_slot) newErrors.pickup_time_slot = "Please select a time slot.";
     if (!form.phone_number.trim()) newErrors.phone_number = "Please enter your phone number.";
@@ -122,26 +109,35 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
     setSubmitting(true);
     setServerError("");
 
+    const results: OrderResult[] = [];
     try {
-      const res = await fetch(`${API_URL}/api/orders`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        const detail = data?.detail;
-        const msg = Array.isArray(detail)
-          ? detail.map((d: { msg: string }) => d.msg).join(", ")
-          : (detail || "Something went wrong. Please try again.");
-        setServerError(msg);
-        setShowErrorModal(true);
-        return;
+      for (const { item, qty } of selectedLines) {
+        const res = await fetch(`${API_URL}/api/orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            name: form.name.trim(),
+            item_id: item.id,
+            quantity: qty,
+            pickup_location: form.pickup_location,
+            pickup_time_slot: form.pickup_time_slot,
+            phone_number: form.phone_number.trim(),
+            email: form.email.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          const detail = data?.detail;
+          const msg = Array.isArray(detail)
+            ? detail.map((d: { msg: string }) => d.msg).join(", ")
+            : (detail || "Something went wrong. Please try again.");
+          setServerError(msg);
+          setShowErrorModal(true);
+          return;
+        }
+        results.push(data);
       }
-
-      onSuccess(data);
+      onSuccess(results);
     } catch {
       setServerError("Unable to connect. Please check your connection and try again.");
       setShowErrorModal(true);
@@ -150,7 +146,7 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
     }
   }
 
-  const inputClass = (field: keyof FormData) =>
+  const inputClass = (field: string) =>
     `w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all ${
       errors[field]
         ? "border-red-400 focus:ring-red-200"
@@ -193,87 +189,101 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
           </div>
 
-          {/* Item selection */}
+          {/* Items */}
           <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
+            <label className="block text-sm font-medium mb-2" style={{ color: "var(--color-text)" }}>
               What would you like to order?
             </label>
-            <CustomSelect
-              options={items.map((item) => ({ value: item.id, label: item.name }))}
-              value={form.item_id}
-              onChange={(val) => handleSelectChange("item_id", val)}
-              hasError={!!errors.item_id}
-            />
-            {selectedItem?.description && (
-              <p className="mt-1.5 text-xs leading-relaxed" style={{ color: "var(--color-muted)" }}>
-                {selectedItem.description}
-              </p>
-            )}
-            <div className="mt-2 flex items-center gap-3 flex-wrap">
-              <span className="text-lg font-bold" style={{ color: "var(--color-forest)" }}>
-                ${effectivePrice.toFixed(2)}
-              </span>
-              {selectedItem?.discounted_price != null && (
-                <>
-                  <span className="text-sm line-through font-medium" style={{ color: "#e05252" }}>
-                    ${selectedItem.price.toFixed(2)}
-                  </span>
-                  <span
-                    className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                    style={{ background: "#fef2f2", color: "#c53030", border: "1px solid #fecaca" }}
+            <div className="space-y-3">
+              {items.map((item) => {
+                const qty = quantities[item.id] ?? 0;
+                const price = item.discounted_price ?? item.price;
+                const isSelected = qty > 0;
+                return (
+                  <div
+                    key={item.id}
+                    className="rounded-2xl p-4 transition-all"
+                    style={{
+                      border: `1px solid ${isSelected ? "var(--color-sage)" : "var(--color-border)"}`,
+                      background: isSelected ? "#f0fdf4" : "var(--color-cream)",
+                    }}
                   >
-                    Save ${(selectedItem.price - selectedItem.discounted_price).toFixed(2)}
-                  </span>
-                </>
-              )}
-            </div>
-            {errors.item_id && <p className="mt-1 text-xs text-red-500">{errors.item_id}</p>}
-          </div>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>
+                          {item.name}
+                        </p>
+                        {item.description && (
+                          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-muted)" }}>
+                            {item.description}
+                          </p>
+                        )}
+                        <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+                            ${price.toFixed(2)}
+                          </span>
+                          {item.discounted_price != null && (
+                            <>
+                              <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
+                                ${item.price.toFixed(2)}
+                              </span>
+                              <span
+                                className="text-xs font-semibold px-1.5 py-0.5 rounded-full"
+                                style={{ background: "#fef2f2", color: "#c53030", border: "1px solid #fecaca" }}
+                              >
+                                Save ${(item.price - item.discounted_price).toFixed(2)}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
 
-          {/* Quantity */}
-          <div>
-            <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
-              How many {selectedItem?.name}?
-            </label>
-            <div className="flex items-center gap-0">
-              <button
-                type="button"
-                onClick={() => changeQuantity(-1)}
-                disabled={form.quantity <= 1}
-                className="flex items-center justify-center w-12 h-12 rounded-l-xl border border-r-0 text-lg font-semibold transition-all disabled:opacity-30 hover:bg-[var(--color-cream-dark)] active:scale-95"
-                style={{
-                  borderColor: "var(--color-border)",
-                  color: "var(--color-forest)",
-                  background: "var(--color-cream)",
-                }}
-                aria-label="Decrease quantity"
-              >
-                -
-              </button>
-              <div
-                className="flex-1 h-12 flex items-center justify-center text-sm font-semibold border-t border-b"
-                style={{
-                  borderColor: "var(--color-border)",
-                  color: "var(--color-text)",
-                  background: "white",
-                }}
-              >
-                {form.quantity} {form.quantity === 1 ? "portion" : "portions"}
-              </div>
-              <button
-                type="button"
-                onClick={() => changeQuantity(1)}
-                className="flex items-center justify-center w-12 h-12 rounded-r-xl border border-l-0 text-lg font-semibold transition-all hover:bg-[var(--color-cream-dark)] active:scale-95"
-                style={{
-                  borderColor: "var(--color-border)",
-                  color: "var(--color-forest)",
-                  background: "var(--color-cream)",
-                }}
-                aria-label="Increase quantity"
-              >
-                +
-              </button>
+                      {/* Quantity stepper */}
+                      <div className="flex items-center gap-0 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => changeQty(item.id, -1)}
+                          disabled={qty <= 0}
+                          className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all disabled:opacity-30"
+                          style={{
+                            borderColor: isSelected ? "var(--color-sage)" : "var(--color-border)",
+                            color: "var(--color-forest)",
+                            background: "white",
+                          }}
+                          aria-label={`Decrease ${item.name} quantity`}
+                        >
+                          -
+                        </button>
+                        <div
+                          className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b"
+                          style={{
+                            borderColor: isSelected ? "var(--color-sage)" : "var(--color-border)",
+                            color: "var(--color-text)",
+                            background: "white",
+                          }}
+                        >
+                          {qty}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => changeQty(item.id, 1)}
+                          className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
+                          style={{
+                            borderColor: isSelected ? "var(--color-sage)" : "var(--color-border)",
+                            color: "var(--color-forest)",
+                            background: "white",
+                          }}
+                          aria-label={`Increase ${item.name} quantity`}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+            {errors.items && <p className="mt-1.5 text-xs text-red-500">{errors.items}</p>}
           </div>
 
           {/* Pickup Location */}
@@ -352,22 +362,44 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
             className="rounded-2xl p-5 mt-2"
             style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
           >
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-widest font-semibold mb-0.5" style={{ color: "var(--color-sage)" }}>
-                  Order Total
-                </p>
-                <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                  {form.quantity} x {selectedItem?.name} @ ${effectivePrice.toFixed(2)} each
-                </p>
-              </div>
-              <p
-                className="text-3xl font-bold"
-                style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
-              >
-                ${total}
+            <p className="text-xs uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--color-sage)" }}>
+              Order Summary
+            </p>
+            {selectedLines.length === 0 ? (
+              <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+                No items selected yet.
               </p>
-            </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedLines.map(({ item, qty }) => {
+                  const price = item.discounted_price ?? item.price;
+                  return (
+                    <div key={item.id} className="flex justify-between text-sm">
+                      <span style={{ color: "var(--color-muted)" }}>
+                        {item.name} x {qty}
+                      </span>
+                      <span className="font-semibold" style={{ color: "var(--color-text)" }}>
+                        ${(price * qty).toFixed(2)}
+                      </span>
+                    </div>
+                  );
+                })}
+                <div
+                  className="flex justify-between items-center pt-2 mt-1 border-t"
+                  style={{ borderColor: "var(--color-border)" }}
+                >
+                  <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+                    Total
+                  </p>
+                  <p
+                    className="text-3xl font-bold"
+                    style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
+                  >
+                    ${grandTotal.toFixed(2)}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <button
@@ -384,15 +416,7 @@ export default function OrderForm({ items, locations, currency, onSuccess }: Ord
           >
             {submitting ? (
               <span className="flex items-center justify-center gap-2">
-                <svg
-                  className="animate-spin"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
+                <svg className="animate-spin" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="10" opacity="0.3" />
                   <path d="M12 2a10 10 0 0 1 10 10" />
                 </svg>

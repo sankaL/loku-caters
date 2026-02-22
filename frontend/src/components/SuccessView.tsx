@@ -1,25 +1,14 @@
-interface OrderResult {
-  order_id: string;
-  order: {
-    name: string;
-    item_id: string;
-    item_name: string;
-    quantity: number;
-    pickup_location: string;
-    pickup_time_slot: string;
-    total_price: number;
-    price_per_item: number;
-    currency: string;
-    event_date: string;
-  };
-}
+import type { OrderResult } from "@/components/OrderForm";
 
 interface SuccessViewProps {
-  result: OrderResult;
+  results: OrderResult[];
 }
 
-export default function SuccessView({ result }: SuccessViewProps) {
-  const { order, order_id } = result;
+export default function SuccessView({ results }: SuccessViewProps) {
+  const first = results[0];
+  const { order } = first;
+
+  const grandTotal = results.reduce((sum, r) => sum + r.order.total_price, 0);
 
   return (
     <section className="w-full max-w-2xl mx-auto px-6 pb-20">
@@ -53,7 +42,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
           Order Placed!
         </h2>
         <p className="text-base mb-8" style={{ color: "var(--color-muted)" }}>
-          Thank you, <strong style={{ color: "var(--color-text)" }}>{order.name}</strong>. Your {order.item_name} pre-order has been submitted.
+          Thank you, <strong style={{ color: "var(--color-text)" }}>{order.name}</strong>. Your pre-order has been submitted.
         </p>
 
         <div
@@ -64,13 +53,27 @@ export default function SuccessView({ result }: SuccessViewProps) {
             Your Order
           </p>
 
+          {/* Line items */}
+          {results.map((r) => (
+            <div
+              key={r.order_id}
+              className="flex justify-between items-center text-sm border-b pb-3"
+              style={{ borderColor: "var(--color-border)" }}
+            >
+              <span style={{ color: "var(--color-muted)" }}>
+                {r.order.item_name} x {r.order.quantity}
+              </span>
+              <span className="font-semibold" style={{ color: "var(--color-text)" }}>
+                {r.order.currency} ${r.order.total_price.toFixed(2)}
+              </span>
+            </div>
+          ))}
+
+          {/* Shared pickup details */}
           {[
-            { label: "Item", value: order.item_name },
-            { label: "Quantity", value: `${order.quantity} ${order.quantity === 1 ? "portion" : "portions"}` },
             { label: "Pickup Date", value: order.event_date },
             { label: "Pickup Location", value: order.pickup_location },
             { label: "Time Slot", value: order.pickup_time_slot },
-            { label: "Order Total", value: `${order.currency} $${order.total_price.toFixed(2)}` },
           ].map(({ label, value }) => (
             <div
               key={label}
@@ -81,6 +84,14 @@ export default function SuccessView({ result }: SuccessViewProps) {
               <span className="font-semibold" style={{ color: "var(--color-text)" }}>{value}</span>
             </div>
           ))}
+
+          {/* Grand total */}
+          <div className="flex justify-between items-center text-sm pt-1">
+            <span className="font-semibold" style={{ color: "var(--color-text)" }}>Order Total</span>
+            <span className="font-bold text-lg" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              {order.currency} ${grandTotal.toFixed(2)}
+            </span>
+          </div>
         </div>
 
         <div
@@ -108,7 +119,9 @@ export default function SuccessView({ result }: SuccessViewProps) {
           We look forward to serving you!
         </p>
         <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-          Order reference: {order_id.slice(0, 8).toUpperCase()}
+          {results.length === 1
+            ? `Order reference: ${first.order_id.slice(0, 8).toUpperCase()}`
+            : `Order references: ${results.map((r) => r.order_id.slice(0, 8).toUpperCase()).join(", ")}`}
         </p>
       </div>
     </section>

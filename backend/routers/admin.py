@@ -8,13 +8,15 @@ from functools import lru_cache
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from jose import JWTError, jwt
 from pydantic import BaseModel
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from config import settings
 from constants import OrderStatus
 from database import get_db
-from event_config import get_config_from_db
-from models import EventConfig, Order
+from event_config import CURRENCY, get_event_date_from_db
+from models import Event, Item, Location, Order
+from schemas import EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate
 from services.email import send_confirmation, send_reminder
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -100,15 +102,8 @@ def dev_login():
 
 
 # ---------------------------------------------------------------------------
-# Schemas
+# Inline schemas
 # ---------------------------------------------------------------------------
-
-class EventConfigUpdate(BaseModel):
-    event_date: str
-    currency: str
-    items: list[dict]
-    locations: list[dict]
-
 
 class StatusUpdate(BaseModel):
     status: str
@@ -129,37 +124,271 @@ class BulkRemindRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Config endpoints
+# Events CRUD
 # ---------------------------------------------------------------------------
 
-@router.get("/config")
-def admin_get_config(
+def _event_dict(event: Event) -> dict:
+    return {
+        "id": event.id,
+        "name": event.name,
+        "event_date": event.event_date,
+        "hero_header": event.hero_header,
+        "hero_subheader": event.hero_subheader,
+        "promo_details": event.promo_details,
+        "is_active": event.is_active,
+        "item_ids": event.item_ids or [],
+        "location_ids": event.location_ids or [],
+        "updated_at": event.updated_at.isoformat() if event.updated_at else None,
+    }
+
+
+@router.get("/events")
+def admin_list_events(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    return get_config_from_db(db)
+    events = db.query(Event).order_by(Event.id.desc()).all()
+    return [_event_dict(e) for e in events]
 
 
-@router.put("/config")
-def admin_update_config(
-    body: EventConfigUpdate,
+@router.post("/events", status_code=201)
+def admin_create_event(
+    body: EventCreate,
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    row = db.query(EventConfig).filter(EventConfig.id == 1).first()
-    if row is None:
-        row = EventConfig(id=1)
-        db.add(row)
-
-    row.event_date = body.event_date
-    row.currency = body.currency
-    row.items = body.items
-    row.locations = body.locations
-    row.updated_at = datetime.now(timezone.utc)
-
+    event = Event(
+        name=body.name,
+        event_date=body.event_date,
+        hero_header=body.hero_header,
+        hero_subheader=body.hero_subheader,
+        promo_details=body.promo_details,
+        is_active=False,
+        item_ids=body.item_ids,
+        location_ids=body.location_ids,
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(event)
     db.commit()
-    db.refresh(row)
-    return {"success": True, "updated_at": row.updated_at}
+    db.refresh(event)
+    return _event_dict(event)
+
+
+@router.put("/events/{event_id}")
+def admin_update_event(
+    event_id: int,
+    body: EventUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event.name = body.name
+    event.event_date = body.event_date
+    event.hero_header = body.hero_header
+    event.hero_subheader = body.hero_subheader
+    event.promo_details = body.promo_details
+    event.item_ids = body.item_ids
+    event.location_ids = body.location_ids
+    event.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(event)
+    return _event_dict(event)
+
+
+@router.post("/events/{event_id}/activate")
+def admin_activate_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    db.query(Event).update({"is_active": False})
+    event.is_active = True
+    event.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(event)
+    return _event_dict(event)
+
+
+@router.delete("/events/{event_id}")
+def admin_delete_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if event.is_active:
+        raise HTTPException(status_code=400, detail="Cannot delete the active event")
+    db.delete(event)
+    db.commit()
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Items CRUD
+# ---------------------------------------------------------------------------
+
+def _item_dict(item: Item) -> dict:
+    return {
+        "id": item.id,
+        "name": item.name,
+        "description": item.description,
+        "price": float(item.price),
+        "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
+        "sort_order": item.sort_order,
+    }
+
+
+@router.get("/items")
+def admin_list_items(
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    items = db.query(Item).order_by(Item.sort_order).all()
+    return [_item_dict(i) for i in items]
+
+
+@router.post("/items", status_code=201)
+def admin_create_item(
+    body: ItemCreate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    existing = db.query(Item).filter(Item.id == body.id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Item with this ID already exists")
+    max_sort = db.query(func.max(Item.sort_order)).scalar()
+    next_sort = (max_sort + 1) if max_sort is not None else 0
+    item = Item(
+        id=body.id,
+        name=body.name,
+        description=body.description,
+        price=body.price,
+        discounted_price=body.discounted_price,
+        sort_order=next_sort,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return _item_dict(item)
+
+
+@router.put("/items/{item_id}")
+def admin_update_item(
+    item_id: str,
+    body: ItemUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    item.name = body.name
+    item.description = body.description
+    item.price = body.price
+    item.discounted_price = body.discounted_price
+    db.commit()
+    db.refresh(item)
+    return _item_dict(item)
+
+
+@router.delete("/items/{item_id}")
+def admin_delete_item(
+    item_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Item not found")
+    db.delete(item)
+    db.commit()
+    return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Locations CRUD
+# ---------------------------------------------------------------------------
+
+def _location_dict(loc: Location) -> dict:
+    return {
+        "id": loc.id,
+        "name": loc.name,
+        "address": loc.address,
+        "time_slots": loc.time_slots,
+        "sort_order": loc.sort_order,
+    }
+
+
+@router.get("/locations")
+def admin_list_locations(
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    locations = db.query(Location).order_by(Location.sort_order).all()
+    return [_location_dict(l) for l in locations]
+
+
+@router.post("/locations", status_code=201)
+def admin_create_location(
+    body: LocationCreate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    existing = db.query(Location).filter(Location.id == body.id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Location with this ID already exists")
+    max_sort = db.query(func.max(Location.sort_order)).scalar()
+    next_sort = (max_sort + 1) if max_sort is not None else 0
+    loc = Location(
+        id=body.id,
+        name=body.name,
+        address=body.address,
+        time_slots=body.time_slots,
+        sort_order=next_sort,
+    )
+    db.add(loc)
+    db.commit()
+    db.refresh(loc)
+    return _location_dict(loc)
+
+
+@router.put("/locations/{location_id}")
+def admin_update_location(
+    location_id: str,
+    body: LocationUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    loc = db.query(Location).filter(Location.id == location_id).first()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    loc.name = body.name
+    loc.address = body.address
+    loc.time_slots = body.time_slots
+    db.commit()
+    db.refresh(loc)
+    return _location_dict(loc)
+
+
+@router.delete("/locations/{location_id}")
+def admin_delete_location(
+    location_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    loc = db.query(Location).filter(Location.id == location_id).first()
+    if not loc:
+        raise HTTPException(status_code=404, detail="Location not found")
+    db.delete(loc)
+    db.commit()
+    return {"success": True}
 
 
 # ---------------------------------------------------------------------------
@@ -172,8 +401,7 @@ def admin_create_order(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    config = get_config_from_db(db)
-    item = next((i for i in config.get("items", []) if i["id"] == body.item_id), None)
+    item = db.query(Item).filter(Item.id == body.item_id).first()
     if not item:
         raise HTTPException(status_code=400, detail="Invalid item_id")
     if body.quantity < 1:
@@ -181,20 +409,15 @@ def admin_create_order(
 
     pickup_location = body.pickup_location.strip()
     pickup_time_slot = body.pickup_time_slot.strip()
-    location = next(
-        (
-            loc
-            for loc in config.get("locations", [])
-            if loc.get("name") == pickup_location or loc.get("id") == pickup_location
-        ),
-        None,
-    )
+    location = db.query(Location).filter(
+        or_(Location.name == pickup_location, Location.id == pickup_location)
+    ).first()
     if not location:
         raise HTTPException(status_code=400, detail="Invalid pickup_location")
-    if pickup_time_slot not in location.get("timeSlots", []):
+    if pickup_time_slot not in (location.time_slots or []):
         raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
 
-    price = item.get("discounted_price") or item["price"]
+    price = float(item.discounted_price) if item.discounted_price is not None else float(item.price)
     total_price = price * body.quantity
 
     order = Order(
@@ -202,8 +425,8 @@ def admin_create_order(
         name=body.name.strip(),
         email=body.email.strip(),
         phone_number=body.phone_number.strip(),
-        item_id=body.item_id,
-        item_name=item["name"],
+        item_id=item.id,
+        item_name=item.name,
         quantity=body.quantity,
         pickup_location=pickup_location,
         pickup_time_slot=pickup_time_slot,
@@ -265,7 +488,8 @@ def admin_bulk_remind(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    config = get_config_from_db(db)
+    event_date = get_event_date_from_db(db)
+
     reminded_count = 0
     failed_emails = 0
 
@@ -276,11 +500,10 @@ def admin_bulk_remind(
         if order.status != OrderStatus.CONFIRMED:
             continue
 
-        address = ""
-        for loc in config.get("locations", []):
-            if loc.get("name") == order.pickup_location or loc.get("id") == order.pickup_location:
-                address = loc.get("address", "")
-                break
+        location = db.query(Location).filter(
+            or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
+        ).first()
+        address = location.address if location else ""
 
         effective_price = float(order.total_price) / order.quantity
 
@@ -293,9 +516,9 @@ def admin_bulk_remind(
             "email": order.email,
             "total_price": float(order.total_price),
             "price_per_item": effective_price,
-            "currency": config.get("currency", "CAD"),
+            "currency": CURRENCY,
             "address": address,
-            "event_date": config["event"]["date"],
+            "event_date": event_date,
         }
 
         try:
@@ -349,12 +572,12 @@ def admin_confirm_order(
     if order.status == OrderStatus.CONFIRMED:
         raise HTTPException(status_code=409, detail="Order already confirmed")
 
-    config = get_config_from_db(db)
-    address = ""
-    for loc in config.get("locations", []):
-        if loc.get("name") == order.pickup_location or loc.get("id") == order.pickup_location:
-            address = loc.get("address", "")
-            break
+    event_date = get_event_date_from_db(db)
+
+    location = db.query(Location).filter(
+        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
+    ).first()
+    address = location.address if location else ""
 
     effective_price = float(order.total_price) / order.quantity
 
@@ -369,9 +592,9 @@ def admin_confirm_order(
         "email": order.email,
         "total_price": float(order.total_price),
         "price_per_item": effective_price,
-        "currency": config.get("currency", "CAD"),
+        "currency": CURRENCY,
         "address": address,
-        "event_date": config["event"]["date"],
+        "event_date": event_date,
     }
 
     email_sent = True

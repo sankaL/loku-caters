@@ -21,6 +21,9 @@ export interface Location {
 export interface EventConfig {
   event: { date: string };
   currency: string;
+  hero_header: string;
+  hero_subheader: string;
+  promo_details: string | null;
   items: Item[];
   locations: Location[];
 }
