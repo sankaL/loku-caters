@@ -308,7 +308,7 @@ export default function DashboardPage() {
             value={`${kpis.confirmedRate}%`}
             delta={kpis.confirmedRateDelta}
             trendText={trendLabel(kpis.confirmedRateDelta, "Confirmation improving", "Confirmation declining", "Confirmation rate")}
-            subtitle="Confirmed, paid, or picked up"
+            subtitle="Confirmed, reminded, paid, or picked up"
           />
           <KpiTile
             label="Avg Order Value"

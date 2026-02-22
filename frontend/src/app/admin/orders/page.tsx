@@ -28,6 +28,7 @@ const PAGE_SIZE = 15;
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fef3c7", color: "#92400e", label: "Pending" },
   confirmed: { bg: "#d1fae5", color: "#065f46", label: "Confirmed" },
+  reminded:  { bg: "#fdf0e8", color: "#7a3f1e", label: "Reminded" },
   paid:      { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
@@ -170,6 +171,11 @@ export default function AdminOrdersPage() {
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
   const [bulkImportRows, setBulkImportRows] = useState<BulkRow[]>([]);
   const [bulkImporting, setBulkImporting] = useState(false);
+
+  // Remind modal
+  const [showRemindModal, setShowRemindModal] = useState(false);
+  const [remindSelections, setRemindSelections] = useState<Set<string>>(new Set());
+  const [remindLoading, setRemindLoading] = useState(false);
 
   // Reset selection when filter/orders change
   useEffect(() => { setSelectedIds(new Set()); }, [filter, locationFilter, orders]);
@@ -388,6 +394,43 @@ export default function AdminOrdersPage() {
       showToast("Bulk confirm failed", "error");
     } finally {
       setBulkConfirming(false);
+    }
+  }
+
+  async function handleSendReminders() {
+    const ids = Array.from(remindSelections);
+    if (ids.length === 0) return;
+    setRemindLoading(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/orders/remind`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.detail || "Failed to send reminders");
+      }
+      const data = await res.json();
+      if (data.failed_emails > 0) {
+        showToast(
+          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, failed ${data.failed_emails}`,
+          "error"
+        );
+      } else {
+        showToast(
+          `Reminder${data.reminded !== 1 ? "s" : ""} sent to ${data.reminded} customer${data.reminded !== 1 ? "s" : ""}`,
+          "success"
+        );
+      }
+      setShowRemindModal(false);
+      await fetchOrders();
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to send reminders", "error");
+    } finally {
+      setRemindLoading(false);
     }
   }
 
@@ -680,6 +723,21 @@ export default function AdminOrdersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => {
+              const confirmed = orders.filter((o) => o.status === "confirmed");
+              setRemindSelections(new Set(confirmed.map((o) => o.id)));
+              setShowRemindModal(true);
+            }}
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
+            style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+            </svg>
+            Remind
+          </button>
           <button
             onClick={() => { setShowAddOrderModal(true); setAddOrderForm(EMPTY_ADD_FORM); }}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
@@ -1455,6 +1513,84 @@ export default function AdminOrdersPage() {
                 style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
               >
                 {bulkImporting ? "Importing..." : `Import ${validBulkRows.length} Order${validBulkRows.length !== 1 ? "s" : ""}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Remind Modal */}
+      {showRemindModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowRemindModal(false); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: "540px", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+          >
+            <h2 className="text-xl font-bold mb-1" style={{ color: "var(--color-bark)", fontFamily: "var(--font-serif)" }}>
+              Send Pickup Reminders
+            </h2>
+            <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
+              Reminder emails will be sent to all selected customers and their orders will be marked as Reminded. Uncheck anyone you want to exclude.
+            </p>
+
+            {orders.filter((o) => o.status === "confirmed").length === 0 ? (
+              <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
+                No confirmed orders to remind.
+              </p>
+            ) : (
+              <div style={{ overflowY: "auto", flex: 1, marginBottom: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" }}>
+                {orders.filter((o) => o.status === "confirmed").map((order) => (
+                  <label
+                    key={order.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "0.75rem",
+                      padding: "0.875rem 1rem",
+                      borderBottom: "1px solid var(--color-border)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={remindSelections.has(order.id)}
+                      onChange={(e) => {
+                        setRemindSelections((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(order.id);
+                          else next.delete(order.id);
+                          return next;
+                        });
+                      }}
+                      style={{ marginTop: "2px", accentColor: "var(--color-bark)", width: "15px", height: "15px", flexShrink: 0 }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{order.name}</p>
+                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email}</p>
+                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{order.pickup_location} - {order.pickup_time_slot}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            )}
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
+              <button
+                onClick={() => setShowRemindModal(false)}
+                className="px-4 py-2 rounded-xl text-sm font-medium"
+                style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSendReminders}
+                disabled={remindLoading || remindSelections.size === 0}
+                className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+              >
+                {remindLoading ? "Sending..." : `Send Reminder${remindSelections.size !== 1 ? "s" : ""} (${remindSelections.size})`}
               </button>
             </div>
           </div>
