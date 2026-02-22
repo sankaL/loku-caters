@@ -33,7 +33,7 @@ export default function AdminLoginPage() {
         const maxAge = data.session.expires_in ?? 3600;
         document.cookie = `sb-access-token=${encodeURIComponent(data.session.access_token)}; path=/; max-age=${maxAge}; samesite=lax`;
       }
-      router.push("/admin/orders");
+      router.push("/admin/dashboard");
       router.refresh();
     } finally {
       setLoading(false);
@@ -49,7 +49,7 @@ export default function AdminLoginPage() {
       const { access_token } = await res.json();
       // Store in cookie so middleware can read it
       document.cookie = `dev-admin-token=${encodeURIComponent(access_token)}; path=/; max-age=${7 * 24 * 3600}`;
-      router.push("/admin/orders");
+      router.push("/admin/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Dev login failed");
     } finally {

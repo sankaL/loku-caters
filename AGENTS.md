@@ -57,3 +57,6 @@ cd frontend && npm run dev
 
 ## Local Testing
 Use the makefile scripts for # Local dev (local Postgres container, DEV_MODE=true, real Resend) when testing
+
+## MUST FOLLOW after code change
+- if its a db change update database-schema.md
