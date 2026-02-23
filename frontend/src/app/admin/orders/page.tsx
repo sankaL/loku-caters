@@ -21,7 +21,7 @@ interface Order {
   created_at: string;
 }
 
-type SortCol = "status" | "total" | "date";
+type SortCol = "status" | "total" | "date" | "timeslot";
 
 const PAGE_SIZE = 15;
 
@@ -137,6 +137,15 @@ function isExpectedCsvHeaderRow(columns: string[]): boolean {
   return expected.every((allowed, idx) => allowed.has(normalized[idx] ?? ""));
 }
 
+function getTimeSlotStartMinutes(slot: string): number {
+  const match = slot.trim().match(/^(\d{1,2}):(\d{2})\s*([AP]M)\b/i);
+  if (!match) return Number.POSITIVE_INFINITY;
+  let hour = parseInt(match[1], 10) % 12;
+  const minute = parseInt(match[2], 10);
+  if (match[3].toUpperCase() === "PM") hour += 12;
+  return hour * 60 + minute;
+}
+
 export default function AdminOrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -229,6 +238,23 @@ export default function AdminOrdersPage() {
     );
   }, [orders, locationFilter, search]);
 
+  const timeSlotRank = useMemo(() => {
+    const uniqueSlots = new Set<string>();
+    eventConfig?.locations.forEach((loc) => {
+      loc.timeSlots.forEach((slot) => uniqueSlots.add(slot));
+    });
+    const sortedSlots = Array.from(uniqueSlots).sort((a, b) => {
+      const diff = getTimeSlotStartMinutes(a) - getTimeSlotStartMinutes(b);
+      if (diff !== 0) return diff;
+      return a.localeCompare(b);
+    });
+    const rank: Record<string, number> = {};
+    sortedSlots.forEach((slot, idx) => {
+      rank[slot] = idx;
+    });
+    return rank;
+  }, [eventConfig]);
+
   const sorted = useMemo(() => {
     if (!sort.col) return filtered;
     return [...filtered].sort((a, b) => {
@@ -240,9 +266,18 @@ export default function AdminOrdersPage() {
       if (sort.col === "status") {
         return sort.dir === "asc" ? a.status.localeCompare(b.status) : b.status.localeCompare(a.status);
       }
+      if (sort.col === "timeslot") {
+        const rankA = timeSlotRank[a.pickup_time_slot] ?? Number.MAX_SAFE_INTEGER;
+        const rankB = timeSlotRank[b.pickup_time_slot] ?? Number.MAX_SAFE_INTEGER;
+        const diff = rankA - rankB;
+        if (diff !== 0) return sort.dir === "asc" ? diff : -diff;
+        return sort.dir === "asc"
+          ? a.pickup_time_slot.localeCompare(b.pickup_time_slot)
+          : b.pickup_time_slot.localeCompare(a.pickup_time_slot);
+      }
       return 0;
     });
-  }, [filtered, sort]);
+  }, [filtered, sort, timeSlotRank]);
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -954,7 +989,14 @@ export default function AdminOrdersPage() {
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Item</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Location</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Time Slot</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                    <button
+                      onClick={() => toggleSort("timeslot")}
+                      className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
+                    >
+                      Time Slot <SortIcon active={sort.col === "timeslot"} dir={sort.dir} />
+                    </button>
+                  </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
                     <button
                       onClick={() => toggleSort("total")}
