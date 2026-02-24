@@ -15,7 +15,7 @@ from config import settings
 from constants import OrderStatus
 from database import get_db
 from event_config import CURRENCY, get_event_date_from_db
-from models import Event, Item, Location, Order
+from models import Event, Feedback, Item, Location, Order
 from schemas import EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate
 from services.email import send_confirmation, send_reminder
 
@@ -644,3 +644,80 @@ def delete_order(
     db.delete(order)
     db.commit()
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Feedback endpoints
+# ---------------------------------------------------------------------------
+
+FEEDBACK_REASON_LABELS = {
+    "price_too_high": "Price too high",
+    "location_not_convenient": "Pickup location not convenient",
+    "dietary_needs": "Food does not meet dietary needs",
+    "not_available": "Not available on the event date",
+    "different_menu": "Prefer a different menu item",
+    "prefer_delivery": "Prefer delivery over pickup",
+    "not_interested": "Not interested at this time",
+    "other": "Other",
+}
+
+
+@router.get("/feedback")
+def admin_list_feedback(
+    reason: Optional[str] = Query(None),
+    feedback_type: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    query = db.query(Feedback).order_by(Feedback.created_at.desc())
+    if reason:
+        query = query.filter(Feedback.reason == reason)
+    if feedback_type:
+        query = query.filter(Feedback.feedback_type == feedback_type)
+
+    rows = query.all()
+
+    items = [
+        {
+            "id": row.id,
+            "feedback_type": row.feedback_type,
+            "order_id": row.order_id,
+            "name": row.name,
+            "contact": row.contact,
+            "reason": row.reason,
+            "reason_label": FEEDBACK_REASON_LABELS.get(row.reason, row.reason) if row.reason else None,
+            "other_details": row.other_details,
+            "message": row.message,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]
+
+    # Metrics across all feedback (unfiltered)
+    all_rows = db.query(Feedback).all()
+    total = len(all_rows)
+    customer_count = sum(1 for r in all_rows if r.feedback_type == "customer")
+    non_customer_count = total - customer_count
+
+    reason_counts: dict[str, int] = {}
+    for row in all_rows:
+        if row.reason:
+            reason_counts[row.reason] = reason_counts.get(row.reason, 0) + 1
+
+    metrics = [
+        {
+            "reason": r,
+            "label": FEEDBACK_REASON_LABELS.get(r, r),
+            "count": reason_counts.get(r, 0),
+            "pct": round(reason_counts.get(r, 0) / non_customer_count * 100) if non_customer_count else 0,
+        }
+        for r in FEEDBACK_REASON_LABELS
+    ]
+
+    return {
+        "total": total,
+        "customer_count": customer_count,
+        "non_customer_count": non_customer_count,
+        "metrics": metrics,
+        "items": items,
+    }

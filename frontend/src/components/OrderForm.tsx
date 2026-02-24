@@ -9,6 +9,8 @@ export interface OrderResult {
   order_id: string;
   order: {
     name: string;
+    email: string;
+    phone_number: string;
     item_id: string;
     item_name: string;
     quantity: number;

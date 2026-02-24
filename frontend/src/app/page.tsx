@@ -8,11 +8,13 @@ import SuccessView from "@/components/SuccessView";
 import { fetchEventConfig, type EventConfig } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 import type { OrderResult } from "@/components/OrderForm";
+import FeedbackModal from "@/components/FeedbackModal";
 
 export default function Home() {
   const [orderResults, setOrderResults] = useState<OrderResult[] | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [configError, setConfigError] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     fetchEventConfig()
@@ -41,12 +43,18 @@ export default function Home() {
       style={{ background: "var(--color-cream)" }}
     >
       <Header />
-      <HeroSection
+      {!orderResults && (
+        <HeroSection
           eventDate={eventConfig?.event.date ?? ""}
           heroHeader={eventConfig?.hero_header ?? ""}
           heroSubheader={eventConfig?.hero_subheader ?? ""}
           promoDetails={eventConfig?.promo_details}
+          onFeedbackClick={() => {
+            captureEvent("feedback_modal_opened");
+            setFeedbackOpen(true);
+          }}
         />
+      )}
 
       {/* Section divider */}
       <div className="max-w-2xl mx-auto px-6 mb-8">
@@ -88,6 +96,8 @@ export default function Home() {
           onSuccess={handleOrderSuccess}
         />
       )}
+
+      <FeedbackModal isOpen={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
 
       {/* Footer */}
       <footer
