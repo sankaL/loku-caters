@@ -1,7 +1,7 @@
 """add contact column to feedback table
 
-Revision ID: 0004_add_feedback_contact
-Revises: 0003_create_feedback
+Revision ID: 0006_add_feedback_contact
+Revises: 0005_create_feedback
 Create Date: 2026-02-22 00:00:00.000000
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0004_add_feedback_contact"
-down_revision = "0003_create_feedback"
+revision = "0006_add_feedback_contact"
+down_revision = "0005_create_feedback"
 branch_labels = None
 depends_on = None
 
