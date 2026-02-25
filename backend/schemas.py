@@ -35,7 +35,6 @@ class OrderResponse(BaseModel):
 
 
 class ItemCreate(BaseModel):
-    id: str
     name: str
     description: str = ""
     price: float
@@ -59,7 +58,6 @@ class ItemResponse(BaseModel):
 
 
 class LocationCreate(BaseModel):
-    id: str
     name: str
     address: str = ""
     time_slots: list[str] = Field(default_factory=list)

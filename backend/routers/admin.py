@@ -260,13 +260,9 @@ def admin_create_item(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    existing = db.query(Item).filter(Item.id == body.id).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="Item with this ID already exists")
     max_sort = db.query(func.max(Item.sort_order)).scalar()
     next_sort = (max_sort + 1) if max_sort is not None else 0
     item = Item(
-        id=body.id,
         name=body.name,
         description=body.description,
         price=body.price,
@@ -341,13 +337,9 @@ def admin_create_location(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    existing = db.query(Location).filter(Location.id == body.id).first()
-    if existing:
-        raise HTTPException(status_code=409, detail="Location with this ID already exists")
     max_sort = db.query(func.max(Location.sort_order)).scalar()
     next_sort = (max_sort + 1) if max_sort is not None else 0
     loc = Location(
-        id=body.id,
         name=body.name,
         address=body.address,
         time_slots=body.time_slots,

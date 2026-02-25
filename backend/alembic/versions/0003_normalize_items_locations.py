@@ -43,7 +43,7 @@ def upgrade() -> None:
     op.execute(sa.text("""
         INSERT INTO items (id, name, description, price, discounted_price, sort_order)
         SELECT
-            elem.value->>'id',
+            gen_random_uuid()::text,
             elem.value->>'name',
             COALESCE(elem.value->>'description', ''),
             (elem.value->>'price')::NUMERIC,
@@ -61,7 +61,7 @@ def upgrade() -> None:
     op.execute(sa.text("""
         INSERT INTO locations (id, name, address, time_slots, sort_order)
         SELECT
-            elem.value->>'id',
+            gen_random_uuid()::text,
             elem.value->>'name',
             COALESCE(elem.value->>'address', ''),
             COALESCE(elem.value->'timeSlots', '[]'::jsonb),

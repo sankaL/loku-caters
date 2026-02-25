@@ -13,7 +13,6 @@ interface Location {
 }
 
 const EMPTY_FORM = {
-  id: "",
   name: "",
   address: "",
   time_slots: [] as string[],
@@ -61,7 +60,7 @@ export default function AdminLocationsPage() {
 
   function openEdit(loc: Location) {
     setEditingId(loc.id);
-    setForm({ id: loc.id, name: loc.name, address: loc.address, time_slots: [...loc.time_slots] });
+    setForm({ name: loc.name, address: loc.address, time_slots: [...loc.time_slots] });
     setNewSlot("");
     setShowModal(true);
   }
@@ -78,7 +77,7 @@ export default function AdminLocationsPage() {
   }
 
   async function handleSave() {
-    if (!form.name.trim() || (!editingId && !form.id.trim())) return;
+    if (!form.name.trim()) return;
     setSaving(true);
     try {
       const token = await getAdminToken();
@@ -98,7 +97,6 @@ export default function AdminLocationsPage() {
           body: JSON.stringify(body),
         });
       } else {
-        body.id = form.id.trim();
         res = await fetch(`${API_URL}/api/admin/locations`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -263,20 +261,6 @@ export default function AdminLocationsPage() {
             <h2 className="text-lg font-semibold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
               {editingId ? "Edit Location" : "Add Location"}
             </h2>
-
-            {!editingId && (
-              <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>Location ID (slug)</label>
-                <input
-                  type="text"
-                  value={form.id}
-                  onChange={(e) => setForm((p) => ({ ...p, id: e.target.value }))}
-                  placeholder="e.g. woodbridge"
-                  className={inputClass}
-                  style={{ color: "var(--color-text)" }}
-                />
-              </div>
-            )}
 
             <div>
               <label className={labelClass} style={{ color: "var(--color-text)" }}>Name</label>

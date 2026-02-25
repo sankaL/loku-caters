@@ -41,7 +41,7 @@ Relational table for menu items. Managed via `/admin/items` in the admin panel.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | `TEXT` | Primary key | Slug, e.g. `"lamprais-01"` |
+| `id` | `TEXT` (UUID) | Primary key | Server-generated UUID string (Python `uuid4`) |
 | `name` | `TEXT` | NOT NULL | Display name |
 | `description` | `TEXT` | NOT NULL, default `''` | Shown below item selector on order form |
 | `price` | `NUMERIC(10,2)` | NOT NULL | Regular price |
@@ -56,7 +56,7 @@ Relational table for pickup locations. Managed via `/admin/locations` in the adm
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | `TEXT` | Primary key | Slug, e.g. `"welland"` |
+| `id` | `TEXT` (UUID) | Primary key | Server-generated UUID string (Python `uuid4`) |
 | `name` | `TEXT` | NOT NULL | Display name shown to customers |
 | `address` | `TEXT` | NOT NULL, default `''` | Included in confirmation and reminder emails |
 | `time_slots` | `JSONB` | NOT NULL, default `'[]'` | Array of time slot strings |
@@ -131,6 +131,7 @@ alembic upgrade head
 | `0005_create_feedback` | `feedback` table |
 | `0006_add_feedback_contact` | adds `contact` column to `feedback` |
 | `0007_feedback_type_and_message` | adds `feedback_type`, `order_id`, `message`; makes `reason` nullable |
+| `0008_uuid_item_location_ids` | replaces slug item/location IDs with server-generated UUIDs; cascades to `events` and `orders` |
 
 ---
 

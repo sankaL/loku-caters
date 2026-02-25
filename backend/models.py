@@ -15,7 +15,7 @@ from database import Base
 class Item(Base):
     __tablename__ = "items"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
@@ -26,7 +26,7 @@ class Item(Base):
 class Location(Base):
     __tablename__ = "locations"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True)
+    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str] = mapped_column(Text, nullable=False)
     address: Mapped[str] = mapped_column(Text, nullable=False, default="")
     time_slots: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)

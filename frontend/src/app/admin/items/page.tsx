@@ -14,7 +14,6 @@ interface Item {
 }
 
 const EMPTY_FORM = {
-  id: "",
   name: "",
   description: "",
   price: "",
@@ -62,7 +61,6 @@ export default function AdminItemsPage() {
   function openEdit(item: Item) {
     setEditingId(item.id);
     setForm({
-      id: item.id,
       name: item.name,
       description: item.description,
       price: String(item.price),
@@ -72,7 +70,7 @@ export default function AdminItemsPage() {
   }
 
   async function handleSave() {
-    if (!form.name.trim() || !form.id.trim() || !form.price) return;
+    if (!form.name.trim() || !form.price) return;
     setSaving(true);
     try {
       const token = await getAdminToken();
@@ -93,7 +91,6 @@ export default function AdminItemsPage() {
           body: JSON.stringify(body),
         });
       } else {
-        body.id = form.id.trim();
         res = await fetch(`${API_URL}/api/admin/items`, {
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
@@ -266,20 +263,6 @@ export default function AdminItemsPage() {
             <h2 className="text-lg font-semibold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
               {editingId ? "Edit Item" : "Add Item"}
             </h2>
-
-            {!editingId && (
-              <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>Item ID (slug)</label>
-                <input
-                  type="text"
-                  value={form.id}
-                  onChange={(e) => setForm((p) => ({ ...p, id: e.target.value }))}
-                  placeholder="e.g. lamprais-01"
-                  className={inputClass}
-                  style={{ color: "var(--color-text)" }}
-                />
-              </div>
-            )}
 
             <div>
               <label className={labelClass} style={{ color: "var(--color-text)" }}>Name</label>
