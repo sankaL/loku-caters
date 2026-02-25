@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import uuid
 from urllib.request import urlopen
-from typing import Optional
+from typing import Optional, Union
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -14,7 +14,8 @@ from sqlalchemy.orm import Session
 from config import settings
 from constants import OrderStatus
 from database import get_db
-from event_config import CURRENCY, get_event_date_from_db
+from event_config import CURRENCY, get_event_date_from_db, get_etransfer_config_from_db
+from event_images import get_event_image_catalog, validate_event_image_key
 from models import Event, Feedback, Item, Location, Order
 from schemas import EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate
 from services.email import send_confirmation, send_reminder
@@ -133,13 +134,35 @@ def _event_dict(event: Event) -> dict:
         "name": event.name,
         "event_date": event.event_date,
         "hero_header": event.hero_header,
+        "hero_header_sage": event.hero_header_sage,
         "hero_subheader": event.hero_subheader,
         "promo_details": event.promo_details,
+        "tooltip_enabled": event.tooltip_enabled,
+        "tooltip_header": event.tooltip_header,
+        "tooltip_body": event.tooltip_body,
+        "tooltip_image_key": event.tooltip_image_key,
+        "hero_side_image_key": event.hero_side_image_key,
+        "etransfer_enabled": event.etransfer_enabled,
+        "etransfer_email": event.etransfer_email,
         "is_active": event.is_active,
         "item_ids": event.item_ids or [],
         "location_ids": event.location_ids or [],
         "updated_at": event.updated_at.isoformat() if event.updated_at else None,
     }
+
+
+def _validate_event_images(payload: Union[EventCreate, EventUpdate]) -> tuple[Optional[str], Optional[str]]:
+    try:
+        tooltip_image_key = validate_event_image_key(payload.tooltip_image_key, "tooltip")
+        hero_side_image_key = validate_event_image_key(payload.hero_side_image_key, "hero_side")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return tooltip_image_key, hero_side_image_key
+
+
+@router.get("/event-images")
+def admin_list_event_images(_: dict = Depends(verify_admin_token)):
+    return get_event_image_catalog()
 
 
 @router.get("/events")
@@ -157,12 +180,21 @@ def admin_create_event(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
+    tooltip_image_key, hero_side_image_key = _validate_event_images(body)
     event = Event(
         name=body.name,
         event_date=body.event_date,
         hero_header=body.hero_header,
+        hero_header_sage=body.hero_header_sage,
         hero_subheader=body.hero_subheader,
         promo_details=body.promo_details,
+        tooltip_enabled=body.tooltip_enabled,
+        tooltip_header=body.tooltip_header,
+        tooltip_body=body.tooltip_body,
+        tooltip_image_key=tooltip_image_key,
+        hero_side_image_key=hero_side_image_key,
+        etransfer_enabled=body.etransfer_enabled,
+        etransfer_email=str(body.etransfer_email) if body.etransfer_email is not None else None,
         is_active=False,
         item_ids=body.item_ids,
         location_ids=body.location_ids,
@@ -181,14 +213,23 @@ def admin_update_event(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
+    tooltip_image_key, hero_side_image_key = _validate_event_images(body)
     event = db.query(Event).filter(Event.id == event_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     event.name = body.name
     event.event_date = body.event_date
     event.hero_header = body.hero_header
+    event.hero_header_sage = body.hero_header_sage
     event.hero_subheader = body.hero_subheader
     event.promo_details = body.promo_details
+    event.tooltip_enabled = body.tooltip_enabled
+    event.tooltip_header = body.tooltip_header
+    event.tooltip_body = body.tooltip_body
+    event.tooltip_image_key = tooltip_image_key
+    event.hero_side_image_key = hero_side_image_key
+    event.etransfer_enabled = body.etransfer_enabled
+    event.etransfer_email = str(body.etransfer_email) if body.etransfer_email is not None else None
     event.item_ids = body.item_ids
     event.location_ids = body.location_ids
     event.updated_at = datetime.now(timezone.utc)
@@ -481,6 +522,7 @@ def admin_bulk_remind(
     _: dict = Depends(verify_admin_token),
 ):
     event_date = get_event_date_from_db(db)
+    etransfer = get_etransfer_config_from_db(db)
 
     reminded_count = 0
     failed_emails = 0
@@ -511,6 +553,8 @@ def admin_bulk_remind(
             "currency": CURRENCY,
             "address": address,
             "event_date": event_date,
+            "etransfer_enabled": etransfer["enabled"],
+            "etransfer_email": etransfer["email"],
         }
 
         try:
@@ -565,6 +609,7 @@ def admin_confirm_order(
         raise HTTPException(status_code=409, detail="Order already confirmed")
 
     event_date = get_event_date_from_db(db)
+    etransfer = get_etransfer_config_from_db(db)
 
     location = db.query(Location).filter(
         or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
@@ -587,6 +632,8 @@ def admin_confirm_order(
         "currency": CURRENCY,
         "address": address,
         "event_date": event_date,
+        "etransfer_enabled": etransfer["enabled"],
+        "etransfer_email": etransfer["email"],
     }
 
     email_sent = True

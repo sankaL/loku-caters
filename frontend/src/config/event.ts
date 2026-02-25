@@ -22,8 +22,16 @@ export interface EventConfig {
   event: { date: string };
   currency: string;
   hero_header: string;
+  hero_header_sage: string;
   hero_subheader: string;
   promo_details: string | null;
+  tooltip_enabled: boolean;
+  tooltip_header: string | null;
+  tooltip_body: string | null;
+  tooltip_image_path: string | null;
+  hero_side_image_path: string | null;
+  etransfer_enabled: boolean;
+  etransfer_email: string | null;
   items: Item[];
   locations: Location[];
 }

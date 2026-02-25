@@ -4,6 +4,8 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from event_images import resolve_event_image_path
+
 _config_path = Path(__file__).parent / "event-config.json"
 with open(_config_path) as f:
     _file_config: dict = json.load(f)
@@ -42,8 +44,16 @@ def get_config_from_db(db: Session) -> dict:
         "event": {"date": event.event_date},
         "currency": get_currency(),
         "hero_header": event.hero_header,
+        "hero_header_sage": event.hero_header_sage,
         "hero_subheader": event.hero_subheader,
         "promo_details": event.promo_details,
+        "tooltip_enabled": event.tooltip_enabled,
+        "tooltip_header": event.tooltip_header,
+        "tooltip_body": event.tooltip_body,
+        "tooltip_image_path": resolve_event_image_path(event.tooltip_image_key),
+        "hero_side_image_path": resolve_event_image_path(event.hero_side_image_key),
+        "etransfer_enabled": event.etransfer_enabled,
+        "etransfer_email": event.etransfer_email,
         "items": [
             {
                 "id": item.id,
@@ -82,3 +92,15 @@ def get_event_date_from_db(db: Session) -> str:
     if event is None:
         raise RuntimeError("No active event found in database")
     return event.event_date
+
+
+def get_etransfer_config_from_db(db: Session) -> dict:
+    """Read optional e-transfer settings from the active event."""
+    from models import Event
+    event = db.query(Event).filter(Event.is_active == True).first()
+    if event is None:
+        raise RuntimeError("No active event found in database")
+    return {
+        "enabled": bool(event.etransfer_enabled),
+        "email": event.etransfer_email,
+    }

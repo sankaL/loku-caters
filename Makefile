@@ -46,6 +46,8 @@ BACKEND_DEV_ENV = \
 sync-config:
 	cp config/event-config.json frontend/src/config/event-config.json
 	cp config/event-config.json backend/event-config.json
+	cp config/event-images.json frontend/src/config/event-images.json
+	cp config/event-images.json backend/event-images.json
 	@echo "Config synced to frontend/src/config/ and backend/"
 
 # ============================================================================

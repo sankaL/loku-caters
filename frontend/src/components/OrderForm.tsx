@@ -20,6 +20,8 @@ export interface OrderResult {
     price_per_item: number;
     currency: string;
     event_date: string;
+    etransfer_enabled: boolean;
+    etransfer_email: string | null;
   };
 }
 

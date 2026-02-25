@@ -47,8 +47,14 @@ export default function Home() {
         <HeroSection
           eventDate={eventConfig?.event.date ?? ""}
           heroHeader={eventConfig?.hero_header ?? ""}
+          heroHeaderSage={eventConfig?.hero_header_sage ?? ""}
           heroSubheader={eventConfig?.hero_subheader ?? ""}
           promoDetails={eventConfig?.promo_details}
+          tooltipEnabled={eventConfig?.tooltip_enabled ?? false}
+          tooltipHeader={eventConfig?.tooltip_header}
+          tooltipBody={eventConfig?.tooltip_body}
+          tooltipImagePath={eventConfig?.tooltip_image_path}
+          heroSideImagePath={eventConfig?.hero_side_image_path}
           onFeedbackClick={() => {
             captureEvent("feedback_modal_opened");
             setFeedbackOpen(true);

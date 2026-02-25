@@ -73,13 +73,41 @@ Stores events with their associated item and location selections. Only one event
 | `id` | `INTEGER` | Primary key, auto-increment | |
 | `name` | `TEXT` | NOT NULL | Internal label, e.g. `"February 2026 Batch"` |
 | `event_date` | `TEXT` | NOT NULL | Display string shown on hero and emails, e.g. `"February 28th, 2026"` |
-| `hero_header` | `TEXT` | NOT NULL, default `''` | Main heading on hero banner; falls back to hardcoded default if empty |
-| `hero_subheader` | `TEXT` | NOT NULL, default `''` | Subheading on hero banner; falls back to hardcoded default if empty |
+| `hero_header` | `TEXT` | NOT NULL, default `''` | Main heading on hero banner (white text). Required when creating/updating via admin API |
+| `hero_header_sage` | `TEXT` | NOT NULL, default `''` | Optional second heading line (sage text) |
+| `hero_subheader` | `TEXT` | NOT NULL, default `''` | Optional hero subheading |
 | `promo_details` | `TEXT` | NULLABLE | Optional promo text shown between hero and order form |
+| `tooltip_enabled` | `BOOLEAN` | NOT NULL, default `false` | Controls whether tooltip trigger/modal is shown on hero |
+| `tooltip_header` | `TEXT` | NULLABLE | Required only when `tooltip_enabled = true`; also used as tooltip badge label |
+| `tooltip_body` | `TEXT` | NULLABLE | Required only when `tooltip_enabled = true` |
+| `tooltip_image_key` | `TEXT` | NULLABLE | Optional key referencing an entry in `config/event-images.json` |
+| `hero_side_image_key` | `TEXT` | NULLABLE | Optional key referencing a `hero_side` image in `config/event-images.json` |
+| `etransfer_enabled` | `BOOLEAN` | NOT NULL, default `false` | Controls whether the e-transfer payment section appears after submit and in confirmation emails |
+| `etransfer_email` | `TEXT` | NULLABLE | Required only when `etransfer_enabled = true` |
 | `is_active` | `BOOLEAN` | NOT NULL, default `false` | Only one row is `true` at a time; the active event is live on the order page |
 | `item_ids` | `JSONB` | NOT NULL, default `'[]'` | Ordered array of `items.id` strings available for this event |
 | `location_ids` | `JSONB` | NOT NULL, default `'[]'` | Ordered array of `locations.id` strings available for this event |
 | `updated_at` | `TIMESTAMPTZ` | NULLABLE | Set automatically on create/update |
+
+---
+
+## Event image registry
+
+Event image assets are stored in the repository and referenced by key from `events.tooltip_image_key` and `events.hero_side_image_key`.
+
+Source-of-truth file:
+
+- `config/event-images.json`
+
+Synced runtime copies:
+
+- `backend/event-images.json`
+- `frontend/src/config/event-images.json`
+
+Registry helper paths define where new images should be placed:
+
+- `frontend/public/assets/img/tooltip`
+- `frontend/public/assets/img/hero-side`
 
 ---
 
@@ -132,6 +160,8 @@ alembic upgrade head
 | `0006_add_feedback_contact` | adds `contact` column to `feedback` |
 | `0007_feedback_type_and_message` | adds `feedback_type`, `order_id`, `message`; makes `reason` nullable |
 | `0008_uuid_item_location_ids` | replaces slug item/location IDs with server-generated UUIDs; cascades to `events` and `orders` |
+| `0009_event_hero_tooltip_images` | adds hero split text, tooltip config, and image-key fields to `events`; backfills tooltip defaults for existing events |
+| `0010_event_etransfer_fields` | adds optional e-transfer toggle and email fields to `events`; backfills existing rows to enabled with legacy email |
 
 ---
 

@@ -203,27 +203,28 @@ export default function SuccessView({ results }: SuccessViewProps) {
           </div>
         </div>
 
-        {/* E-Transfer notice */}
-        <div
-          className="rounded-2xl p-5 mb-4 flex gap-4 items-start text-left"
-          style={{ background: "#fdf8f0", border: "1px solid #e8d9b8" }}
-        >
-          <div className="mt-0.5 flex-shrink-0">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9a7a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="5" width="20" height="14" rx="2" />
-              <path d="M2 10h20" />
-            </svg>
+        {order.etransfer_enabled && order.etransfer_email && (
+          <div
+            className="rounded-2xl p-5 mb-4 flex gap-4 items-start text-left"
+            style={{ background: "#fdf8f0", border: "1px solid #e8d9b8" }}
+          >
+            <div className="mt-0.5 flex-shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9a7a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="5" width="20" height="14" rx="2" />
+                <path d="M2 10h20" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold mb-1" style={{ color: "#7a5a1a" }}>
+                Payment by e-Transfer
+              </p>
+              <p className="text-sm leading-relaxed" style={{ color: "#8a6a2a" }}>
+                If you would like to pay by e-Transfer, you are welcome to send your payment to{" "}
+                <strong>{order.etransfer_email}</strong> at your convenience - any time before your scheduled pickup.
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold mb-1" style={{ color: "#7a5a1a" }}>
-              Payment by e-Transfer
-            </p>
-            <p className="text-sm leading-relaxed" style={{ color: "#8a6a2a" }}>
-              If you would like to pay by e-Transfer, you are welcome to send your payment to{" "}
-              <strong>jlokuliyana@yahoo.com</strong> at your convenience - any time before your scheduled pickup.
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Email notice */}
         <div

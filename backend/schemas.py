@@ -1,6 +1,6 @@
 from typing import Optional
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
 class OrderCreate(BaseModel):
@@ -77,24 +77,78 @@ class LocationResponse(BaseModel):
     sort_order: int
 
 
-class EventCreate(BaseModel):
+class EventBase(BaseModel):
     name: str
     event_date: str
-    hero_header: str = ""
+    hero_header: str
+    hero_header_sage: str = ""
     hero_subheader: str = ""
     promo_details: Optional[str] = None
+    tooltip_enabled: bool = False
+    tooltip_header: Optional[str] = None
+    tooltip_body: Optional[str] = None
+    tooltip_image_key: Optional[str] = None
+    hero_side_image_key: Optional[str] = None
+    etransfer_enabled: bool = False
+    etransfer_email: Optional[EmailStr] = None
     item_ids: list[str] = Field(default_factory=list)
     location_ids: list[str] = Field(default_factory=list)
 
+    @field_validator("name", "event_date", "hero_header")
+    @classmethod
+    def required_text_fields(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped
 
-class EventUpdate(BaseModel):
-    name: str
-    event_date: str
-    hero_header: str = ""
-    hero_subheader: str = ""
-    promo_details: Optional[str] = None
-    item_ids: list[str] = Field(default_factory=list)
-    location_ids: list[str] = Field(default_factory=list)
+    @field_validator("hero_header_sage", "hero_subheader")
+    @classmethod
+    def optional_text_fields(cls, v: Optional[str]) -> str:
+        return (v or "").strip()
+
+    @field_validator("etransfer_email", mode="before")
+    @classmethod
+    def normalize_etransfer_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("promo_details", "tooltip_header", "tooltip_body", "tooltip_image_key", "hero_side_image_key")
+    @classmethod
+    def optional_nullable_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = v.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def validate_tooltip_fields(self) -> "EventBase":
+        if self.tooltip_enabled:
+            if not self.tooltip_header:
+                raise ValueError("tooltip_header is required when tooltip is enabled")
+            if not self.tooltip_body:
+                raise ValueError("tooltip_body is required when tooltip is enabled")
+        else:
+            self.tooltip_header = None
+            self.tooltip_body = None
+            self.tooltip_image_key = None
+
+        if self.etransfer_enabled:
+            if not self.etransfer_email:
+                raise ValueError("etransfer_email is required when e-transfer is enabled")
+        else:
+            self.etransfer_email = None
+        return self
+
+
+class EventCreate(EventBase):
+    pass
+
+
+class EventUpdate(EventBase):
+    pass
 
 
 FEEDBACK_REASONS = {

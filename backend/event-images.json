@@ -1,0 +1,22 @@
+{
+  "helper": {
+    "tooltip_target_dir": "frontend/public/assets/img/tooltip",
+    "hero_side_target_dir": "frontend/public/assets/img/hero-side"
+  },
+  "images": [
+    {
+      "key": "tooltip-lamprais-how-its-made",
+      "type": "tooltip",
+      "label": "Lamprais Tooltip",
+      "path": "/assets/img/tooltip/lamprais-how-its-made-compressed.png",
+      "alt": "How Lamprais is made, with rice and accompaniments wrapped in banana leaf"
+    },
+    {
+      "key": "hero-side-lamprais",
+      "type": "hero_side",
+      "label": "Lamprais Hero Side",
+      "path": "/assets/img/hero-side/lamprais-side.png",
+      "alt": "Lamprais serving image for hero card side decoration"
+    }
+  ]
+}
