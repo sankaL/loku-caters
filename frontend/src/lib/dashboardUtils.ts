@@ -1,5 +1,6 @@
 export interface Order {
   id: string;
+  event_id: number;
   name: string;
   email: string | null;
   phone_number: string | null;

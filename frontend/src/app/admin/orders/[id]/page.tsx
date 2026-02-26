@@ -10,6 +10,7 @@ import Modal from "@/components/ui/Modal";
 
 interface Order {
   id: string;
+  event_id: number;
   name: string;
   email: string | null;
   phone_number: string | null;
@@ -23,6 +24,13 @@ interface Order {
   notes?: string | null;
   exclude_email?: boolean;
   created_at: string;
+}
+
+interface AdminEvent {
+  id: number;
+  name: string;
+  event_date: string;
+  is_active: boolean;
 }
 
 interface EditOrderForm {
@@ -66,6 +74,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [deleting, setDeleting] = useState(false);
 
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
+  const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [configUsesFallback, setConfigUsesFallback] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<EditOrderForm | null>(null);
   const [savingEdits, setSavingEdits] = useState(false);
@@ -113,14 +123,97 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   }, [id]);
 
   useEffect(() => {
-    fetchEventConfig().then(setEventConfig).catch(() => {});
+    let cancelled = false;
+    async function loadEventConfig() {
+      if (!order) return;
+      setConfigUsesFallback(false);
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/admin/events/${order.event_id}/config`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as EventConfig;
+          if (!cancelled) setEventConfig(data);
+          return;
+        }
+      } catch {
+        // Non-blocking
+      }
+
+      try {
+        const cfg = await fetchEventConfig();
+        if (!cancelled) {
+          setEventConfig(cfg);
+          setConfigUsesFallback(true);
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
+    loadEventConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [order]);
+
+  useEffect(() => {
+    async function loadEvents() {
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/admin/events`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as AdminEvent[];
+        setEvents(Array.isArray(data) ? data : []);
+      } catch {
+        // Non-blocking
+      }
+    }
+    loadEvents();
   }, []);
+
+  const eventLabel = useMemo(() => {
+    if (!order) return "";
+    const e = events.find((x) => x.id === order.event_id);
+    if (!e) return `Event ${order.event_id}`;
+    return `${e.name} (${e.event_date})`;
+  }, [events, order]);
 
   const editTimeSlots = useMemo(() => {
     if (!eventConfig || !editForm?.pickup_location) return [];
     const loc = eventConfig.locations.find((l) => l.name === editForm.pickup_location);
     return loc?.timeSlots ?? [];
   }, [eventConfig, editForm?.pickup_location]);
+
+  const editItemOptions = useMemo(() => {
+    const base = (eventConfig?.items ?? []).map((i) => ({ value: i.id, label: i.name }));
+    const selectedId = (editForm?.item_id ?? "").trim();
+    if (!selectedId) return base;
+    if (base.some((o) => o.value === selectedId)) return base;
+    const label = (order?.item_name ?? selectedId).trim() || selectedId;
+    return [{ value: selectedId, label: `${label} (current)` }, ...base];
+  }, [eventConfig, editForm?.item_id, order?.item_name]);
+
+  const editLocationOptions = useMemo(() => {
+    const base = (eventConfig?.locations ?? []).map((l) => ({ value: l.name, label: l.name }));
+    const selected = (editForm?.pickup_location ?? "").trim();
+    if (!selected) return base;
+    if (base.some((o) => o.value === selected)) return base;
+    return [{ value: selected, label: `${selected} (current)` }, ...base];
+  }, [eventConfig, editForm?.pickup_location]);
+
+  const editTimeSlotOptions = useMemo(() => {
+    const base = editTimeSlots.map((s) => ({ value: s, label: s }));
+    const selected = (editForm?.pickup_time_slot ?? "").trim();
+    if (!selected) return base;
+    if (base.some((o) => o.value === selected)) return base;
+    return [{ value: selected, label: `${selected} (current)` }, ...base];
+  }, [editTimeSlots, editForm?.pickup_time_slot]);
 
   async function handleStatusChange(newStatus: string) {
     if (!order) return;
@@ -416,6 +509,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <p style={valueStyle}>{order.item_name}</p>
             </div>
             <div>
+              <p style={labelStyle}>Event</p>
+              <p style={valueStyle}>{eventLabel}</p>
+            </div>
+            <div>
               <p style={labelStyle}>Quantity</p>
               <p style={valueStyle}>{order.quantity}</p>
             </div>
@@ -531,18 +628,23 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <div>
                 <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Item</label>
                 <CustomSelect
-                  options={(eventConfig?.items ?? []).map((i) => ({ value: i.id, label: i.name }))}
+                  options={editItemOptions}
                   value={editForm.item_id}
                   onChange={(v) => setEditForm((f) => f ? ({ ...f, item_id: v }) : f)}
                   disabled={!eventConfig}
                 />
+                {configUsesFallback && (
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    Using active event catalog as a fallback.
+                  </p>
+                )}
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
                 <div>
                   <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Location</label>
                   <CustomSelect
-                    options={(eventConfig?.locations ?? []).map((l) => ({ value: l.name, label: l.name }))}
+                    options={editLocationOptions}
                     value={editForm.pickup_location}
                     onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_location: v, pickup_time_slot: "" }) : f)}
                     disabled={!eventConfig}
@@ -551,7 +653,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                 <div>
                   <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Time Slot</label>
                   <CustomSelect
-                    options={editTimeSlots.map((s) => ({ value: s, label: s }))}
+                    options={editTimeSlotOptions}
                     value={editForm.pickup_time_slot}
                     onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_time_slot: v }) : f)}
                     disabled={!eventConfig || !editForm.pickup_location}

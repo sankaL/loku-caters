@@ -322,14 +322,14 @@ export default function DashboardPage() {
             value={fmt0(revenue.total, currency)}
             delta={revenueDelta}
             trendText={`This month: ${fmt0(currMonthRevenue, currency)}`}
-            subtitle="Active orders only"
+            subtitle="Excludes no-shows and cancellations"
           />
           <KpiTile
             label="Avg Order Value"
             value={fmt(kpis.avgOrderValue, currency)}
             delta={kpis.avgOrderValueDelta}
             trendText={trendLabel(kpis.avgOrderValueDelta, "Value trending up", "Value trending down", "Average per order")}
-            subtitle="Active orders only"
+            subtitle="Excludes no-shows and cancellations"
           />
           <KpiTile
             label="Pickup Completion"

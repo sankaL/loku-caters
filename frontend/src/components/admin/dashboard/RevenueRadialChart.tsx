@@ -130,7 +130,7 @@ export default function RevenueRadialChart({ data, currency }: RevenueRadialChar
   const slices = buildSlices(data);
 
   return (
-    <DashboardCard title="Total revenue by item" subtitle="Active orders only">
+    <DashboardCard title="Total revenue by item" subtitle="Excludes no-shows and cancellations">
       {slices.length === 0 || totalRevenue <= 0 ? (
         <p style={{ fontSize: 13, color: "var(--color-muted)", textAlign: "center", padding: "40px 0" }}>
           No data

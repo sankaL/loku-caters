@@ -6,9 +6,11 @@ import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 
 interface Order {
   id: string;
+  event_id: number;
   name: string;
   email: string | null;
   phone_number: string | null;
@@ -22,6 +24,13 @@ interface Order {
   notes?: string | null;
   exclude_email?: boolean;
   created_at: string;
+}
+
+interface AdminEvent {
+  id: number;
+  name: string;
+  event_date: string;
+  is_active: boolean;
 }
 
 type SortCol = "status" | "total" | "date" | "timeslot";
@@ -157,6 +166,7 @@ export default function AdminOrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [eventFilter, setEventFilter] = useState<string>("all");
   const [locationFilter, setLocationFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -167,6 +177,8 @@ export default function AdminOrdersPage() {
   const [sort, setSort] = useState<{ col: SortCol | null; dir: "asc" | "desc" }>({ col: null, dir: "asc" });
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
+  const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [configUsesFallback, setConfigUsesFallback] = useState(false);
 
   // Single delete modal
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -194,26 +206,108 @@ export default function AdminOrdersPage() {
   const [remindLoading, setRemindLoading] = useState(false);
 
   // Reset selection when filter/orders change
-  useEffect(() => { setSelectedIds(new Set()); }, [filter, locationFilter, orders]);
-  useEffect(() => { setPage(1); }, [locationFilter]);
+  useEffect(() => { setSelectedIds(new Set()); }, [filter, eventFilter, locationFilter, orders]);
+  useEffect(() => { setPage(1); }, [eventFilter, locationFilter]);
+
+  // Switching event should not keep a stale location selection
+  useEffect(() => {
+    setLocationFilter("all");
+  }, [eventFilter]);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Fetch event config for location/item dropdowns
+  // Fetch all events for label + filtering
   useEffect(() => {
-    fetchEventConfig().then(setEventConfig).catch(() => {});
+    async function loadEvents() {
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/admin/events`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as AdminEvent[];
+        setEvents(Array.isArray(data) ? data : []);
+      } catch {
+        // Non-blocking
+      }
+    }
+    loadEvents();
   }, []);
+
+  const activeEventId = useMemo(() => {
+    const active = events.find((e) => e.is_active);
+    return active ? active.id : null;
+  }, [events]);
+
+  const configEventId = useMemo(() => {
+    if (eventFilter !== "all") {
+      const parsed = parseInt(eventFilter, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+    return activeEventId;
+  }, [eventFilter, activeEventId]);
+
+  const configEventLabel = useMemo(() => {
+    if (!configEventId) return "";
+    const e = events.find((x) => x.id === configEventId);
+    if (!e) return `Event ${configEventId}`;
+    return `${e.name} (${e.event_date})`;
+  }, [configEventId, events]);
+
+  // Fetch event config for add/import dropdowns and validation
+  useEffect(() => {
+    let cancelled = false;
+    async function loadEventConfig() {
+      setConfigUsesFallback(false);
+
+      if (configEventId) {
+        try {
+          const token = await getAdminToken();
+          if (!token) return;
+          const res = await fetch(`${API_URL}/api/admin/events/${configEventId}/config`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = (await res.json()) as EventConfig;
+            if (!cancelled) setEventConfig(data);
+            return;
+          }
+        } catch {
+          // Non-blocking
+        }
+      }
+
+      try {
+        const cfg = await fetchEventConfig();
+        if (!cancelled) {
+          setEventConfig(cfg);
+          setConfigUsesFallback(true);
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
+    loadEventConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [configEventId]);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const params = filter !== "all" ? `?status=${filter}` : "";
-      const res = await fetch(`${API_URL}/api/admin/orders${params}`, {
+      const qs = new URLSearchParams();
+      if (filter !== "all") qs.set("status", filter);
+      if (eventFilter !== "all") qs.set("event_id", eventFilter);
+      const query = qs.toString();
+      const res = await fetch(`${API_URL}/api/admin/orders${query ? `?${query}` : ""}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to fetch orders");
@@ -224,13 +318,48 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, eventFilter]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search]);
 
+  const eventLabelById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const e of events) {
+      const label = `${e.name} (${e.event_date})`.trim();
+      map.set(e.id, label || `Event ${e.id}`);
+    }
+    return map;
+  }, [events]);
+
+  const eventOptions = useMemo(
+    () => [
+      { value: "all", label: "All Events" },
+      ...events.map((e) => ({ value: String(e.id), label: `${e.name} (${e.event_date})` })),
+    ],
+    [events]
+  );
+
+  const locationOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const o of orders) {
+      const loc = (o.pickup_location || "").trim();
+      if (loc) set.add(loc);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [orders]);
+
+  const locationFilterOptions = useMemo(() => {
+    if (locationOptions.length > 0) return locationOptions;
+    const fromConfig = (eventConfig?.locations ?? []).map((l) => l.name).filter(Boolean);
+    return Array.from(new Set(fromConfig)).sort((a, b) => a.localeCompare(b));
+  }, [locationOptions, eventConfig]);
+
   const filtered = useMemo(() => {
     let result = orders;
+    if (eventFilter !== "all") {
+      result = result.filter((o) => String(o.event_id) === eventFilter);
+    }
     if (locationFilter !== "all") {
       result = result.filter((o) => o.pickup_location === locationFilter);
     }
@@ -241,14 +370,16 @@ export default function AdminOrdersPage() {
         o.name.toLowerCase().includes(q) ||
         (o.email ?? "").toLowerCase().includes(q) ||
         (o.phone_number ?? "").toLowerCase().includes(q) ||
-        o.pickup_location.toLowerCase().includes(q)
+        o.pickup_location.toLowerCase().includes(q) ||
+        (eventLabelById.get(o.event_id) ?? "").toLowerCase().includes(q)
     );
-  }, [orders, locationFilter, search]);
+  }, [orders, eventFilter, locationFilter, search, eventLabelById]);
 
   const timeSlotRank = useMemo(() => {
     const uniqueSlots = new Set<string>();
-    eventConfig?.locations.forEach((loc) => {
-      loc.timeSlots.forEach((slot) => uniqueSlots.add(slot));
+    orders.forEach((o) => {
+      const slot = (o.pickup_time_slot || "").trim();
+      if (slot) uniqueSlots.add(slot);
     });
     const sortedSlots = Array.from(uniqueSlots).sort((a, b) => {
       const diff = getTimeSlotStartMinutes(a) - getTimeSlotStartMinutes(b);
@@ -260,7 +391,7 @@ export default function AdminOrdersPage() {
       rank[slot] = idx;
     });
     return rank;
-  }, [eventConfig]);
+  }, [orders]);
 
   const sorted = useMemo(() => {
     if (!sort.col) return filtered;
@@ -496,7 +627,10 @@ export default function AdminOrdersPage() {
       const res = await fetch(`${API_URL}/api/admin/orders`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(addOrderForm),
+        body: JSON.stringify({
+          ...addOrderForm,
+          event_id: configEventId,
+        }),
       });
       if (!res.ok) {
         throw new Error(await getApiErrorMessage(res, "Failed to create order"));
@@ -595,6 +729,7 @@ export default function AdminOrdersPage() {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify({
+              event_id: configEventId,
               name: row.name,
               email: row.email,
               phone_number: row.phone_number,
@@ -644,6 +779,7 @@ export default function AdminOrdersPage() {
       "Email",
       "Phone",
       "Item",
+      "Event",
       "Quantity",
       "Pickup Location",
       "Pickup Time Slot",
@@ -658,6 +794,7 @@ export default function AdminOrdersPage() {
       order.email ?? "",
       order.phone_number ?? "",
       order.item_name,
+      eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`,
       order.quantity,
       order.pickup_location,
       order.pickup_time_slot,
@@ -839,17 +976,28 @@ export default function AdminOrdersPage() {
             style={{ ...dropdownStyle, width: "100%" }}
           >
             <option value="all">All Locations</option>
-            {eventConfig?.locations.map((loc) => (
-              <option key={loc.id} value={loc.name}>{loc.name}</option>
+            {locationFilterOptions.map((loc) => (
+              <option key={loc} value={loc}>{loc}</option>
             ))}
           </select>
           <SelectChevron />
         </div>
 
+        {/* Event dropdown (searchable) */}
+        <div className="w-full sm:w-[320px]">
+          <SearchableSelect
+            options={eventOptions}
+            value={eventFilter}
+            onChange={setEventFilter}
+            placeholder="All Events"
+            searchPlaceholder="Search events..."
+          />
+        </div>
+
         {/* Clear filters */}
-        {(filter !== "all" || locationFilter !== "all" || search) && (
+        {(filter !== "all" || eventFilter !== "all" || locationFilter !== "all" || search) && (
           <button
-            onClick={() => { setFilter("all"); setLocationFilter("all"); setSearch(""); }}
+            onClick={() => { setFilter("all"); setEventFilter("all"); setLocationFilter("all"); setSearch(""); }}
             className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
             style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
           >
@@ -881,7 +1029,7 @@ export default function AdminOrdersPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, email, phone, location..."
+            placeholder="Search name, email, phone, location, event..."
             className="w-full pl-9 pr-4 py-2 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]"
             style={{ color: "var(--color-text)" }}
           />
@@ -1004,6 +1152,7 @@ export default function AdminOrdersPage() {
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Name</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Item</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Event</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Location</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
                     <button
@@ -1091,6 +1240,11 @@ export default function AdminOrdersPage() {
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
                         {order.item_name} x{order.quantity}
+                      </td>
+                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
+                        <span className="block" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`}
+                        </span>
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
                         {order.pickup_location}
@@ -1323,8 +1477,8 @@ export default function AdminOrdersPage() {
       </Modal>
 
       {/* Add Order Modal */}
-      {showAddOrderModal && (
-        <div
+        {showAddOrderModal && (
+          <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAddOrderModal(false); }}
         >
@@ -1335,6 +1489,11 @@ export default function AdminOrdersPage() {
             <h2 className="text-xl font-bold mb-5" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
               Add Order
             </h2>
+            {configEventLabel && (
+              <p className="text-xs mb-4" style={{ color: "var(--color-muted)" }}>
+                Creating for: {configEventLabel}{configUsesFallback ? " (using active config fallback)" : ""}
+              </p>
+            )}
             <form onSubmit={handleAddOrder} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
                 <div>
@@ -1493,8 +1652,8 @@ export default function AdminOrdersPage() {
       )}
 
       {/* Bulk Import Modal */}
-      {showBulkImportModal && (
-        <div
+        {showBulkImportModal && (
+          <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) setShowBulkImportModal(false); }}
         >
@@ -1508,6 +1667,11 @@ export default function AdminOrdersPage() {
             <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
               Upload a CSV file to create multiple orders at once. All imported orders will be set to Pending.
             </p>
+            {configEventLabel && (
+              <p className="text-xs mb-4" style={{ color: "var(--color-muted)" }}>
+                Importing into: {configEventLabel}{configUsesFallback ? " (using active config fallback)" : ""}
+              </p>
+            )}
 
             <div
               className="rounded-xl p-4 mb-4 text-xs"

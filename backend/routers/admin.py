@@ -14,7 +14,11 @@ from sqlalchemy.orm import Session
 from config import settings
 from constants import OrderStatus
 from database import get_db
-from event_config import CURRENCY, get_event_date_from_db, get_etransfer_config_from_db
+from event_config import (
+    CURRENCY,
+    EventNotFoundError,
+    get_config_for_event_id_from_db,
+)
 from event_images import get_event_image_catalog, validate_event_image_key
 from models import Event, Feedback, Item, Location, Order
 from schemas import EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate
@@ -111,6 +115,7 @@ class StatusUpdate(BaseModel):
 
 
 class AdminOrderCreate(BaseModel):
+    event_id: Optional[int] = None
     name: str
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
@@ -284,6 +289,18 @@ def admin_list_events(
     return [_event_dict(e) for e in events]
 
 
+@router.get("/events/{event_id}/config")
+def admin_get_event_config(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    try:
+        return get_config_for_event_id_from_db(db, event_id)
+    except EventNotFoundError:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+
 @router.post("/events", status_code=201)
 def admin_create_event(
     body: EventCreate,
@@ -392,6 +409,10 @@ def admin_delete_event(
         raise HTTPException(status_code=404, detail="Event not found")
     if event.is_active:
         raise HTTPException(status_code=400, detail="Cannot delete the active event")
+
+    existing_orders = db.query(Order).filter(Order.event_id == event_id).count()
+    if existing_orders > 0:
+        raise HTTPException(status_code=400, detail="Cannot delete event with existing orders")
     db.delete(event)
     db.commit()
     return {"success": True}
@@ -557,6 +578,7 @@ def admin_delete_location(
 def _order_dict(order: Order) -> dict:
     return {
         "id": order.id,
+        "event_id": int(order.event_id) if getattr(order, "event_id", None) is not None else None,
         "name": order.name,
         "email": order.email,
         "phone_number": order.phone_number,
@@ -578,9 +600,24 @@ def admin_create_order(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
+    if body.event_id is not None and body.event_id < 1:
+        raise HTTPException(status_code=400, detail="Invalid event_id")
+
+    event: Optional[Event]
+    if body.event_id is not None:
+        event = db.query(Event).filter(Event.id == body.event_id).first()
+        if event is None:
+            raise HTTPException(status_code=404, detail="Event not found")
+    else:
+        event = db.query(Event).filter(Event.is_active == True).first()
+        if event is None:
+            raise HTTPException(status_code=400, detail="No active event")
+
     item = db.query(Item).filter(Item.id == body.item_id).first()
     if not item:
         raise HTTPException(status_code=400, detail="Invalid item_id")
+    if item.id not in (event.item_ids or []):
+        raise HTTPException(status_code=400, detail="Invalid item_id for event")
     if body.quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1")
 
@@ -591,6 +628,8 @@ def admin_create_order(
     ).first()
     if not location:
         raise HTTPException(status_code=400, detail="Invalid pickup_location")
+    if location.id not in (event.location_ids or []):
+        raise HTTPException(status_code=400, detail="Invalid pickup_location for event")
     if pickup_time_slot not in (location.time_slots or []):
         raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
 
@@ -599,6 +638,7 @@ def admin_create_order(
 
     order = Order(
         id=str(uuid.uuid4()),
+        event_id=int(event.id),
         name=body.name,
         email=str(body.email) if body.email is not None else None,
         phone_number=body.phone_number,
@@ -622,12 +662,15 @@ def admin_create_order(
 @router.get("/orders")
 def admin_list_orders(
     status: Optional[str] = Query(None),
+    event_id: Optional[int] = Query(None),
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
     query = db.query(Order)
     if status:
         query = query.filter(Order.status == status)
+    if event_id is not None:
+        query = query.filter(Order.event_id == event_id)
     orders = query.order_by(Order.created_at.desc()).all()
     return [_order_dict(o) for o in orders]
 
@@ -638,16 +681,34 @@ def admin_bulk_remind(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    event_date = get_event_date_from_db(db)
-    etransfer = get_etransfer_config_from_db(db)
+    requested_ids = body.order_ids or []
+    unique_ids = list(dict.fromkeys(requested_ids))
+
+    orders = (
+        db.query(Order).filter(Order.id.in_(unique_ids)).all()
+        if unique_ids
+        else []
+    )
+    orders_by_id: dict[str, Order] = {o.id: o for o in orders}
+
+    event_ids = sorted({int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None})
+    events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
+    events_by_id: dict[int, Event] = {int(e.id): e for e in events}
+
+    active_event = db.query(Event).filter(Event.is_active == True).first()
+    active_event_date = active_event.event_date if active_event else ""
+    active_etransfer = {
+        "enabled": bool(active_event.etransfer_enabled) if active_event else False,
+        "email": active_event.etransfer_email if active_event else None,
+    }
 
     reminded_count = 0
     failed_emails = 0
     skipped_excluded = 0
     skipped_missing_email = 0
 
-    for order_id in body.order_ids:
-        order = db.query(Order).filter(Order.id == order_id).first()
+    for order_id in requested_ids:
+        order = orders_by_id.get(order_id)
         if order is None:
             continue
         if order.status != OrderStatus.CONFIRMED:
@@ -665,7 +726,14 @@ def admin_bulk_remind(
         ).first()
         address = location.address if location else ""
 
-        effective_price = float(order.total_price) / order.quantity
+        effective_price = float(order.total_price) / order.quantity if order.quantity else 0.0
+
+        event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
+        event_date = event.event_date if event else active_event_date
+        etransfer = {
+            "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
+            "email": event.etransfer_email if event else active_etransfer["email"],
+        }
 
         order_data = {
             "name": order.name,
@@ -726,9 +794,14 @@ def admin_update_order(
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
+    event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
+    enforce_event_membership = event is not None
+
     item = db.query(Item).filter(Item.id == body.item_id).first()
     if not item:
         raise HTTPException(status_code=400, detail="Invalid item_id")
+    if enforce_event_membership and item.id not in (event.item_ids or []):
+        raise HTTPException(status_code=400, detail="Invalid item_id for event")
     if body.quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1")
 
@@ -739,6 +812,8 @@ def admin_update_order(
     ).first()
     if not location:
         raise HTTPException(status_code=400, detail="Invalid pickup_location")
+    if enforce_event_membership and location.id not in (event.location_ids or []):
+        raise HTTPException(status_code=400, detail="Invalid pickup_location for event")
     if pickup_time_slot not in (location.time_slots or []):
         raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
 
@@ -791,8 +866,14 @@ def admin_confirm_order(
                 detail="Order email is missing. Set exclude_email=true to confirm without email.",
             )
 
-        event_date = get_event_date_from_db(db)
-        etransfer = get_etransfer_config_from_db(db)
+        event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
+        if event is None:
+            event = db.query(Event).filter(Event.is_active == True).first()
+        event_date = event.event_date if event else ""
+        etransfer = {
+            "enabled": bool(event.etransfer_enabled) if event else False,
+            "email": event.etransfer_email if event else None,
+        }
 
         location = db.query(Location).filter(
             or_(Location.name == order.pickup_location, Location.id == order.pickup_location)

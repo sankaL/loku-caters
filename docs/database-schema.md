@@ -13,6 +13,7 @@ App tables live in the `public` schema but are not intended to be accessed via S
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | `UUID` | Primary key, default `gen_random_uuid()` | Exposed to customer as 8-char reference (uppercased) |
+| `event_id` | `INTEGER` | NOT NULL | References `events.id` at time of order (no FK) |
 | `name` | `TEXT` | NOT NULL | Customer full name |
 | `item_id` | `TEXT` | NOT NULL | Denormalised at order time; matches an `items.id` at time of order |
 | `item_name` | `TEXT` | NOT NULL | Denormalised name at time of order |
@@ -170,6 +171,7 @@ alembic upgrade head
 | `0010_event_etransfer_fields` | adds optional e-transfer toggle and email fields to `events`; backfills existing rows to enabled with legacy email |
 | `0011_enable_rls_public_tables` | enables RLS on app tables in `public` |
 | `0012_order_notes_exclude_email` | adds `notes` and `exclude_email` to `orders`; makes `email` and `phone_number` nullable |
+| `0013_orders_event_id` | adds `event_id` to `orders` and backfills to the active event |
 
 ---
 
@@ -177,4 +179,4 @@ alembic upgrade head
 
 **Four-table design** with no foreign keys between them.
 
-`orders` captures item and location data as denormalised strings at order time so records remain accurate even if the config changes later. `items` and `locations` are the live source of truth for the full catalog. `events` holds one or more events, each referencing a subset of items and locations by ID; only the `is_active = true` event is shown on the public order page.
+`orders` captures item and location data as denormalised strings at order time so records remain accurate even if the config changes later. Each order is also tied to an `event_id` so admin views and emails can reference the correct event even after the active event changes. `items` and `locations` are the live source of truth for the full catalog. `events` holds one or more events, each referencing a subset of items and locations by ID; only the `is_active = true` event is shown on the public order page.

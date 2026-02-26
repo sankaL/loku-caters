@@ -2,7 +2,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
-from event_config import CURRENCY, get_item_from_db, get_event_date_from_db, get_etransfer_config_from_db
+from event_config import (
+    CURRENCY,
+    NoActiveEventError,
+    get_active_event_id_from_db,
+    get_item_from_db,
+    get_event_date_for_event_id_from_db,
+    get_etransfer_config_for_event_id_from_db,
+)
 from models import Order
 from schemas import OrderCreate, OrderResponse
 
@@ -11,6 +18,11 @@ router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 @router.post("", response_model=OrderResponse, status_code=201)
 def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
+    try:
+        event_id = get_active_event_id_from_db(db)
+    except NoActiveEventError:
+        raise HTTPException(status_code=404, detail="no_active_event")
+
     item = get_item_from_db(db, order_in.item_id)
     if item is None:
         raise HTTPException(status_code=400, detail=f"Unknown item: {order_in.item_id}")
@@ -19,6 +31,7 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
     total_price = round(order_in.quantity * effective_price, 2)
 
     order = Order(
+        event_id=event_id,
         name=order_in.name,
         item_id=item.id,
         item_name=item.name,
@@ -34,9 +47,10 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(order)
 
-    event_date = get_event_date_from_db(db)
-    etransfer = get_etransfer_config_from_db(db)
+    event_date = get_event_date_for_event_id_from_db(db, event_id)
+    etransfer = get_etransfer_config_for_event_id_from_db(db, event_id)
     order_data = {
+        "event_id": event_id,
         "name": order.name,
         "item_id": order.item_id,
         "item_name": order.item_name,

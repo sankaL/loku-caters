@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,14 @@ with open(_config_path) as f:
 
 class NoActiveEventError(RuntimeError):
     pass
+
+
+class EventNotFoundError(RuntimeError):
+    pass
+
+
+if TYPE_CHECKING:
+    from models import Item
 
 def get_currency() -> str:
     currency = _file_config.get("currency")
@@ -30,20 +38,39 @@ def get_config_from_db(db: Session) -> dict:
     event = db.query(Event).filter(Event.is_active == True).first()
     if event is None:
         raise NoActiveEventError("No active event found in database")
+    return _build_config_from_event(db, event)
+
+
+def get_config_for_event_id_from_db(db: Session, event_id: int) -> dict:
+    """Load event config with items and locations for a specific event id."""
+    from models import Event
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event is None:
+        raise EventNotFoundError(f"Event not found: {event_id}")
+    return _build_config_from_event(db, event)
+
+
+def _build_config_from_event(db: Session, event) -> dict:
+    from models import Item, Location
+
     item_ids = event.item_ids or []
     location_ids = event.location_ids or []
+
     items = (
         db.query(Item)
         .filter(Item.id.in_(item_ids))
         .order_by(Item.sort_order)
         .all()
     ) if item_ids else []
+
     locations = (
         db.query(Location)
         .filter(Location.id.in_(location_ids))
         .order_by(Location.sort_order)
         .all()
     ) if location_ids else []
+
     return {
         "event": {"date": event.event_date},
         "currency": get_currency(),
@@ -80,7 +107,7 @@ def get_config_from_db(db: Session) -> dict:
     }
 
 
-def get_item_from_db(db: Session, item_id: str) -> Optional[object]:
+def get_item_from_db(db: Session, item_id: str) -> Optional["Item"]:
     """Look up an item only if it belongs to the active event."""
     from models import Event, Item
     event = db.query(Event).filter(Event.is_active == True).first()
@@ -98,12 +125,45 @@ def get_event_date_from_db(db: Session) -> str:
     return event.event_date
 
 
+def get_active_event_id_from_db(db: Session) -> int:
+    """Return the current active event id."""
+    from models import Event
+
+    event = db.query(Event).filter(Event.is_active == True).first()
+    if event is None:
+        raise NoActiveEventError("No active event found in database")
+    return int(event.id)
+
+
+def get_event_date_for_event_id_from_db(db: Session, event_id: int) -> str:
+    """Read event_date for a specific event id."""
+    from models import Event
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event is None:
+        raise EventNotFoundError(f"Event not found: {event_id}")
+    return event.event_date
+
+
 def get_etransfer_config_from_db(db: Session) -> dict:
     """Read optional e-transfer settings from the active event."""
     from models import Event
     event = db.query(Event).filter(Event.is_active == True).first()
     if event is None:
         raise NoActiveEventError("No active event found in database")
+    return {
+        "enabled": bool(event.etransfer_enabled),
+        "email": event.etransfer_email,
+    }
+
+
+def get_etransfer_config_for_event_id_from_db(db: Session, event_id: int) -> dict:
+    """Read optional e-transfer settings for a specific event id."""
+    from models import Event
+
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event is None:
+        raise EventNotFoundError(f"Event not found: {event_id}")
     return {
         "enabled": bool(event.etransfer_enabled),
         "email": event.etransfer_email,

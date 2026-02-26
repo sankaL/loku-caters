@@ -60,6 +60,7 @@ class Order(Base):
     __tablename__ = "orders"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    event_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     item_id: Mapped[str] = mapped_column(String, nullable=False)
     item_name: Mapped[str] = mapped_column(String, nullable=False)

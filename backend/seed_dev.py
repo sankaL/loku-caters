@@ -9,7 +9,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from database import SessionLocal
-from models import Order
+from models import Event, Order
 
 
 ORDERS = [
@@ -97,10 +97,15 @@ ORDERS = [
 def seed():
     db = SessionLocal()
     try:
+        active_event = db.query(Event).filter(Event.is_active == True).first()
+        if active_event is None:
+            raise RuntimeError("No active event found. Create and activate an event before seeding orders.")
+
         inserted = 0
         for data in ORDERS:
             order = Order(
                 id=str(uuid.uuid4()),
+                event_id=int(active_event.id),
                 **data,
             )
             db.add(order)
