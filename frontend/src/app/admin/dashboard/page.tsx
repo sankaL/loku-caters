@@ -234,7 +234,7 @@ export default function DashboardPage() {
         if (!ordersRes.ok) throw new Error("Failed to load orders");
 
         setOrders(await ordersRes.json());
-        if (configResult.status === "fulfilled") {
+        if (configResult.status === "fulfilled" && configResult.value) {
           setCurrency(configResult.value.currency);
         }
       } catch {

@@ -10,6 +10,10 @@ _config_path = Path(__file__).parent / "event-config.json"
 with open(_config_path) as f:
     _file_config: dict = json.load(f)
 
+
+class NoActiveEventError(RuntimeError):
+    pass
+
 def get_currency() -> str:
     currency = _file_config.get("currency")
     if not currency:
@@ -25,7 +29,7 @@ def get_config_from_db(db: Session) -> dict:
     from models import Event, Item, Location
     event = db.query(Event).filter(Event.is_active == True).first()
     if event is None:
-        raise RuntimeError("No active event found in database")
+        raise NoActiveEventError("No active event found in database")
     item_ids = event.item_ids or []
     location_ids = event.location_ids or []
     items = (
@@ -90,7 +94,7 @@ def get_event_date_from_db(db: Session) -> str:
     from models import Event
     event = db.query(Event).filter(Event.is_active == True).first()
     if event is None:
-        raise RuntimeError("No active event found in database")
+        raise NoActiveEventError("No active event found in database")
     return event.event_date
 
 
@@ -99,7 +103,7 @@ def get_etransfer_config_from_db(db: Session) -> dict:
     from models import Event
     event = db.query(Event).filter(Event.is_active == True).first()
     if event is None:
-        raise RuntimeError("No active event found in database")
+        raise NoActiveEventError("No active event found in database")
     return {
         "enabled": bool(event.etransfer_enabled),
         "email": event.etransfer_email,

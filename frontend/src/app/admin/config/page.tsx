@@ -192,6 +192,7 @@ export default function AdminEventsPage() {
   const [activating, setActivating] = useState<number | null>(null);
   const [deleting, setDeleting] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [pendingToggle, setPendingToggle] = useState<{ eventId: number; eventName: string; willActivate: boolean } | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
@@ -399,20 +400,28 @@ export default function AdminEventsPage() {
     }
   }
 
-  async function handleActivate(eventId: number) {
+  function requestToggle(event: EventItem) {
+    setPendingToggle({ eventId: event.id, eventName: event.name, willActivate: !event.is_active });
+  }
+
+  async function handleToggleConfirm() {
+    if (!pendingToggle) return;
+    const { eventId, willActivate } = pendingToggle;
     setActivating(eventId);
+    setPendingToggle(null);
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/events/${eventId}/activate`, {
+      const action = willActivate ? "activate" : "deactivate";
+      const res = await fetch(`${API_URL}/api/admin/events/${eventId}/${action}`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error("Activate failed");
+      if (!res.ok) throw new Error(`${willActivate ? "Activate" : "Deactivate"} failed`);
       await loadData();
-      showToast("Event set as active.", "success");
+      showToast(willActivate ? "Event is now active." : "Event deactivated.", "success");
     } catch {
-      showToast("Failed to activate event", "error");
+      showToast(`Failed to ${willActivate ? "activate" : "deactivate"} event`, "error");
     } finally {
       setActivating(null);
     }
@@ -451,7 +460,7 @@ export default function AdminEventsPage() {
   }
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
       {toast && (
         <div
           className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
@@ -465,7 +474,7 @@ export default function AdminEventsPage() {
         </div>
       )}
 
-      <div className="mb-8 flex items-start justify-between gap-4">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1
             className="text-2xl font-bold mb-1"
@@ -566,7 +575,7 @@ export default function AdminEventsPage() {
                     )}
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-3 shrink-0">
                     <button
                       onClick={() => openEdit(event)}
                       className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
@@ -580,22 +589,6 @@ export default function AdminEventsPage() {
                     >
                       Edit
                     </button>
-                    {!event.is_active && (
-                      <button
-                        onClick={() => handleActivate(event.id)}
-                        disabled={activating === event.id}
-                        className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all disabled:opacity-60"
-                        style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                        onMouseEnter={(e) => {
-                          if (activating !== event.id) (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)";
-                        }}
-                      >
-                        {activating === event.id ? "..." : "Set Active"}
-                      </button>
-                    )}
                     {!event.is_active && (
                       <button
                         onClick={() => handleDelete(event)}
@@ -612,11 +605,109 @@ export default function AdminEventsPage() {
                         {deleting === event.id ? "..." : "Delete"}
                       </button>
                     )}
+                    {/* Active toggle */}
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        role="switch"
+                        aria-checked={event.is_active}
+                        onClick={() => requestToggle(event)}
+                        disabled={activating === event.id}
+                        title={event.is_active ? "Deactivate event" : "Activate event"}
+                        style={{
+                          width: "44px",
+                          height: "24px",
+                          borderRadius: "12px",
+                          background: event.is_active ? "var(--color-forest)" : "var(--color-border)",
+                          border: "none",
+                          cursor: activating === event.id ? "not-allowed" : "pointer",
+                          position: "relative",
+                          transition: "background 0.2s",
+                          flexShrink: 0,
+                          opacity: activating === event.id ? 0.5 : 1,
+                          padding: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            position: "absolute",
+                            top: "2px",
+                            left: event.is_active ? "22px" : "2px",
+                            width: "20px",
+                            height: "20px",
+                            borderRadius: "50%",
+                            background: "var(--color-cream)",
+                            transition: "left 0.2s",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+                          }}
+                        />
+                      </button>
+                      <span style={{ fontSize: "10px", color: event.is_active ? "var(--color-forest)" : "var(--color-muted)", fontWeight: 600 }}>
+                        {activating === event.id ? "..." : (event.is_active ? "Live" : "Off")}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Activate / Deactivate confirmation dialog */}
+      {pendingToggle && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.5)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl shadow-2xl p-8"
+            style={{ background: "white" }}
+          >
+            <h3
+              style={{
+                fontFamily: "var(--font-serif)",
+                color: "var(--color-forest)",
+                fontSize: "1.15rem",
+                fontWeight: 700,
+                marginBottom: "12px",
+              }}
+            >
+              {pendingToggle.willActivate ? "Activate event?" : "Deactivate event?"}
+            </h3>
+            <p style={{ color: "var(--color-muted)", fontSize: "14px", lineHeight: 1.65, marginBottom: "28px" }}>
+              {pendingToggle.willActivate
+                ? <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will go live immediately and become the active event on the order page. Any currently active event will be taken offline.</>
+                : <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will be taken offline immediately. The order page will show the no-events placeholder until another event is activated.</>
+              }
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={() => setPendingToggle(null)}
+                style={{ color: "var(--color-muted)", fontSize: "14px", fontWeight: 500, cursor: "pointer", border: "none", background: "none" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleConfirm}
+                disabled={!!activating}
+                style={{
+                  background: pendingToggle.willActivate ? "var(--color-forest)" : "#dc2626",
+                  color: "white",
+                  padding: "10px 22px",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  cursor: activating ? "not-allowed" : "pointer",
+                  border: "none",
+                  opacity: activating ? 0.6 : 1,
+                }}
+              >
+                {pendingToggle.willActivate ? "Activate" : "Deactivate"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

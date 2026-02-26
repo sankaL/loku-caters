@@ -141,7 +141,7 @@ export default function AdminLocationsPage() {
   const labelClass = "block text-sm font-medium mb-1.5";
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
       {toast && (
         <div
           className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
@@ -155,7 +155,7 @@ export default function AdminLocationsPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1
             className="text-2xl font-bold mb-1"

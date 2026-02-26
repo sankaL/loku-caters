@@ -33,6 +33,7 @@ interface FeedbackResponse {
   total: number;
   customer_count: number;
   non_customer_count: number;
+  general_contact_count: number;
   metrics: FeedbackMetric[];
   items: FeedbackItem[];
 }
@@ -61,6 +62,10 @@ const REASON_COLORS: Record<string, { bg: string; text: string }> = {
   different_menu:          { bg: "#eff6ff", text: "#1d4ed8" },
   prefer_delivery:         { bg: "#f0f9ff", text: "#0369a1" },
   not_interested:          { bg: "#faf5ff", text: "#6b21a8" },
+  catering_inquiry:        { bg: "#ecfdf5", text: "#047857" },
+  previous_order_inquiry:  { bg: "#eff6ff", text: "#1d4ed8" },
+  stay_updated:            { bg: "#f0fdf4", text: "#166534" },
+  general_feedback:        { bg: "var(--color-cream)", text: "var(--color-forest)" },
   other:                   { bg: "var(--color-cream)", text: "var(--color-muted)" },
 };
 
@@ -85,7 +90,28 @@ function ReasonBadge({ reason, label }: { reason: string; label: string }) {
 }
 
 function TypeBadge({ type }: { type: string }) {
-  const isCustomer = type === "customer";
+  const kind = type === "customer" ? "customer" : type === "general_contact" ? "general_contact" : "non_customer";
+  const styleByKind: Record<string, { bg: string; color: string; border: string; label: string }> = {
+    customer: {
+      bg: "#f0f7eb",
+      color: "#2d6a2d",
+      border: "1px solid #c8ddb4",
+      label: "Customer",
+    },
+    non_customer: {
+      bg: "var(--color-cream)",
+      color: "var(--color-muted)",
+      border: "1px solid var(--color-border)",
+      label: "Non-customer",
+    },
+    general_contact: {
+      bg: "#eff6ff",
+      color: "#1d4ed8",
+      border: "1px solid #bfdbfe",
+      label: "Contact",
+    },
+  };
+  const s = styleByKind[kind];
   return (
     <span
       style={{
@@ -94,13 +120,13 @@ function TypeBadge({ type }: { type: string }) {
         borderRadius: "999px",
         fontSize: "12px",
         fontWeight: 600,
-        background: isCustomer ? "#f0f7eb" : "var(--color-cream)",
-        color: isCustomer ? "#2d6a2d" : "var(--color-muted)",
+        background: s.bg,
+        color: s.color,
         whiteSpace: "nowrap",
-        border: isCustomer ? "1px solid #c8ddb4" : "1px solid var(--color-border)",
+        border: s.border,
       }}
     >
-      {isCustomer ? "Customer" : "Non-customer"}
+      {s.label}
     </span>
   );
 }
@@ -217,7 +243,7 @@ export default function AdminFeedbackPage() {
           Feedback
         </h1>
         <p style={{ fontSize: 14, color: "var(--color-muted)" }}>
-          Pre-order feedback from visitors and post-order feedback from customers.
+          Pre-order feedback from visitors, contact messages, and post-order feedback from customers.
         </p>
       </div>
 
@@ -240,7 +266,7 @@ export default function AdminFeedbackPage() {
       {/* Top metric cards */}
       {loading ? (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 28 }}>
-          {[...Array(4)].map((_, i) => (
+          {[...Array(5)].map((_, i) => (
             <div key={i} style={{ background: "white", border: "1px solid var(--color-border)", borderRadius: 20, padding: 20 }}>
               <Skeleton w="60%" h={12} />
               <div style={{ marginTop: 12 }}><Skeleton w="40%" h={28} /></div>
@@ -309,6 +335,32 @@ export default function AdminFeedbackPage() {
               {data.non_customer_count}
             </p>
             <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Pre-order feedback</p>
+          </div>
+
+          {/* Contact */}
+          <div
+            style={{
+              background: "white",
+              border: `2px solid ${typeFilter === "general_contact" ? "var(--color-sage)" : "var(--color-border)"}`,
+              borderRadius: 20,
+              padding: 20,
+              cursor: "pointer",
+              transition: "border-color 0.15s",
+            }}
+            onClick={() => setTypeFilter(typeFilter === "general_contact" ? "all" : "general_contact")}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                Contact
+              </p>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+              {data.general_contact_count}
+            </p>
+            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Messages and inquiries</p>
           </div>
 
           {/* Top non-customer reason */}
@@ -444,6 +496,7 @@ export default function AdminFeedbackPage() {
           <option value="all">All types</option>
           <option value="customer">Customer</option>
           <option value="non_customer">Non-customer</option>
+          <option value="general_contact">Contact</option>
         </select>
 
         <select
@@ -468,6 +521,10 @@ export default function AdminFeedbackPage() {
           <option value="different_menu">Prefer a different menu item</option>
           <option value="prefer_delivery">Prefer delivery over pickup</option>
           <option value="not_interested">Not interested at this time</option>
+          <option value="catering_inquiry">Catering inquiry</option>
+          <option value="previous_order_inquiry">Question about a past order</option>
+          <option value="stay_updated">Stay updated on future events</option>
+          <option value="general_feedback">General feedback or suggestions</option>
           <option value="other">Other</option>
         </select>
 

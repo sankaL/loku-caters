@@ -160,9 +160,13 @@ FEEDBACK_REASONS = {
     "prefer_delivery",
     "not_interested",
     "other",
+    "catering_inquiry",
+    "previous_order_inquiry",
+    "stay_updated",
+    "general_feedback",
 }
 
-FEEDBACK_TYPES = {"non_customer", "customer"}
+FEEDBACK_TYPES = {"non_customer", "customer", "general_contact"}
 
 
 class FeedbackCreate(BaseModel):

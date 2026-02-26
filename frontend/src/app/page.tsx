@@ -5,6 +5,7 @@ import Header from "@/components/Header";
 import HeroSection from "@/components/HeroSection";
 import OrderForm from "@/components/OrderForm";
 import SuccessView from "@/components/SuccessView";
+import NoEventPage from "@/components/NoEventPage";
 import { fetchEventConfig, type EventConfig } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 import type { OrderResult } from "@/components/OrderForm";
@@ -14,11 +15,15 @@ export default function Home() {
   const [orderResults, setOrderResults] = useState<OrderResult[] | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [configError, setConfigError] = useState(false);
+  const [noActiveEvent, setNoActiveEvent] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     fetchEventConfig()
-      .then(setEventConfig)
+      .then((config) => {
+        if (config === null) setNoActiveEvent(true);
+        else setEventConfig(config);
+      })
       .catch(() => setConfigError(true));
   }, []);
 
@@ -35,6 +40,18 @@ export default function Home() {
       });
     });
     setOrderResults(results);
+  }
+
+  if (noActiveEvent) {
+    return (
+      <main
+        className="min-h-screen"
+        style={{ background: "var(--color-cream)" }}
+      >
+        <Header />
+        <NoEventPage />
+      </main>
+    );
   }
 
   return (

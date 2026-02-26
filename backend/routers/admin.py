@@ -365,6 +365,22 @@ def admin_activate_event(
     return _event_dict(event)
 
 
+@router.post("/events/{event_id}/deactivate")
+def admin_deactivate_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event.is_active = False
+    event.updated_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(event)
+    return _event_dict(event)
+
+
 @router.delete("/events/{event_id}")
 def admin_delete_event(
     event_id: int,
@@ -865,6 +881,10 @@ FEEDBACK_REASON_LABELS = {
     "different_menu": "Prefer a different menu item",
     "prefer_delivery": "Prefer delivery over pickup",
     "not_interested": "Not interested at this time",
+    "catering_inquiry": "Catering inquiry",
+    "previous_order_inquiry": "Question about a past order",
+    "stay_updated": "Stay updated on future events",
+    "general_feedback": "General feedback or suggestions",
     "other": "Other",
 }
 
@@ -904,10 +924,13 @@ def admin_list_feedback(
     all_rows = db.query(Feedback).all()
     total = len(all_rows)
     customer_count = sum(1 for r in all_rows if r.feedback_type == "customer")
-    non_customer_count = total - customer_count
+    non_customer_count = sum(1 for r in all_rows if r.feedback_type == "non_customer")
+    general_contact_count = sum(1 for r in all_rows if r.feedback_type == "general_contact")
 
     reason_counts: dict[str, int] = {}
     for row in all_rows:
+        if row.feedback_type != "non_customer":
+            continue
         if row.reason:
             reason_counts[row.reason] = reason_counts.get(row.reason, 0) + 1
 
@@ -925,6 +948,7 @@ def admin_list_feedback(
         "total": total,
         "customer_count": customer_count,
         "non_customer_count": non_customer_count,
+        "general_contact_count": general_contact_count,
         "metrics": metrics,
         "items": items,
     }

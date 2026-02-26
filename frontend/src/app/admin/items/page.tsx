@@ -135,7 +135,7 @@ export default function AdminItemsPage() {
   const labelClass = "block text-sm font-medium mb-1.5";
 
   return (
-    <div className="p-8 max-w-4xl">
+    <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
       {toast && (
         <div
           className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
@@ -149,7 +149,7 @@ export default function AdminItemsPage() {
         </div>
       )}
 
-      <div className="flex items-center justify-between mb-8">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1
             className="text-2xl font-bold mb-1"
@@ -191,10 +191,11 @@ export default function AdminItemsPage() {
         </div>
       ) : (
         <div
-          className="rounded-2xl overflow-hidden"
+          className="rounded-2xl"
           style={{ background: "white", border: "1px solid var(--color-border)" }}
         >
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>ID</th>
@@ -245,7 +246,8 @@ export default function AdminItemsPage() {
                 </tr>
               ))}
             </tbody>
-          </table>
+            </table>
+          </div>
         </div>
       )}
 
