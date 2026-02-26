@@ -4,13 +4,14 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
 
 interface Order {
   id: string;
   name: string;
-  email: string;
-  phone_number: string;
+  email: string | null;
+  phone_number: string | null;
   item_name: string;
   item_id: string;
   quantity: number;
@@ -18,6 +19,8 @@ interface Order {
   pickup_time_slot: string;
   total_price: number;
   status: string;
+  notes?: string | null;
+  exclude_email?: boolean;
   created_at: string;
 }
 
@@ -99,12 +102,16 @@ interface AddOrderForm {
   quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
+  notes: string;
+  exclude_email: boolean;
 }
 
 const EMPTY_ADD_FORM: AddOrderForm = {
   name: "", email: "", phone_number: "",
   item_id: "", quantity: 1,
   pickup_location: "", pickup_time_slot: "",
+  notes: "",
+  exclude_email: false,
 };
 
 interface BulkRow {
@@ -232,8 +239,8 @@ export default function AdminOrdersPage() {
     return result.filter(
       (o) =>
         o.name.toLowerCase().includes(q) ||
-        o.email.toLowerCase().includes(q) ||
-        o.phone_number.toLowerCase().includes(q) ||
+        (o.email ?? "").toLowerCase().includes(q) ||
+        (o.phone_number ?? "").toLowerCase().includes(q) ||
         o.pickup_location.toLowerCase().includes(q)
     );
   }, [orders, locationFilter, search]);
@@ -279,6 +286,13 @@ export default function AdminOrdersPage() {
     });
   }, [filtered, sort, timeSlotRank]);
 
+  const confirmedOrders = useMemo(() => orders.filter((o) => o.status === "confirmed"), [orders]);
+  const eligibleReminderOrders = useMemo(
+    () => confirmedOrders.filter((o) => !o.exclude_email && (o.email ?? "").trim().length > 0),
+    [confirmedOrders]
+  );
+  const excludedReminderCount = confirmedOrders.length - eligibleReminderOrders.length;
+
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   useEffect(() => { setPage((prev) => Math.min(prev, totalPages)); }, [totalPages]);
@@ -301,10 +315,16 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to confirm order");
+        throw new Error(await getApiErrorMessage(res, "Failed to confirm order"));
       }
-      showToast("Confirmation email sent!", "success");
+      const data = await res.json();
+      if (data.email_suppressed) {
+        showToast("Order confirmed (email excluded)", "success");
+      } else if (data.email_sent) {
+        showToast("Confirmation email sent!", "success");
+      } else {
+        showToast("Order confirmed, but email failed to send", "error");
+      }
       await fetchOrders();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to send email", "error");
@@ -324,8 +344,7 @@ export default function AdminOrdersPage() {
         body: JSON.stringify({ status: newStatus }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to update status");
+        throw new Error(await getApiErrorMessage(res, "Failed to update status"));
       }
       setOrders((prev) => {
         if (filter !== "all" && newStatus !== filter) {
@@ -351,8 +370,7 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to delete order");
+        throw new Error(await getApiErrorMessage(res, "Failed to delete order"));
       }
       setOrders((prev) => prev.filter((o) => o.id !== orderId));
       showToast("Order deleted", "success");
@@ -445,18 +463,18 @@ export default function AdminOrdersPage() {
         body: JSON.stringify({ order_ids: ids }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to send reminders");
+        throw new Error(await getApiErrorMessage(res, "Failed to send reminders"));
       }
       const data = await res.json();
+      const skipped = (data.skipped_excluded ?? 0) + (data.skipped_missing_email ?? 0);
       if (data.failed_emails > 0) {
         showToast(
-          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, failed ${data.failed_emails}`,
+          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, skipped ${skipped}, failed ${data.failed_emails}`,
           "error"
         );
       } else {
         showToast(
-          `Reminder${data.reminded !== 1 ? "s" : ""} sent to ${data.reminded} customer${data.reminded !== 1 ? "s" : ""}`,
+          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}${skipped > 0 ? `, skipped ${skipped}` : ""}`,
           "success"
         );
       }
@@ -481,8 +499,7 @@ export default function AdminOrdersPage() {
         body: JSON.stringify(addOrderForm),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to create order");
+        throw new Error(await getApiErrorMessage(res, "Failed to create order"));
       }
       showToast("Order created successfully", "success");
       setShowAddOrderModal(false);
@@ -638,8 +655,8 @@ export default function AdminOrdersPage() {
     const rows = sorted.map((order) => [
       order.id,
       order.name,
-      order.email,
-      order.phone_number,
+      order.email ?? "",
+      order.phone_number ?? "",
       order.item_name,
       order.quantity,
       order.pickup_location,
@@ -754,14 +771,13 @@ export default function AdminOrdersPage() {
             Orders
           </h1>
           <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            Clicking Send Confirmation emails the customer and marks the order confirmed automatically.
+            Clicking Send Confirmation emails the customer and marks the order confirmed automatically (unless email is excluded).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => {
-              const confirmed = orders.filter((o) => o.status === "confirmed");
-              setRemindSelections(new Set(confirmed.map((o) => o.id)));
+              setRemindSelections(new Set(eligibleReminderOrders.map((o) => o.id)));
               setShowRemindModal(true);
             }}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
@@ -1060,8 +1076,18 @@ export default function AdminOrdersPage() {
                         {order.name}
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-muted)" }}>
-                        <div>{order.email}</div>
-                        <div className="text-xs">{order.phone_number}</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{order.email ?? "-"}</span>
+                          {order.exclude_email && (
+                            <span
+                              className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                              style={{ background: "#f3f4f6", color: "#374151", border: "1px solid var(--color-border)" }}
+                            >
+                              Email Excluded
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs">{order.phone_number ?? "-"}</div>
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
                         {order.item_name} x{order.quantity}
@@ -1107,7 +1133,22 @@ export default function AdminOrdersPage() {
                               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap"
                               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
                             >
-                              {isConfirming ? "Sending..." : "Send Confirmation"}
+                              {isConfirming
+                                ? "Confirming..."
+                                : (order.exclude_email ? "Confirm (No Email)" : "Send Confirmation")
+                              }
+                            </button>
+                          )}
+                          {order.status === "confirmed" && (
+                            <button
+                              onClick={() => handleStatusChange(order.id, "paid")}
+                              disabled={isUpdatingStatus}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap hover:opacity-90"
+                              style={{ background: "var(--color-sage)", color: "white" }}
+                              aria-label="Mark order paid"
+                              title="Mark as paid"
+                            >
+                              {isUpdatingStatus ? "Paid..." : "Paid"}
                             </button>
                           )}
                           <button
@@ -1278,7 +1319,7 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed.
+        Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed (orders with Email Excluded will be confirmed without email).
       </Modal>
 
       {/* Add Order Modal */}
@@ -1310,7 +1351,7 @@ export default function AdminOrdersPage() {
                 <div>
                   <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Email</label>
                   <input
-                    required
+                    required={!addOrderForm.exclude_email}
                     type="email"
                     value={addOrderForm.email}
                     onChange={(e) => setAddOrderForm((f) => ({ ...f, email: e.target.value }))}
@@ -1321,7 +1362,7 @@ export default function AdminOrdersPage() {
                 <div>
                   <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone</label>
                   <input
-                    required
+                    required={!addOrderForm.exclude_email}
                     type="tel"
                     value={addOrderForm.phone_number}
                     onChange={(e) => setAddOrderForm((f) => ({ ...f, phone_number: e.target.value }))}
@@ -1339,6 +1380,21 @@ export default function AdminOrdersPage() {
                     onChange={(e) => setAddOrderForm((f) => ({ ...f, quantity: parseInt(e.target.value, 10) || 1 }))}
                     style={inputStyle}
                   />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-text)" }}>
+                    <input
+                      type="checkbox"
+                      checked={addOrderForm.exclude_email}
+                      onChange={(e) => setAddOrderForm((f) => ({ ...f, exclude_email: e.target.checked }))}
+                      style={{ accentColor: "var(--color-forest)", width: "15px", height: "15px" }}
+                    />
+                    Exclude Email (no confirmation or reminder emails)
+                  </label>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    When enabled, Email and Phone are optional.
+                  </p>
                 </div>
               </div>
 
@@ -1396,6 +1452,17 @@ export default function AdminOrdersPage() {
                     <SelectChevron />
                   </div>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Notes (admin only)</label>
+                <textarea
+                  value={addOrderForm.notes}
+                  onChange={(e) => setAddOrderForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="Internal notes for this order..."
+                  rows={3}
+                  style={{ ...inputStyle, resize: "vertical" as const, minHeight: "88px" }}
+                />
               </div>
 
               <p className="text-xs" style={{ color: "var(--color-muted)" }}>
@@ -1574,16 +1641,27 @@ export default function AdminOrdersPage() {
               Send Pickup Reminders
             </h2>
             <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
-              Reminder emails will be sent to all selected customers and their orders will be marked as Reminded. Uncheck anyone you want to exclude.
+              Reminder emails will be sent to all selected customers and their orders will be marked as Reminded. Orders with Email Excluded or missing email will be skipped.
             </p>
 
-            {orders.filter((o) => o.status === "confirmed").length === 0 ? (
+            {excludedReminderCount > 0 && (
+              <div
+                className="rounded-xl px-4 py-3 text-xs mb-4"
+                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+              >
+                {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible for reminder emails and will be skipped.
+              </div>
+            )}
+
+            {eligibleReminderOrders.length === 0 ? (
               <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
-                No confirmed orders to remind.
+                {confirmedOrders.length === 0
+                  ? "No confirmed orders to remind."
+                  : "No eligible confirmed orders to remind."}
               </p>
             ) : (
               <div style={{ overflowY: "auto", flex: 1, marginBottom: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" }}>
-                {orders.filter((o) => o.status === "confirmed").map((order) => (
+                {eligibleReminderOrders.map((order) => (
                   <label
                     key={order.id}
                     style={{
@@ -1610,7 +1688,7 @@ export default function AdminOrdersPage() {
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{order.name}</p>
-                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email}</p>
+                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email ?? "-"}</p>
                       <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{order.pickup_location} - {order.pickup_time_slot}</p>
                     </div>
                   </label>

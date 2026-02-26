@@ -1,8 +1,8 @@
 export interface Order {
   id: string;
   name: string;
-  email: string;
-  phone_number: string;
+  email: string | null;
+  phone_number: string | null;
   item_name: string;
   item_id: string;
   quantity: number;
@@ -10,6 +10,8 @@ export interface Order {
   pickup_time_slot: string;
   total_price: number;
   status: string;
+  notes?: string | null;
+  exclude_email?: boolean;
   created_at: string;
 }
 
@@ -62,6 +64,47 @@ export function computeRevenue(orders: Order[]): {
   return { total, monthly: buckets.map(({ month, revenue }) => ({ month, revenue })) };
 }
 
+export interface ItemRevenueRow {
+  itemId: string;
+  itemName: string;
+  orderCount: number;
+  quantity: number;
+  revenue: number;
+}
+
+export function computeItemRevenueBreakdown(orders: Order[]): ItemRevenueRow[] {
+  const active = orders.filter(isActive);
+  const map = new Map<string, ItemRevenueRow>();
+
+  for (const o of active) {
+    const rawKey = (o.item_id || o.item_name || "unknown").trim();
+    const itemId = rawKey || "unknown";
+    const rawName = (o.item_name || o.item_id || "Unknown item").trim();
+    const itemName = rawName || "Unknown item";
+
+    const existing = map.get(itemId);
+    if (existing) {
+      existing.orderCount += 1;
+      existing.quantity += o.quantity;
+      existing.revenue += o.total_price;
+      if ((!existing.itemName || existing.itemName === existing.itemId) && itemName) {
+        existing.itemName = itemName;
+      }
+      continue;
+    }
+
+    map.set(itemId, {
+      itemId,
+      itemName,
+      orderCount: 1,
+      quantity: o.quantity,
+      revenue: o.total_price,
+    });
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.revenue - a.revenue);
+}
+
 export function computeLocationBreakdown(orders: Order[]): {
   location: string;
   count: number;
@@ -105,8 +148,10 @@ export function computeTopCustomers(
 ): { name: string; email: string; totalSpend: number; orderCount: number }[] {
   const map = new Map<string, { name: string; totalSpend: number; orderCount: number }>();
   for (const o of orders) {
-    const existing = map.get(o.email) ?? { name: o.name, totalSpend: 0, orderCount: 0 };
-    map.set(o.email, {
+    const email = (o.email ?? "").trim();
+    if (!email) continue;
+    const existing = map.get(email) ?? { name: o.name, totalSpend: 0, orderCount: 0 };
+    map.set(email, {
       name: o.name,
       totalSpend: existing.totalSpend + o.total_price,
       orderCount: existing.orderCount + 1,
@@ -178,6 +223,7 @@ export function computeOrdersOverTime(
 function calcMetrics(subset: Order[]) {
   const nonCancelled = subset.filter((o) => o.status !== "cancelled");
   const totalOrders = nonCancelled.length;
+  const totalItems = nonCancelled.reduce((sum, o) => sum + (Number.isFinite(o.quantity) ? o.quantity : 0), 0);
   const confirmed = subset.filter((o) =>
     ["confirmed", "reminded", "paid", "picked_up"].includes(o.status)
   ).length;
@@ -193,7 +239,7 @@ function calcMetrics(subset: Order[]) {
   const pickedUp = subset.filter((o) => o.status === "picked_up").length;
   const completionRate =
     resolved.length > 0 ? Math.round((pickedUp / resolved.length) * 100) : 0;
-  return { totalOrders, confirmedRate, avgOrderValue, completionRate };
+  return { totalOrders, totalItems, confirmedRate, avgOrderValue, completionRate };
 }
 
 function pctDelta(curr: number, prev: number): number | null {
@@ -204,6 +250,7 @@ function pctDelta(curr: number, prev: number): number | null {
 export interface KPIData {
   totalOrders: number;
   totalOrdersDelta: number | null;
+  totalItems: number;
   confirmedRate: number;
   confirmedRateDelta: number | null;
   avgOrderValue: number;

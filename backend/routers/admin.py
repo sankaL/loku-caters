@@ -7,7 +7,7 @@ from functools import lru_cache
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from jose import JWTError, jwt
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr, field_validator, model_validator
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -112,12 +112,122 @@ class StatusUpdate(BaseModel):
 
 class AdminOrderCreate(BaseModel):
     name: str
-    email: str
-    phone_number: str
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
     item_id: str
     quantity: int
     pickup_location: str
     pickup_time_slot: str
+    notes: Optional[str] = None
+    exclude_email: bool = False
+
+    @field_validator("name", "item_id", "pickup_location", "pickup_time_slot")
+    @classmethod
+    def required_trim(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def normalize_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def normalize_notes(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("quantity")
+    @classmethod
+    def quantity_must_be_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Quantity must be at least 1")
+        return v
+
+    @model_validator(mode="after")
+    def require_contact_unless_excluded(self) -> "AdminOrderCreate":
+        if not self.exclude_email:
+            if not self.email:
+                raise ValueError("email is required unless exclude_email is true")
+            if not self.phone_number:
+                raise ValueError("phone_number is required unless exclude_email is true")
+        return self
+
+
+class AdminOrderUpdate(BaseModel):
+    name: str
+    email: Optional[EmailStr] = None
+    phone_number: Optional[str] = None
+    item_id: str
+    quantity: int
+    pickup_location: str
+    pickup_time_slot: str
+    notes: Optional[str] = None
+    exclude_email: bool = False
+
+    @field_validator("name", "item_id", "pickup_location", "pickup_time_slot")
+    @classmethod
+    def required_trim(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def normalize_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("notes", mode="before")
+    @classmethod
+    def normalize_notes(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("quantity")
+    @classmethod
+    def quantity_must_be_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Quantity must be at least 1")
+        return v
+
+    @model_validator(mode="after")
+    def require_contact_unless_excluded(self) -> "AdminOrderUpdate":
+        if not self.exclude_email:
+            if not self.email:
+                raise ValueError("email is required unless exclude_email is true")
+            if not self.phone_number:
+                raise ValueError("phone_number is required unless exclude_email is true")
+        return self
 
 
 class BulkRemindRequest(BaseModel):
@@ -428,6 +538,24 @@ def admin_delete_location(
 # Order endpoints
 # ---------------------------------------------------------------------------
 
+def _order_dict(order: Order) -> dict:
+    return {
+        "id": order.id,
+        "name": order.name,
+        "email": order.email,
+        "phone_number": order.phone_number,
+        "item_id": order.item_id,
+        "item_name": order.item_name,
+        "quantity": order.quantity,
+        "pickup_location": order.pickup_location,
+        "pickup_time_slot": order.pickup_time_slot,
+        "total_price": float(order.total_price),
+        "status": order.status,
+        "notes": order.notes,
+        "exclude_email": bool(order.exclude_email),
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+    }
+
 @router.post("/orders", status_code=201)
 def admin_create_order(
     body: AdminOrderCreate,
@@ -440,8 +568,8 @@ def admin_create_order(
     if body.quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1")
 
-    pickup_location = body.pickup_location.strip()
-    pickup_time_slot = body.pickup_time_slot.strip()
+    pickup_location = body.pickup_location
+    pickup_time_slot = body.pickup_time_slot
     location = db.query(Location).filter(
         or_(Location.name == pickup_location, Location.id == pickup_location)
     ).first()
@@ -455,9 +583,9 @@ def admin_create_order(
 
     order = Order(
         id=str(uuid.uuid4()),
-        name=body.name.strip(),
-        email=body.email.strip(),
-        phone_number=body.phone_number.strip(),
+        name=body.name,
+        email=str(body.email) if body.email is not None else None,
+        phone_number=body.phone_number,
         item_id=item.id,
         item_name=item.name,
         quantity=body.quantity,
@@ -465,25 +593,14 @@ def admin_create_order(
         pickup_time_slot=pickup_time_slot,
         total_price=total_price,
         status=OrderStatus.PENDING,
+        notes=body.notes,
+        exclude_email=body.exclude_email,
     )
     db.add(order)
     db.commit()
     db.refresh(order)
 
-    return {
-        "id": order.id,
-        "name": order.name,
-        "email": order.email,
-        "phone_number": order.phone_number,
-        "item_id": order.item_id,
-        "item_name": order.item_name,
-        "quantity": order.quantity,
-        "pickup_location": order.pickup_location,
-        "pickup_time_slot": order.pickup_time_slot,
-        "total_price": float(order.total_price),
-        "status": order.status,
-        "created_at": order.created_at.isoformat() if order.created_at else None,
-    }
+    return _order_dict(order)
 
 
 @router.get("/orders")
@@ -496,23 +613,7 @@ def admin_list_orders(
     if status:
         query = query.filter(Order.status == status)
     orders = query.order_by(Order.created_at.desc()).all()
-    return [
-        {
-            "id": o.id,
-            "name": o.name,
-            "email": o.email,
-            "phone_number": o.phone_number,
-            "item_id": o.item_id,
-            "item_name": o.item_name,
-            "quantity": o.quantity,
-            "pickup_location": o.pickup_location,
-            "pickup_time_slot": o.pickup_time_slot,
-            "total_price": float(o.total_price),
-            "status": o.status,
-            "created_at": o.created_at.isoformat() if o.created_at else None,
-        }
-        for o in orders
-    ]
+    return [_order_dict(o) for o in orders]
 
 
 @router.post("/orders/remind")
@@ -526,12 +627,21 @@ def admin_bulk_remind(
 
     reminded_count = 0
     failed_emails = 0
+    skipped_excluded = 0
+    skipped_missing_email = 0
 
     for order_id in body.order_ids:
         order = db.query(Order).filter(Order.id == order_id).first()
         if order is None:
             continue
         if order.status != OrderStatus.CONFIRMED:
+            continue
+
+        if order.exclude_email:
+            skipped_excluded += 1
+            continue
+        if not order.email or not str(order.email).strip():
+            skipped_missing_email += 1
             continue
 
         location = db.query(Location).filter(
@@ -568,7 +678,13 @@ def admin_bulk_remind(
         reminded_count += 1
 
     db.commit()
-    return {"success": True, "reminded": reminded_count, "failed_emails": failed_emails}
+    return {
+        "success": True,
+        "reminded": reminded_count,
+        "failed_emails": failed_emails,
+        "skipped_excluded": skipped_excluded,
+        "skipped_missing_email": skipped_missing_email,
+    }
 
 
 @router.get("/orders/{order_id}")
@@ -580,20 +696,61 @@ def admin_get_order(
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    return {
-        "id": order.id,
-        "name": order.name,
-        "email": order.email,
-        "phone_number": order.phone_number,
-        "item_id": order.item_id,
-        "item_name": order.item_name,
-        "quantity": order.quantity,
-        "pickup_location": order.pickup_location,
-        "pickup_time_slot": order.pickup_time_slot,
-        "total_price": float(order.total_price),
-        "status": order.status,
-        "created_at": order.created_at.isoformat() if order.created_at else None,
-    }
+    return _order_dict(order)
+
+
+@router.put("/orders/{order_id}")
+def admin_update_order(
+    order_id: str,
+    body: AdminOrderUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    item = db.query(Item).filter(Item.id == body.item_id).first()
+    if not item:
+        raise HTTPException(status_code=400, detail="Invalid item_id")
+    if body.quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+
+    pickup_location = body.pickup_location
+    pickup_time_slot = body.pickup_time_slot
+    location = db.query(Location).filter(
+        or_(Location.name == pickup_location, Location.id == pickup_location)
+    ).first()
+    if not location:
+        raise HTTPException(status_code=400, detail="Invalid pickup_location")
+    if pickup_time_slot not in (location.time_slots or []):
+        raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
+
+    total_price: float
+    if order.item_id == item.id and order.quantity == body.quantity:
+        total_price = float(order.total_price)
+    elif order.item_id == item.id:
+        historical_unit = float(order.total_price) / order.quantity
+        total_price = historical_unit * body.quantity
+    else:
+        price = float(item.discounted_price) if item.discounted_price is not None else float(item.price)
+        total_price = price * body.quantity
+
+    order.name = body.name
+    order.email = str(body.email) if body.email is not None else None
+    order.phone_number = body.phone_number
+    order.item_id = item.id
+    order.item_name = item.name
+    order.quantity = body.quantity
+    order.pickup_location = pickup_location
+    order.pickup_time_slot = pickup_time_slot
+    order.total_price = total_price
+    order.notes = body.notes
+    order.exclude_email = body.exclude_email
+
+    db.commit()
+    db.refresh(order)
+    return _order_dict(order)
 
 
 @router.post("/orders/{order_id}/confirm")
@@ -608,40 +765,50 @@ def admin_confirm_order(
     if order.status == OrderStatus.CONFIRMED:
         raise HTTPException(status_code=409, detail="Order already confirmed")
 
-    event_date = get_event_date_from_db(db)
-    etransfer = get_etransfer_config_from_db(db)
+    email_sent = False
+    email_suppressed = bool(order.exclude_email)
 
-    location = db.query(Location).filter(
-        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-    ).first()
-    address = location.address if location else ""
+    if not email_suppressed:
+        if not order.email or not str(order.email).strip():
+            raise HTTPException(
+                status_code=400,
+                detail="Order email is missing. Set exclude_email=true to confirm without email.",
+            )
 
-    effective_price = float(order.total_price) / order.quantity
+        event_date = get_event_date_from_db(db)
+        etransfer = get_etransfer_config_from_db(db)
 
-    order_data = {
-        "name": order.name,
-        "item_id": order.item_id,
-        "item_name": order.item_name,
-        "quantity": order.quantity,
-        "pickup_location": order.pickup_location,
-        "pickup_time_slot": order.pickup_time_slot,
-        "phone_number": order.phone_number,
-        "email": order.email,
-        "total_price": float(order.total_price),
-        "price_per_item": effective_price,
-        "currency": CURRENCY,
-        "address": address,
-        "event_date": event_date,
-        "etransfer_enabled": etransfer["enabled"],
-        "etransfer_email": etransfer["email"],
-    }
+        location = db.query(Location).filter(
+            or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
+        ).first()
+        address = location.address if location else ""
 
-    email_sent = True
-    try:
-        send_confirmation(order_data)
-    except Exception as exc:
-        email_sent = False
-        print(f"[email] Failed to send confirmation to {order.email}: {exc}")
+        effective_price = float(order.total_price) / order.quantity
+
+        order_data = {
+            "name": order.name,
+            "item_id": order.item_id,
+            "item_name": order.item_name,
+            "quantity": order.quantity,
+            "pickup_location": order.pickup_location,
+            "pickup_time_slot": order.pickup_time_slot,
+            "phone_number": order.phone_number,
+            "email": order.email,
+            "total_price": float(order.total_price),
+            "price_per_item": effective_price,
+            "currency": CURRENCY,
+            "address": address,
+            "event_date": event_date,
+            "etransfer_enabled": etransfer["enabled"],
+            "etransfer_email": etransfer["email"],
+        }
+
+        email_sent = True
+        try:
+            send_confirmation(order_data)
+        except Exception as exc:
+            email_sent = False
+            print(f"[email] Failed to send confirmation to {order.email}: {exc}")
 
     order.status = OrderStatus.CONFIRMED
     db.commit()
@@ -651,6 +818,7 @@ def admin_confirm_order(
         "order_id": order_id,
         "status": order.status,
         "email_sent": email_sent,
+        "email_suppressed": email_suppressed,
     }
 
 

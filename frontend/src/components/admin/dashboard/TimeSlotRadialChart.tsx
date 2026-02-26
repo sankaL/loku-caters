@@ -67,7 +67,7 @@ export default function TimeSlotRadialChart({ data }: TimeSlotRadialChartProps) 
   return (
     <DashboardCard title="Orders by Time Slot" subtitle="Distribution">
       <div style={{ height: 120 }}>
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={120}>
           <RadialBarChart
             innerRadius="20%"
             outerRadius="90%"

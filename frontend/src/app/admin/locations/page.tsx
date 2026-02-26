@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 interface Location {
   id: string;
@@ -105,8 +106,7 @@ export default function AdminLocationsPage() {
       }
 
       if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.detail || "Save failed");
+        throw new Error(await getApiErrorMessage(res, "Save failed"));
       }
 
       setShowModal(false);

@@ -4,6 +4,7 @@
 import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 type EventImageType = "tooltip" | "hero_side";
 
@@ -384,14 +385,7 @@ export default function AdminEventsPage() {
       });
 
       if (!res.ok) {
-        let detail = "Failed to save event";
-        try {
-          const errorPayload = await res.json();
-          if (typeof errorPayload?.detail === "string") detail = errorPayload.detail;
-        } catch {
-          // ignore
-        }
-        throw new Error(detail);
+        throw new Error(await getApiErrorMessage(res, "Failed to save event"));
       }
 
       setModalOpen(false);

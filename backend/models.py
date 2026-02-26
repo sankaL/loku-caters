@@ -66,8 +66,10 @@ class Order(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     pickup_location: Mapped[str] = mapped_column(String, nullable=False)
     pickup_time_slot: Mapped[str] = mapped_column(String, nullable=False)
-    phone_number: Mapped[str] = mapped_column(String, nullable=False)
-    email: Mapped[str] = mapped_column(String, nullable=False)
+    phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    exclude_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(String, default=OrderStatus.PENDING)
     created_at: Mapped[datetime] = mapped_column(

@@ -2,6 +2,10 @@
 
 Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in `backend/alembic/versions/`.
 
+## Security: Row Level Security (RLS)
+
+App tables live in the `public` schema but are not intended to be accessed via Supabase PostgREST from the browser. RLS is enabled on these tables, and no RLS policies are defined. The FastAPI backend connects directly to Postgres as the table owner and performs all reads and writes.
+
 ---
 
 ## Table: `orders`
@@ -15,8 +19,10 @@ Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in
 | `quantity` | `INTEGER` | NOT NULL, CHECK >= 1 | Number of portions |
 | `pickup_location` | `TEXT` | NOT NULL | Matches a location name in the `locations` table |
 | `pickup_time_slot` | `TEXT` | NOT NULL | Matches a time slot for that location |
-| `phone_number` | `TEXT` | NOT NULL | |
-| `email` | `TEXT` | NOT NULL | Used to send Resend confirmation |
+| `phone_number` | `TEXT` | NULLABLE | Admin may omit when `exclude_email = true` |
+| `email` | `TEXT` | NULLABLE | Used to send Resend confirmation/reminders unless excluded |
+| `notes` | `TEXT` | NULLABLE | Admin-only internal notes |
+| `exclude_email` | `BOOLEAN` | NOT NULL, default `false` | When true, admin actions will not send confirmation/reminder emails |
 | `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from items table price |
 | `status` | `TEXT` | default `'pending'` | See valid values below |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
@@ -26,7 +32,7 @@ Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in
 | Value | Meaning |
 |---|---|
 | `pending` | Order submitted, awaiting admin review |
-| `confirmed` | Confirmed by admin via admin panel; confirmation email sent with pickup address |
+| `confirmed` | Confirmed by admin via admin panel; confirmation email may be sent unless email is excluded or delivery fails |
 | `reminded` | Pickup reminder email sent |
 | `paid` | Payment received |
 | `picked_up` | Customer collected the order |
@@ -162,6 +168,8 @@ alembic upgrade head
 | `0008_uuid_item_location_ids` | replaces slug item/location IDs with server-generated UUIDs; cascades to `events` and `orders` |
 | `0009_event_hero_tooltip_images` | adds hero split text, tooltip config, and image-key fields to `events`; backfills tooltip defaults for existing events |
 | `0010_event_etransfer_fields` | adds optional e-transfer toggle and email fields to `events`; backfills existing rows to enabled with legacy email |
+| `0011_enable_rls_public_tables` | enables RLS on app tables in `public` |
+| `0012_order_notes_exclude_email` | adds `notes` and `exclude_email` to `orders`; makes `email` and `phone_number` nullable |
 
 ---
 
