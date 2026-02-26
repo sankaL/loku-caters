@@ -1,7 +1,7 @@
 """create feedback table
 
-Revision ID: 0005_create_feedback
-Revises: 0004_events_table
+Revision ID: 0003_create_feedback
+Revises: 0002_create_event_config
 Create Date: 2026-02-22 00:00:00.000000
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
-revision = "0005_create_feedback"
-down_revision = "0004_events_table"
+revision = "0003_create_feedback"
+down_revision = "0002_create_event_config"
 branch_labels = None
 depends_on = None
 

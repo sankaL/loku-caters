@@ -1,7 +1,7 @@
 """normalize items and locations to db tables
 
-Revision ID: 0003_normalize_items_locations
-Revises: 0002_create_event_config
+Revision ID: 0006_normalize_items_locations
+Revises: 0005_feedback_type_and_message
 Create Date: 2026-02-22 00:00:00.000000
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision = "0003_normalize_items_locations"
-down_revision = "0002_create_event_config"
+revision = "0006_normalize_items_locations"
+down_revision = "0005_feedback_type_and_message"
 branch_labels = None
 depends_on = None
 
@@ -43,7 +43,7 @@ def upgrade() -> None:
     op.execute(sa.text("""
         INSERT INTO items (id, name, description, price, discounted_price, sort_order)
         SELECT
-            gen_random_uuid()::text,
+            COALESCE(NULLIF(elem.value->>'id', ''), gen_random_uuid()::text),
             elem.value->>'name',
             COALESCE(elem.value->>'description', ''),
             (elem.value->>'price')::NUMERIC,
@@ -61,7 +61,7 @@ def upgrade() -> None:
     op.execute(sa.text("""
         INSERT INTO locations (id, name, address, time_slots, sort_order)
         SELECT
-            gen_random_uuid()::text,
+            COALESCE(NULLIF(elem.value->>'id', ''), gen_random_uuid()::text),
             elem.value->>'name',
             COALESCE(elem.value->>'address', ''),
             COALESCE(elem.value->'timeSlots', '[]'::jsonb),

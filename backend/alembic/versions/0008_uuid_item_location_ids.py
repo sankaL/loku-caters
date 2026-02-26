@@ -1,7 +1,7 @@
 """replace slug item/location IDs with server-generated UUIDs
 
 Revision ID: 0008_uuid_item_location_ids
-Revises: 0007_feedback_type_and_message
+Revises: 0007_events_table
 Create Date: 2026-02-25 00:00:00.000000
 """
 
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "0008_uuid_item_location_ids"
-down_revision = "0007_feedback_type_and_message"
+down_revision = "0007_events_table"
 branch_labels = None
 depends_on = None
 

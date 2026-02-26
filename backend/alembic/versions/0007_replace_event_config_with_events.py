@@ -1,7 +1,7 @@
 """replace event_config with events table
 
-Revision ID: 0004_replace_event_config_with_events
-Revises: 0003_normalize_items_locations
+Revision ID: 0007_events_table
+Revises: 0006_normalize_items_locations
 Create Date: 2026-02-22 00:00:00.000000
 """
 
@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision = "0004_events_table"
-down_revision = "0003_normalize_items_locations"
+revision = "0007_events_table"
+down_revision = "0006_normalize_items_locations"
 branch_labels = None
 depends_on = None
 

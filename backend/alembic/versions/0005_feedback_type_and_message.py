@@ -1,7 +1,7 @@
 """add feedback_type, order_id, message to feedback; make reason nullable
 
-Revision ID: 0007_feedback_type_and_message
-Revises: 0006_add_feedback_contact
+Revision ID: 0005_feedback_type_and_message
+Revises: 0004_add_feedback_contact
 Create Date: 2026-02-22 00:00:00.000000
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 from alembic import op
 import sqlalchemy as sa
 
-revision = "0007_feedback_type_and_message"
-down_revision = "0006_add_feedback_contact"
+revision = "0005_feedback_type_and_message"
+down_revision = "0004_add_feedback_contact"
 branch_labels = None
 depends_on = None
 

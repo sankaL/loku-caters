@@ -161,11 +161,11 @@ alembic upgrade head
 |---|---|
 | `0001_create_orders` | `orders` table |
 | `0002_create_event_config` | `event_config` table, seeded with values from the original `event-config.json` |
-| `0003_normalize_items_locations` | `items` and `locations` tables (seeded from `event_config` JSONB); adds `hero_header`, `hero_subheader`, `promo_details` to `event_config`; drops `currency`, `items`, `locations` JSONB columns |
-| `0004_replace_event_config_with_events` | `events` table (seeded from `event_config` row with all item/location IDs, `is_active = true`); drops `event_config` |
-| `0005_create_feedback` | `feedback` table |
-| `0006_add_feedback_contact` | adds `contact` column to `feedback` |
-| `0007_feedback_type_and_message` | adds `feedback_type`, `order_id`, `message`; makes `reason` nullable |
+| `0003_create_feedback` | `feedback` table |
+| `0004_add_feedback_contact` | adds `contact` column to `feedback` |
+| `0005_feedback_type_and_message` | adds `feedback_type`, `order_id`, `message`; makes `reason` nullable |
+| `0006_normalize_items_locations` | `items` and `locations` tables (seeded from `event_config` JSONB); adds `hero_header`, `hero_subheader`, `promo_details` to `event_config`; drops `currency`, `items`, `locations` JSONB columns |
+| `0007_events_table` | `events` table (seeded from `event_config` row with all item/location IDs, `is_active = true`); drops `event_config` |
 | `0008_uuid_item_location_ids` | replaces slug item/location IDs with server-generated UUIDs; cascades to `events` and `orders` |
 | `0009_event_hero_tooltip_images` | adds hero split text, tooltip config, and image-key fields to `events`; backfills tooltip defaults for existing events |
 | `0010_event_etransfer_fields` | adds optional e-transfer toggle and email fields to `events`; backfills existing rows to enabled with legacy email |
