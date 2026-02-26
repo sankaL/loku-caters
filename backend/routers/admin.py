@@ -589,6 +589,7 @@ def _order_dict(order: Order) -> dict:
         "pickup_time_slot": order.pickup_time_slot,
         "total_price": float(order.total_price),
         "status": order.status,
+        "reminded": bool(order.reminded),
         "notes": order.notes,
         "exclude_email": bool(order.exclude_email),
         "created_at": order.created_at.isoformat() if order.created_at else None,
@@ -768,7 +769,7 @@ def admin_bulk_remind(
             print(f"[email] Failed to send reminder to {order.email}: {exc}")
             continue
 
-        order.status = OrderStatus.REMINDED
+        order.reminded = True
         reminded_count += 1
 
     db.commit()

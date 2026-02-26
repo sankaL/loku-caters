@@ -11,6 +11,7 @@ export interface Order {
   pickup_time_slot: string;
   total_price: number;
   status: string;
+  reminded: boolean;
   notes?: string | null;
   exclude_email?: boolean;
   created_at: string;
@@ -19,7 +20,6 @@ export interface Order {
 export const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fef3c7", color: "#92400e", label: "Pending" },
   confirmed: { bg: "#d1fae5", color: "#065f46", label: "Confirmed" },
-  reminded:  { bg: "#fdf0e8", color: "#7a3f1e", label: "Reminded" },
   paid:      { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
@@ -226,7 +226,7 @@ function calcMetrics(subset: Order[]) {
   const totalOrders = nonCancelled.length;
   const totalItems = nonCancelled.reduce((sum, o) => sum + (Number.isFinite(o.quantity) ? o.quantity : 0), 0);
   const confirmed = subset.filter((o) =>
-    ["confirmed", "reminded", "paid", "picked_up"].includes(o.status)
+    ["confirmed", "paid", "picked_up"].includes(o.status)
   ).length;
   const confirmedRate = totalOrders > 0 ? Math.round((confirmed / totalOrders) * 100) : 0;
   const active = subset.filter(isActive);

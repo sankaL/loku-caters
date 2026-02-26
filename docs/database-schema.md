@@ -26,6 +26,7 @@ App tables live in the `public` schema but are not intended to be accessed via S
 | `exclude_email` | `BOOLEAN` | NOT NULL, default `false` | When true, admin actions will not send confirmation/reminder emails |
 | `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from items table price |
 | `status` | `TEXT` | default `'pending'` | See valid values below |
+| `reminded` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether a pickup reminder email has been sent; independent of order status |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
 
 ### Order status values
@@ -34,7 +35,6 @@ App tables live in the `public` schema but are not intended to be accessed via S
 |---|---|
 | `pending` | Order submitted, awaiting admin review |
 | `confirmed` | Confirmed by admin via admin panel; confirmation email may be sent unless email is excluded or delivery fails |
-| `reminded` | Pickup reminder email sent |
 | `paid` | Payment received |
 | `picked_up` | Customer collected the order |
 | `no_show` | Customer did not pick up |
@@ -172,6 +172,7 @@ alembic upgrade head
 | `0011_enable_rls_public_tables` | enables RLS on app tables in `public` |
 | `0012_order_notes_exclude_email` | adds `notes` and `exclude_email` to `orders`; makes `email` and `phone_number` nullable |
 | `0013_orders_event_id` | adds `event_id` to `orders` and backfills to the active event |
+| `0014_add_reminded_boolean` | adds `reminded` boolean to `orders`; backfills existing `status='reminded'` rows to `reminded=true, status='confirmed'` |
 
 ---
 

@@ -73,6 +73,7 @@ class Order(Base):
     exclude_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(String, default=OrderStatus.PENDING)
+    reminded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
