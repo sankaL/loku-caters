@@ -2,6 +2,10 @@
 
 Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in `backend/alembic/versions/`.
 
+## Security: Row Level Security (RLS)
+
+App tables live in the `public` schema but are not intended to be accessed via Supabase PostgREST from the browser. RLS is enabled on these tables, and no RLS policies are defined. The FastAPI backend connects directly to Postgres as the table owner and performs all reads and writes.
+
 ---
 
 ## Table: `orders`
@@ -9,15 +13,18 @@ Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | `UUID` | Primary key, default `gen_random_uuid()` | Exposed to customer as 8-char reference (uppercased) |
+| `event_id` | `INTEGER` | NOT NULL | References `events.id` at time of order (no FK) |
 | `name` | `TEXT` | NOT NULL | Customer full name |
-| `item_id` | `TEXT` | NOT NULL | Matches `id` in `event_config.items` |
+| `item_id` | `TEXT` | NOT NULL | Denormalised at order time; matches an `items.id` at time of order |
 | `item_name` | `TEXT` | NOT NULL | Denormalised name at time of order |
 | `quantity` | `INTEGER` | NOT NULL, CHECK >= 1 | Number of portions |
-| `pickup_location` | `TEXT` | NOT NULL | Matches a location name in `event_config.locations` |
+| `pickup_location` | `TEXT` | NOT NULL | Matches a location name in the `locations` table |
 | `pickup_time_slot` | `TEXT` | NOT NULL | Matches a time slot for that location |
-| `phone_number` | `TEXT` | NOT NULL | |
-| `email` | `TEXT` | NOT NULL | Used to send Resend confirmation |
-| `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from config price |
+| `phone_number` | `TEXT` | NULLABLE | Admin may omit when `exclude_email = true` |
+| `email` | `TEXT` | NULLABLE | Used to send Resend confirmation/reminders unless excluded |
+| `notes` | `TEXT` | NULLABLE | Admin-only internal notes |
+| `exclude_email` | `BOOLEAN` | NOT NULL, default `false` | When true, admin actions will not send confirmation/reminder emails |
+| `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from items table price |
 | `status` | `TEXT` | default `'pending'` | See valid values below |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
 
@@ -26,7 +33,8 @@ Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in
 | Value | Meaning |
 |---|---|
 | `pending` | Order submitted, awaiting admin review |
-| `confirmed` | Confirmed by admin via admin panel; confirmation email sent with pickup address |
+| `confirmed` | Confirmed by admin via admin panel; confirmation email may be sent unless email is excluded or delivery fails |
+| `reminded` | Pickup reminder email sent |
 | `paid` | Payment received |
 | `picked_up` | Customer collected the order |
 | `no_show` | Customer did not pick up |
@@ -34,49 +42,79 @@ Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in
 
 ---
 
-## Table: `event_config`
+## Table: `items`
 
-Single-row table (`id = 1` always). Stores all event configuration that was previously managed via `event-config.json`. Edited through the admin panel at `/admin/config`. The main order page and backend read from this table at runtime.
+Relational table for menu items. Managed via `/admin/items` in the admin panel.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
-| `id` | `INTEGER` | Primary key, always `1` | Single-row design |
-| `event_date` | `TEXT` | NOT NULL | Display string shown on the hero section, e.g. `"February 28th, 2026"` |
-| `currency` | `TEXT` | NOT NULL, default `'CAD'` | 3-letter currency code |
-| `items` | `JSONB` | NOT NULL | Array of item objects (see structure below) |
-| `locations` | `JSONB` | NOT NULL | Array of location objects (see structure below) |
-| `updated_at` | `TIMESTAMPTZ` | | Set automatically when admin saves config |
+| `id` | `TEXT` (UUID) | Primary key | Server-generated UUID string (Python `uuid4`) |
+| `name` | `TEXT` | NOT NULL | Display name |
+| `description` | `TEXT` | NOT NULL, default `''` | Shown below item selector on order form |
+| `price` | `NUMERIC(10,2)` | NOT NULL | Regular price |
+| `discounted_price` | `NUMERIC(10,2)` | NULLABLE | Overrides `price` for display and order calculation if set |
+| `sort_order` | `INTEGER` | NOT NULL, default `0` | Controls display order |
 
-### `items` JSONB structure
+---
 
-```json
-[
-  {
-    "id": "lamprais-01",
-    "name": "Lamprais",
-    "description": "...",
-    "price": 23.00,
-    "discounted_price": 20.00
-  }
-]
-```
+## Table: `locations`
 
-`discounted_price` is optional. If present, it overrides `price` for display and order calculation.
+Relational table for pickup locations. Managed via `/admin/locations` in the admin panel.
 
-### `locations` JSONB structure
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Server-generated UUID string (Python `uuid4`) |
+| `name` | `TEXT` | NOT NULL | Display name shown to customers |
+| `address` | `TEXT` | NOT NULL, default `''` | Included in confirmation and reminder emails |
+| `time_slots` | `JSONB` | NOT NULL, default `'[]'` | Array of time slot strings |
+| `sort_order` | `INTEGER` | NOT NULL, default `0` | Controls display order |
 
-```json
-[
-  {
-    "id": "woodbridge",
-    "name": "Woodbridge",
-    "address": "123 Main St, Woodbridge, ON L4H 1A1",
-    "timeSlots": ["12:00 PM - 1:00 PM", "1:00 PM - 2:00 PM"]
-  }
-]
-```
+---
 
-`address` is included in the confirmation email when admin sends it via the admin panel.
+## Table: `events`
+
+Stores events with their associated item and location selections. Only one event has `is_active = true` at a time; that event drives the public order page. Managed via `/admin/config` in the admin panel.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `INTEGER` | Primary key, auto-increment | |
+| `name` | `TEXT` | NOT NULL | Internal label, e.g. `"February 2026 Batch"` |
+| `event_date` | `TEXT` | NOT NULL | Display string shown on hero and emails, e.g. `"February 28th, 2026"` |
+| `hero_header` | `TEXT` | NOT NULL, default `''` | Main heading on hero banner (white text). Required when creating/updating via admin API |
+| `hero_header_sage` | `TEXT` | NOT NULL, default `''` | Optional second heading line (sage text) |
+| `hero_subheader` | `TEXT` | NOT NULL, default `''` | Optional hero subheading |
+| `promo_details` | `TEXT` | NULLABLE | Optional promo text shown between hero and order form |
+| `tooltip_enabled` | `BOOLEAN` | NOT NULL, default `false` | Controls whether tooltip trigger/modal is shown on hero |
+| `tooltip_header` | `TEXT` | NULLABLE | Required only when `tooltip_enabled = true`; also used as tooltip badge label |
+| `tooltip_body` | `TEXT` | NULLABLE | Required only when `tooltip_enabled = true` |
+| `tooltip_image_key` | `TEXT` | NULLABLE | Optional key referencing an entry in `config/event-images.json` |
+| `hero_side_image_key` | `TEXT` | NULLABLE | Optional key referencing a `hero_side` image in `config/event-images.json` |
+| `etransfer_enabled` | `BOOLEAN` | NOT NULL, default `false` | Controls whether the e-transfer payment section appears after submit and in confirmation emails |
+| `etransfer_email` | `TEXT` | NULLABLE | Required only when `etransfer_enabled = true` |
+| `is_active` | `BOOLEAN` | NOT NULL, default `false` | Only one row is `true` at a time; the active event is live on the order page |
+| `item_ids` | `JSONB` | NOT NULL, default `'[]'` | Ordered array of `items.id` strings available for this event |
+| `location_ids` | `JSONB` | NOT NULL, default `'[]'` | Ordered array of `locations.id` strings available for this event |
+| `updated_at` | `TIMESTAMPTZ` | NULLABLE | Set automatically on create/update |
+
+---
+
+## Event image registry
+
+Event image assets are stored in the repository and referenced by key from `events.tooltip_image_key` and `events.hero_side_image_key`.
+
+Source-of-truth file:
+
+- `config/event-images.json`
+
+Synced runtime copies:
+
+- `backend/event-images.json`
+- `frontend/src/config/event-images.json`
+
+Registry helper paths define where new images should be placed:
+
+- `frontend/public/assets/img/tooltip`
+- `frontend/public/assets/img/hero-side`
 
 ---
 
@@ -126,11 +164,19 @@ alembic upgrade head
 | `0003_create_feedback` | `feedback` table |
 | `0004_add_feedback_contact` | adds `contact` column to `feedback` |
 | `0005_feedback_type_and_message` | adds `feedback_type`, `order_id`, `message`; makes `reason` nullable |
+| `0006_normalize_items_locations` | `items` and `locations` tables (seeded from `event_config` JSONB); adds `hero_header`, `hero_subheader`, `promo_details` to `event_config`; drops `currency`, `items`, `locations` JSONB columns |
+| `0007_events_table` | `events` table (seeded from `event_config` row with all item/location IDs, `is_active = true`); drops `event_config` |
+| `0008_uuid_item_location_ids` | replaces slug item/location IDs with server-generated UUIDs; cascades to `events` and `orders` |
+| `0009_event_hero_tooltip_images` | adds hero split text, tooltip config, and image-key fields to `events`; backfills tooltip defaults for existing events |
+| `0010_event_etransfer_fields` | adds optional e-transfer toggle and email fields to `events`; backfills existing rows to enabled with legacy email |
+| `0011_enable_rls_public_tables` | enables RLS on app tables in `public` |
+| `0012_order_notes_exclude_email` | adds `notes` and `exclude_email` to `orders`; makes `email` and `phone_number` nullable |
+| `0013_orders_event_id` | adds `event_id` to `orders` and backfills to the active event |
 
 ---
 
 ## Relationships
 
-**Two-table design** with no foreign keys between them.
+**Four-table design** with no foreign keys between them.
 
-`orders` captures item and location data as denormalised strings at order time so records remain accurate even if the config changes later. `event_config` is the live source of truth for items, locations, and pricing; it is read at request time by the backend and frontend.
+`orders` captures item and location data as denormalised strings at order time so records remain accurate even if the config changes later. Each order is also tied to an `event_id` so admin views and emails can reference the correct event even after the active event changes. `items` and `locations` are the live source of truth for the full catalog. `events` holds one or more events, each referencing a subset of items and locations by ID; only the `is_active = true` event is shown on the public order page.

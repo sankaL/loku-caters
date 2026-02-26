@@ -1,7 +1,29 @@
 import resend
 from config import settings
+from event_config import CURRENCY
 
 resend.api_key = settings.resend_api_key
+
+
+def _build_etransfer_section_html(order_data: dict) -> str:
+    etransfer_enabled = bool(order_data.get("etransfer_enabled"))
+    etransfer_email = str(order_data.get("etransfer_email") or "").strip()
+    if not etransfer_enabled or not etransfer_email:
+        return ""
+
+    return f"""
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf8f0;border-radius:12px;overflow:hidden;margin-bottom:24px;border:1px solid #e8d9b8;">
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#7a5a1a;">Payment by e-Transfer</p>
+                    <p style="margin:0;font-size:14px;color:#8a6a2a;line-height:1.6;">
+                      If you would like to pay by e-Transfer, you are welcome to send your payment to
+                      <strong>{etransfer_email}</strong> at your convenience - any time before your scheduled pickup.
+                    </p>
+                  </td>
+                </tr>
+              </table>
+"""
 
 
 def send_confirmation(order_data: dict) -> None:
@@ -16,10 +38,11 @@ def send_confirmation(order_data: dict) -> None:
     pickup_time_slot = order_data["pickup_time_slot"]
     total_price = order_data["total_price"]
     price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency", "CAD")
+    currency = order_data.get("currency") or CURRENCY
     email = order_data["email"]
     address = order_data.get("address", "")
     event_date = order_data.get("event_date", "")
+    etransfer_section_html = _build_etransfer_section_html(order_data)
 
     location_display = pickup_location
     if address:
@@ -98,19 +121,7 @@ def send_confirmation(order_data: dict) -> None:
                 </tr>
               </table>
 
-              <!-- E-Transfer -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf8f0;border-radius:12px;overflow:hidden;margin-bottom:24px;border:1px solid #e8d9b8;">
-                <tr>
-                  <td style="padding:20px 24px;">
-                    <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#7a5a1a;">Payment by e-Transfer</p>
-                    <p style="margin:0;font-size:14px;color:#8a6a2a;line-height:1.6;">
-                      If you would like to pay by e-Transfer, you are welcome to send your payment to
-                      <strong>jlokuliyana@yahoo.com</strong> at your convenience - any time before your scheduled pickup.
-                      If you have already sent your payment, please disregard this notice.
-                    </p>
-                  </td>
-                </tr>
-              </table>
+{etransfer_section_html}
 
               <p style="margin:0;font-size:15px;color:#4a4a4a;line-height:1.6;">
                 We look forward to serving you! If you have any questions, simply reply to this email.
@@ -158,10 +169,11 @@ def send_reminder(order_data: dict) -> None:
     pickup_time_slot = order_data["pickup_time_slot"]
     total_price = order_data["total_price"]
     price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency", "CAD")
+    currency = order_data.get("currency") or CURRENCY
     email = order_data["email"]
     address = order_data.get("address", "")
     event_date = order_data.get("event_date", "")
+    etransfer_section_html = _build_etransfer_section_html(order_data)
 
     location_display = pickup_location
     if address:
@@ -240,19 +252,7 @@ def send_reminder(order_data: dict) -> None:
                 </tr>
               </table>
 
-              <!-- E-Transfer -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf8f0;border-radius:12px;overflow:hidden;margin-bottom:24px;border:1px solid #e8d9b8;">
-                <tr>
-                  <td style="padding:20px 24px;">
-                    <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#7a5a1a;">Payment by e-Transfer</p>
-                    <p style="margin:0;font-size:14px;color:#8a6a2a;line-height:1.6;">
-                      If you have not yet sent your e-Transfer payment, you are welcome to do so at any time before your pickup by sending to
-                      <strong>jlokuliyana@yahoo.com</strong>.
-                      If you have already sent your payment, please disregard this notice.
-                    </p>
-                  </td>
-                </tr>
-              </table>
+{etransfer_section_html}
 
               <p style="margin:0;font-size:15px;color:#4a4a4a;line-height:1.6;">
                 If you have any questions, simply reply to this email.

@@ -8,6 +8,7 @@ import {
   Order,
   KPIData,
   computeRevenue,
+  computeItemRevenueBreakdown,
   computeLocationBreakdown,
   computeTimeSlotBreakdown,
   computeTopCustomers,
@@ -192,6 +193,10 @@ function fmt(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-CA", { style: "currency", currency }).format(amount);
 }
 
+function fmt0(amount: number, currency: string): string {
+  return new Intl.NumberFormat("en-CA", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -202,6 +207,10 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<Range>("7d");
   const [toast, setToast] = useState<string | null>(null);
+
+  function itemWord(n: number): string {
+    return n === 1 ? "item" : "items";
+  }
 
   useEffect(() => {
     async function load() {
@@ -225,7 +234,7 @@ export default function DashboardPage() {
         if (!ordersRes.ok) throw new Error("Failed to load orders");
 
         setOrders(await ordersRes.json());
-        if (configResult.status === "fulfilled") {
+        if (configResult.status === "fulfilled" && configResult.value) {
           setCurrency(configResult.value.currency);
         }
       } catch {
@@ -245,12 +254,17 @@ export default function DashboardPage() {
 
   // Aggregations
   const revenue = computeRevenue(orders);
+  const items = computeItemRevenueBreakdown(orders);
   const locations = computeLocationBreakdown(orders);
   const timeSlots = computeTimeSlotBreakdown(orders);
   const topCustomers = computeTopCustomers(orders, 5);
   const openOrders = filterOpenOrders(orders);
   const timeline = computeOrdersOverTime(orders, range);
   const kpis: KPIData = computeKPIs(orders);
+
+  const currMonthRevenue = revenue.monthly[revenue.monthly.length - 1]?.revenue ?? 0;
+  const prevMonthRevenue = revenue.monthly[revenue.monthly.length - 2]?.revenue ?? 0;
+  const revenueDelta = prevMonthRevenue === 0 ? null : Math.round(((currMonthRevenue - prevMonthRevenue) / prevMonthRevenue) * 100);
 
   const today = new Date().toLocaleDateString("en-CA", {
     weekday: "long",
@@ -301,21 +315,21 @@ export default function DashboardPage() {
             value={String(kpis.totalOrders)}
             delta={kpis.totalOrdersDelta}
             trendText={trendLabel(kpis.totalOrdersDelta, "Trending up this month", "Trending down this month", "Orders this month")}
-            subtitle="Non-cancelled pre-orders"
+            subtitle={`Non-cancelled pre-orders | ${kpis.totalItems} ${itemWord(kpis.totalItems)} this month`}
           />
           <KpiTile
-            label="Confirmed Rate"
-            value={`${kpis.confirmedRate}%`}
-            delta={kpis.confirmedRateDelta}
-            trendText={trendLabel(kpis.confirmedRateDelta, "Confirmation improving", "Confirmation declining", "Confirmation rate")}
-            subtitle="Confirmed, reminded, paid, or picked up"
+            label="Total Revenue"
+            value={fmt0(revenue.total, currency)}
+            delta={revenueDelta}
+            trendText={`This month: ${fmt0(currMonthRevenue, currency)}`}
+            subtitle="Excludes no-shows and cancellations"
           />
           <KpiTile
             label="Avg Order Value"
             value={fmt(kpis.avgOrderValue, currency)}
             delta={kpis.avgOrderValueDelta}
             trendText={trendLabel(kpis.avgOrderValueDelta, "Value trending up", "Value trending down", "Average per order")}
-            subtitle="Active orders only"
+            subtitle="Excludes no-shows and cancellations"
           />
           <KpiTile
             label="Pickup Completion"
@@ -352,7 +366,7 @@ export default function DashboardPage() {
           </>
         ) : (
           <>
-            <RevenueRadialChart totalRevenue={revenue.total} currency={currency} />
+            <RevenueRadialChart data={items} currency={currency} />
             <LocationDonutChart data={locations} currency={currency} />
             <TimeSlotRadialChart data={timeSlots} />
           </>

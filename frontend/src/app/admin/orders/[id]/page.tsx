@@ -1,17 +1,19 @@
 "use client";
 
-import { useState, useEffect, use } from "react";
+import { useState, useEffect, use, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL } from "@/config/event";
+import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import { getApiErrorMessage } from "@/lib/apiError";
 import CustomSelect from "@/components/ui/CustomSelect";
 import Modal from "@/components/ui/Modal";
 
 interface Order {
   id: string;
+  event_id: number;
   name: string;
-  email: string;
-  phone_number: string;
+  email: string | null;
+  phone_number: string | null;
   item_id: string;
   item_name: string;
   quantity: number;
@@ -19,7 +21,28 @@ interface Order {
   pickup_time_slot: string;
   total_price: number;
   status: string;
+  notes?: string | null;
+  exclude_email?: boolean;
   created_at: string;
+}
+
+interface AdminEvent {
+  id: number;
+  name: string;
+  event_date: string;
+  is_active: boolean;
+}
+
+interface EditOrderForm {
+  name: string;
+  email: string;
+  phone_number: string;
+  item_id: string;
+  quantity: number;
+  pickup_location: string;
+  pickup_time_slot: string;
+  notes: string;
+  exclude_email: boolean;
 }
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
@@ -50,6 +73,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
+  const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [configUsesFallback, setConfigUsesFallback] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editForm, setEditForm] = useState<EditOrderForm | null>(null);
+  const [savingEdits, setSavingEdits] = useState(false);
+
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   const showToast = (message: string, type: "success" | "error") => {
@@ -70,7 +100,19 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           return;
         }
         if (!res.ok) throw new Error("Failed to fetch order");
-        setOrder(await res.json());
+        const data = await res.json();
+        setOrder(data);
+        setEditForm({
+          name: data.name ?? "",
+          email: data.email ?? "",
+          phone_number: data.phone_number ?? "",
+          item_id: data.item_id ?? "",
+          quantity: data.quantity ?? 1,
+          pickup_location: data.pickup_location ?? "",
+          pickup_time_slot: data.pickup_time_slot ?? "",
+          notes: data.notes ?? "",
+          exclude_email: !!data.exclude_email,
+        });
       } catch {
         showToast("Failed to load order", "error");
       } finally {
@@ -79,6 +121,99 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     }
     fetchOrder();
   }, [id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadEventConfig() {
+      if (!order) return;
+      setConfigUsesFallback(false);
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/admin/events/${order.event_id}/config`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as EventConfig;
+          if (!cancelled) setEventConfig(data);
+          return;
+        }
+      } catch {
+        // Non-blocking
+      }
+
+      try {
+        const cfg = await fetchEventConfig();
+        if (!cancelled) {
+          setEventConfig(cfg);
+          setConfigUsesFallback(true);
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
+    loadEventConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [order]);
+
+  useEffect(() => {
+    async function loadEvents() {
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/admin/events`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as AdminEvent[];
+        setEvents(Array.isArray(data) ? data : []);
+      } catch {
+        // Non-blocking
+      }
+    }
+    loadEvents();
+  }, []);
+
+  const eventLabel = useMemo(() => {
+    if (!order) return "";
+    const e = events.find((x) => x.id === order.event_id);
+    if (!e) return `Event ${order.event_id}`;
+    return `${e.name} (${e.event_date})`;
+  }, [events, order]);
+
+  const editTimeSlots = useMemo(() => {
+    if (!eventConfig || !editForm?.pickup_location) return [];
+    const loc = eventConfig.locations.find((l) => l.name === editForm.pickup_location);
+    return loc?.timeSlots ?? [];
+  }, [eventConfig, editForm?.pickup_location]);
+
+  const editItemOptions = useMemo(() => {
+    const base = (eventConfig?.items ?? []).map((i) => ({ value: i.id, label: i.name }));
+    const selectedId = (editForm?.item_id ?? "").trim();
+    if (!selectedId) return base;
+    if (base.some((o) => o.value === selectedId)) return base;
+    const label = (order?.item_name ?? selectedId).trim() || selectedId;
+    return [{ value: selectedId, label: `${label} (current)` }, ...base];
+  }, [eventConfig, editForm?.item_id, order?.item_name]);
+
+  const editLocationOptions = useMemo(() => {
+    const base = (eventConfig?.locations ?? []).map((l) => ({ value: l.name, label: l.name }));
+    const selected = (editForm?.pickup_location ?? "").trim();
+    if (!selected) return base;
+    if (base.some((o) => o.value === selected)) return base;
+    return [{ value: selected, label: `${selected} (current)` }, ...base];
+  }, [eventConfig, editForm?.pickup_location]);
+
+  const editTimeSlotOptions = useMemo(() => {
+    const base = editTimeSlots.map((s) => ({ value: s, label: s }));
+    const selected = (editForm?.pickup_time_slot ?? "").trim();
+    if (!selected) return base;
+    if (base.some((o) => o.value === selected)) return base;
+    return [{ value: selected, label: `${selected} (current)` }, ...base];
+  }, [editTimeSlots, editForm?.pickup_time_slot]);
 
   async function handleStatusChange(newStatus: string) {
     if (!order) return;
@@ -92,8 +227,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         body: JSON.stringify({ status: newStatus }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to update status");
+        throw new Error(await getApiErrorMessage(res, "Failed to update status"));
       }
       setOrder((prev) => prev ? { ...prev, status: newStatus } : prev);
       showToast("Status updated", "success");
@@ -115,15 +249,58 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to send confirmation");
+        throw new Error(await getApiErrorMessage(res, "Failed to send confirmation"));
       }
+      const data = await res.json();
       setOrder((prev) => prev ? { ...prev, status: "confirmed" } : prev);
-      showToast("Confirmation email sent!", "success");
+      if (data.email_suppressed) {
+        showToast("Order confirmed (email excluded)", "success");
+      } else if (data.email_sent) {
+        showToast("Confirmation email sent!", "success");
+      } else {
+        showToast("Order confirmed, but email failed to send", "error");
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to send email", "error");
     } finally {
       setSendingEmail(false);
+    }
+  }
+
+  async function handleSaveEdits(e: React.FormEvent) {
+    e.preventDefault();
+    if (!editForm) return;
+    setSavingEdits(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/orders/${id}`, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to update order"));
+      }
+      const data = await res.json();
+      setOrder(data);
+      setEditForm({
+        name: data.name ?? "",
+        email: data.email ?? "",
+        phone_number: data.phone_number ?? "",
+        item_id: data.item_id ?? "",
+        quantity: data.quantity ?? 1,
+        pickup_location: data.pickup_location ?? "",
+        pickup_time_slot: data.pickup_time_slot ?? "",
+        notes: data.notes ?? "",
+        exclude_email: !!data.exclude_email,
+      });
+      setShowEditModal(false);
+      showToast("Order updated", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update order", "error");
+    } finally {
+      setSavingEdits(false);
     }
   }
 
@@ -140,8 +317,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to delete order");
+        throw new Error(await getApiErrorMessage(res, "Failed to delete order"));
       }
       router.push("/admin/orders");
     } catch (err) {
@@ -170,6 +346,17 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
   const labelStyle = { fontSize: "11px", fontWeight: 600, textTransform: "uppercase" as const, letterSpacing: "0.08em", color: "var(--color-sage)", marginBottom: "4px" };
   const valueStyle = { fontSize: "14px", color: "var(--color-text)", fontWeight: 500 };
+
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "12px 14px",
+    borderRadius: "12px",
+    border: "1px solid var(--color-border)",
+    background: "white",
+    color: "var(--color-text)",
+    fontSize: "14px",
+    outline: "none",
+  };
 
   if (loading) {
     return (
@@ -256,11 +443,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
             <div>
               <p style={labelStyle}>Email</p>
-              <p style={valueStyle} className="break-all">{order.email}</p>
+              <p style={valueStyle} className="break-all">{order.email ?? "-"}</p>
             </div>
             <div>
               <p style={labelStyle}>Phone</p>
-              <p style={valueStyle}>{order.phone_number}</p>
+              <p style={valueStyle}>{order.phone_number ?? "-"}</p>
             </div>
           </div>
         </div>
@@ -283,11 +470,23 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
           <button
             onClick={handleSendEmail}
-            disabled={sendingEmail}
+            disabled={sendingEmail || order.status !== "pending"}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-60"
             style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            title={order.status !== "pending" ? "Order is already confirmed" : undefined}
           >
-            {sendingEmail ? "Sending..." : "Send Confirmation Email"}
+            {sendingEmail
+              ? "Sending..."
+              : (order.exclude_email ? "Confirm (No Email)" : "Send Confirmation Email")
+            }
+          </button>
+
+          <button
+            onClick={() => setShowEditModal(true)}
+            className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all"
+            style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+          >
+            Edit Order
           </button>
 
           <button
@@ -310,6 +509,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <p style={valueStyle}>{order.item_name}</p>
             </div>
             <div>
+              <p style={labelStyle}>Event</p>
+              <p style={valueStyle}>{eventLabel}</p>
+            </div>
+            <div>
               <p style={labelStyle}>Quantity</p>
               <p style={valueStyle}>{order.quantity}</p>
             </div>
@@ -318,6 +521,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <p style={{ ...valueStyle, color: "var(--color-forest)", fontWeight: 700 }}>
                 ${order.total_price.toFixed(2)}
               </p>
+            </div>
+            <div>
+              <p style={labelStyle}>Email Excluded</p>
+              <p style={valueStyle}>{order.exclude_email ? "Yes" : "No"}</p>
             </div>
             <div>
               <p style={labelStyle}>Location</p>
@@ -333,7 +540,164 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             </div>
           </div>
         </div>
+
+        {/* Admin Notes */}
+        <div style={cardStyle} className="md:col-span-3">
+          <h2 className="text-sm font-semibold mb-2" style={{ color: "var(--color-forest)" }}>
+            Notes
+          </h2>
+          <p className="text-sm" style={{ color: "var(--color-text)", whiteSpace: "pre-wrap" }}>
+            {order.notes ? order.notes : "-"}
+          </p>
+        </div>
       </div>
+
+      {/* Edit Order Modal */}
+      {showEditModal && editForm && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowEditModal(false); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "720px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-5" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              Edit Order
+            </h2>
+            <form onSubmit={handleSaveEdits} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm((f) => f ? ({ ...f, name: e.target.value }) : f)}
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Email</label>
+                  <input
+                    required={!editForm.exclude_email}
+                    type="email"
+                    value={editForm.email}
+                    onChange={(e) => setEditForm((f) => f ? ({ ...f, email: e.target.value }) : f)}
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone</label>
+                  <input
+                    required={!editForm.exclude_email}
+                    type="tel"
+                    value={editForm.phone_number}
+                    onChange={(e) => setEditForm((f) => f ? ({ ...f, phone_number: e.target.value }) : f)}
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Quantity</label>
+                  <input
+                    required
+                    type="number"
+                    min={1}
+                    value={editForm.quantity}
+                    onChange={(e) => setEditForm((f) => f ? ({ ...f, quantity: parseInt(e.target.value, 10) || 1 }) : f)}
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-text)" }}>
+                    <input
+                      type="checkbox"
+                      checked={editForm.exclude_email}
+                      onChange={(e) => setEditForm((f) => f ? ({ ...f, exclude_email: e.target.checked }) : f)}
+                      style={{ accentColor: "var(--color-forest)", width: "15px", height: "15px" }}
+                    />
+                    Exclude Email (no confirmation or reminder emails)
+                  </label>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    When enabled, Email and Phone are optional.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Item</label>
+                <CustomSelect
+                  options={editItemOptions}
+                  value={editForm.item_id}
+                  onChange={(v) => setEditForm((f) => f ? ({ ...f, item_id: v }) : f)}
+                  disabled={!eventConfig}
+                />
+                {configUsesFallback && (
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    Using active event catalog as a fallback.
+                  </p>
+                )}
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Location</label>
+                  <CustomSelect
+                    options={editLocationOptions}
+                    value={editForm.pickup_location}
+                    onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_location: v, pickup_time_slot: "" }) : f)}
+                    disabled={!eventConfig}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Time Slot</label>
+                  <CustomSelect
+                    options={editTimeSlotOptions}
+                    value={editForm.pickup_time_slot}
+                    onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_time_slot: v }) : f)}
+                    disabled={!eventConfig || !editForm.pickup_location}
+                    placeholder={editForm.pickup_location ? "Select a time slot" : "Select a location first"}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Notes (admin only)</label>
+                <textarea
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm((f) => f ? ({ ...f, notes: e.target.value }) : f)}
+                  rows={4}
+                  style={{ ...inputStyle, resize: "vertical" as const, minHeight: "110px" }}
+                />
+              </div>
+
+              <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                Price will be computed server-side.
+              </p>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowEditModal(false)}
+                  className="px-4 py-2 rounded-xl text-sm font-medium"
+                  style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEdits}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                  style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                >
+                  {savingEdits ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <Modal
         isOpen={showDeleteModal}

@@ -1,14 +1,31 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { useState, useEffect } from "react";
 import ReactDOM from "react-dom";
 
 interface HeroSectionProps {
   eventDate: string;
+  heroHeader: string;
+  heroHeaderSage?: string;
+  heroSubheader: string;
+  promoDetails?: string | null;
+  tooltipEnabled?: boolean;
+  tooltipHeader?: string | null;
+  tooltipBody?: string | null;
+  tooltipImagePath?: string | null;
+  heroSideImagePath?: string | null;
   onFeedbackClick?: () => void;
 }
 
-function LampraisModal({ onClose }: { onClose: () => void }) {
+interface TooltipModalProps {
+  title: string;
+  body: string;
+  imagePath?: string | null;
+  onClose: () => void;
+}
+
+function TooltipModal({ title, body, imagePath, onClose }: TooltipModalProps) {
   useEffect(() => {
     function handleKey(e: KeyboardEvent) {
       if (e.key === "Escape") onClose();
@@ -49,7 +66,6 @@ function LampraisModal({ onClose }: { onClose: () => void }) {
         }}
         onMouseDown={(e) => e.stopPropagation()}
       >
-        {/* Modal header */}
         <div
           style={{
             display: "flex",
@@ -71,7 +87,7 @@ function LampraisModal({ onClose }: { onClose: () => void }) {
                 marginBottom: "4px",
               }}
             >
-              Sri Lankan Cuisine
+              Event Tooltip
             </p>
             <h2
               style={{
@@ -82,7 +98,7 @@ function LampraisModal({ onClose }: { onClose: () => void }) {
                 fontFamily: "var(--font-serif)",
               }}
             >
-              What is Lamprais?
+              {title}
             </h2>
           </div>
           <button
@@ -109,24 +125,23 @@ function LampraisModal({ onClose }: { onClose: () => void }) {
           </button>
         </div>
 
-        {/* Image */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/assets/img/lumprais-how-its-made-compressed.png"
-          alt="How Lamprais is made - a traditional Sri Lankan dish of rice and accompaniments wrapped in banana leaf"
-          style={{ display: "block", width: "100%", height: "auto" }}
-        />
+        {imagePath && (
+          <img
+            src={imagePath}
+            alt={title}
+            style={{ display: "block", width: "100%", height: "auto" }}
+          />
+        )}
 
-        {/* Footer */}
         <div
           style={{
             padding: "16px 24px",
             background: "var(--color-cream)",
-            borderTop: "1px solid var(--color-border)",
+            borderTop: imagePath ? "1px solid var(--color-border)" : "none",
           }}
         >
           <p style={{ margin: 0, fontSize: "13px", color: "var(--color-muted)", lineHeight: 1.6 }}>
-            Lamprais is a beloved Sri Lankan dish of rice cooked in stock, served with a variety of curries and accompaniments, all wrapped and baked in a banana leaf.
+            {body}
           </p>
         </div>
       </div>
@@ -135,8 +150,22 @@ function LampraisModal({ onClose }: { onClose: () => void }) {
   );
 }
 
-export default function HeroSection({ eventDate, onFeedbackClick }: HeroSectionProps) {
+export default function HeroSection({
+  eventDate,
+  heroHeader,
+  heroHeaderSage,
+  heroSubheader,
+  promoDetails,
+  tooltipEnabled = false,
+  tooltipHeader,
+  tooltipBody,
+  tooltipImagePath,
+  heroSideImagePath,
+  onFeedbackClick,
+}: HeroSectionProps) {
   const [modalOpen, setModalOpen] = useState(false);
+
+  const canShowTooltip = Boolean(tooltipEnabled && tooltipHeader && tooltipBody);
 
   return (
     <section className="w-full max-w-5xl mx-auto px-6 pt-4 pb-12">
@@ -152,18 +181,18 @@ export default function HeroSection({ eventDate, onFeedbackClick }: HeroSectionP
           }}
         />
 
-        {/* Decorative food image */}
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src="/assets/img/background-removed-background-removed.png"
-          alt=""
-          aria-hidden="true"
-          className="hidden md:block absolute right-0 inset-y-0 h-full w-auto max-w-[50%] object-contain object-right-bottom pointer-events-none select-none opacity-80"
-          style={{
-            maskImage: "linear-gradient(to right, transparent 0%, black 45%)",
-            WebkitMaskImage: "linear-gradient(to right, transparent 0%, black 45%)",
-          }}
-        />
+        {heroSideImagePath && (
+          <img
+            src={heroSideImagePath}
+            alt=""
+            aria-hidden="true"
+            className="hidden md:block absolute right-0 inset-y-0 h-full w-auto max-w-[50%] object-contain object-right-bottom pointer-events-none select-none opacity-80"
+            style={{
+              maskImage: "linear-gradient(to right, transparent 0%, black 45%)",
+              WebkitMaskImage: "linear-gradient(to right, transparent 0%, black 45%)",
+            }}
+          />
+        )}
 
         <div className="relative px-8 py-10 md:px-14 md:py-16">
           {eventDate && (
@@ -179,67 +208,74 @@ export default function HeroSection({ eventDate, onFeedbackClick }: HeroSectionP
             className="text-4xl md:text-5xl font-bold leading-tight mb-4 animate-fade-up delay-100"
             style={{ color: "var(--color-cream)", fontFamily: "var(--font-serif)" }}
           >
-            We&apos;re Making
-            <br />
-            <span style={{ color: "#a8c882" }}>Lamprais</span>
+            {heroHeader || "We're Making"}
+            {heroHeaderSage && (
+              <>
+                <br />
+                <span style={{ color: "var(--color-sage)" }}>{heroHeaderSage}</span>
+              </>
+            )}
           </h1>
 
-          {/* "What is Lamprais?" trigger */}
-          <button
-            type="button"
-            onClick={() => setModalOpen(true)}
-            className="animate-fade-up delay-150"
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "5px 12px",
-              borderRadius: "999px",
-              border: "1px solid rgba(168,200,130,0.4)",
-              background: "rgba(168,200,130,0.12)",
-              fontSize: "12px",
-              fontWeight: 600,
-              color: "#a8c882",
-              cursor: "pointer",
-              marginBottom: "16px",
-              transition: "background 0.15s, border-color 0.15s",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(168,200,130,0.22)";
-              e.currentTarget.style.borderColor = "rgba(168,200,130,0.7)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "rgba(168,200,130,0.12)";
-              e.currentTarget.style.borderColor = "rgba(168,200,130,0.4)";
-            }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
-            What is Lamprais?
-          </button>
+          {canShowTooltip && (
+            <button
+              type="button"
+              onClick={() => setModalOpen(true)}
+              className="animate-fade-up delay-150"
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "5px 12px",
+                borderRadius: "999px",
+                border: "1px solid rgba(114,145,82,0.45)",
+                background: "rgba(114,145,82,0.12)",
+                fontSize: "12px",
+                fontWeight: 600,
+                color: "var(--color-sage)",
+                cursor: "pointer",
+                marginBottom: "16px",
+                transition: "background 0.15s, border-color 0.15s",
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = "rgba(114,145,82,0.22)";
+                e.currentTarget.style.borderColor = "rgba(114,145,82,0.75)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = "rgba(114,145,82,0.12)";
+                e.currentTarget.style.borderColor = "rgba(114,145,82,0.45)";
+              }}
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <line x1="12" y1="8" x2="12" y2="12" />
+                <line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+              {tooltipHeader}
+            </button>
+          )}
 
           <p
             className="text-base md:text-lg leading-relaxed mb-2 max-w-xl animate-fade-up delay-200"
-            style={{ color: "#b8c8a8" }}
+            style={{ color: "rgba(247,245,240,0.85)" }}
           >
-            We&apos;re making a fresh batch and we&apos;d love for you to have some.
+            {heroSubheader || "We're making a fresh batch and we'd love for you to have some."}
           </p>
 
-          <p
-            className="text-sm mb-4 max-w-xl animate-fade-up delay-300"
-            style={{ color: "#a8c882" }}
-          >
-            Back after a little while, so we&apos;re offering a special welcome-back price for this batch.
-          </p>
+          {promoDetails && (
+            <p
+              className="text-sm mb-4 max-w-xl animate-fade-up delay-300"
+              style={{ color: "var(--color-sage)" }}
+            >
+              {promoDetails}
+            </p>
+          )}
 
           <p
             className="text-sm animate-fade-up delay-300"
-            style={{ color: "#8a9a7a" }}
+            style={{ color: "rgba(247,245,240,0.65)" }}
           >
-            Scroll down to pre-order and we&apos;ll confirm via email before pickup.
+            {"Scroll down to pre-order and we'll confirm via email before pickup."}
           </p>
 
           {onFeedbackClick && (
@@ -282,13 +318,20 @@ export default function HeroSection({ eventDate, onFeedbackClick }: HeroSectionP
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              Can&apos;t join this batch?
+              {"Can't join this batch?"}
             </button>
           )}
         </div>
       </div>
 
-      {modalOpen && <LampraisModal onClose={() => setModalOpen(false)} />}
+      {modalOpen && canShowTooltip && tooltipHeader && tooltipBody && (
+        <TooltipModal
+          title={tooltipHeader}
+          body={tooltipBody}
+          imagePath={tooltipImagePath}
+          onClose={() => setModalOpen(false)}
+        />
+      )}
     </section>
   );
 }

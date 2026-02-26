@@ -11,7 +11,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from database import SessionLocal
-from models import Order
+from models import Event, Order
 from constants import OrderStatus
 
 SEED_ORDERS = [
@@ -133,6 +133,10 @@ SEED_ORDERS = [
 def main() -> None:
     db = SessionLocal()
     try:
+        active_event = db.query(Event).filter(Event.is_active == True).first()
+        if active_event is None:
+            raise RuntimeError("No active event found. Create and activate an event before seeding orders.")
+
         existing = db.query(Order).count()
         if existing > 0:
             print(f"Deleting {existing} existing order(s)...")
@@ -143,6 +147,7 @@ def main() -> None:
         for data in SEED_ORDERS:
             offset_hours = data.get("offset_hours", 0)
             fields = {k: v for k, v in data.items() if k != "offset_hours"}
+            fields["event_id"] = int(active_event.id)
             order = Order(
                 id=str(uuid.uuid4()),
                 created_at=now + timedelta(hours=offset_hours),

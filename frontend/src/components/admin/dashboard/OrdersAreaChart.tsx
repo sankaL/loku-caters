@@ -102,7 +102,7 @@ function SelectChevron() {
 }
 
 // Determine x-axis tick interval to avoid crowding
-function tickInterval(range: Range, total: number): number {
+function tickInterval(range: Range): number {
   if (range === "1y") return 0; // show all 12 months
   if (range === "7d") return 0; // show all 7 days
   // 30d: show every 5 days
@@ -110,7 +110,7 @@ function tickInterval(range: Range, total: number): number {
 }
 
 export default function OrdersAreaChart({ data, range, onRangeChange, currency }: OrdersAreaChartProps) {
-  const interval = tickInterval(range, data.length);
+  const interval = tickInterval(range);
 
   const rangeAction = (
     <div style={{ position: "relative", display: "inline-block" }}>

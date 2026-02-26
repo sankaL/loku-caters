@@ -60,7 +60,7 @@ export default function LocationDonutChart({ data, currency }: LocationDonutChar
   return (
     <DashboardCard title="Orders by Location" subtitle="All time">
       <div style={{ position: "relative", height: 120 }}>
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={120}>
           <PieChart>
             <Pie
               data={data}

@@ -4,13 +4,16 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 
 interface Order {
   id: string;
+  event_id: number;
   name: string;
-  email: string;
-  phone_number: string;
+  email: string | null;
+  phone_number: string | null;
   item_name: string;
   item_id: string;
   quantity: number;
@@ -18,7 +21,16 @@ interface Order {
   pickup_time_slot: string;
   total_price: number;
   status: string;
+  notes?: string | null;
+  exclude_email?: boolean;
   created_at: string;
+}
+
+interface AdminEvent {
+  id: number;
+  name: string;
+  event_date: string;
+  is_active: boolean;
 }
 
 type SortCol = "status" | "total" | "date" | "timeslot";
@@ -99,12 +111,16 @@ interface AddOrderForm {
   quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
+  notes: string;
+  exclude_email: boolean;
 }
 
 const EMPTY_ADD_FORM: AddOrderForm = {
   name: "", email: "", phone_number: "",
   item_id: "", quantity: 1,
   pickup_location: "", pickup_time_slot: "",
+  notes: "",
+  exclude_email: false,
 };
 
 interface BulkRow {
@@ -150,6 +166,7 @@ export default function AdminOrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [eventFilter, setEventFilter] = useState<string>("all");
   const [locationFilter, setLocationFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
@@ -160,6 +177,8 @@ export default function AdminOrdersPage() {
   const [sort, setSort] = useState<{ col: SortCol | null; dir: "asc" | "desc" }>({ col: null, dir: "asc" });
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
+  const [events, setEvents] = useState<AdminEvent[]>([]);
+  const [configUsesFallback, setConfigUsesFallback] = useState(false);
 
   // Single delete modal
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -187,26 +206,108 @@ export default function AdminOrdersPage() {
   const [remindLoading, setRemindLoading] = useState(false);
 
   // Reset selection when filter/orders change
-  useEffect(() => { setSelectedIds(new Set()); }, [filter, locationFilter, orders]);
-  useEffect(() => { setPage(1); }, [locationFilter]);
+  useEffect(() => { setSelectedIds(new Set()); }, [filter, eventFilter, locationFilter, orders]);
+  useEffect(() => { setPage(1); }, [eventFilter, locationFilter]);
+
+  // Switching event should not keep a stale location selection
+  useEffect(() => {
+    setLocationFilter("all");
+  }, [eventFilter]);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  // Fetch event config for location/item dropdowns
+  // Fetch all events for label + filtering
   useEffect(() => {
-    fetchEventConfig().then(setEventConfig).catch(() => {});
+    async function loadEvents() {
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/admin/events`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as AdminEvent[];
+        setEvents(Array.isArray(data) ? data : []);
+      } catch {
+        // Non-blocking
+      }
+    }
+    loadEvents();
   }, []);
+
+  const activeEventId = useMemo(() => {
+    const active = events.find((e) => e.is_active);
+    return active ? active.id : null;
+  }, [events]);
+
+  const configEventId = useMemo(() => {
+    if (eventFilter !== "all") {
+      const parsed = parseInt(eventFilter, 10);
+      return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+    }
+    return activeEventId;
+  }, [eventFilter, activeEventId]);
+
+  const configEventLabel = useMemo(() => {
+    if (!configEventId) return "";
+    const e = events.find((x) => x.id === configEventId);
+    if (!e) return `Event ${configEventId}`;
+    return `${e.name} (${e.event_date})`;
+  }, [configEventId, events]);
+
+  // Fetch event config for add/import dropdowns and validation
+  useEffect(() => {
+    let cancelled = false;
+    async function loadEventConfig() {
+      setConfigUsesFallback(false);
+
+      if (configEventId) {
+        try {
+          const token = await getAdminToken();
+          if (!token) return;
+          const res = await fetch(`${API_URL}/api/admin/events/${configEventId}/config`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const data = (await res.json()) as EventConfig;
+            if (!cancelled) setEventConfig(data);
+            return;
+          }
+        } catch {
+          // Non-blocking
+        }
+      }
+
+      try {
+        const cfg = await fetchEventConfig();
+        if (!cancelled) {
+          setEventConfig(cfg);
+          setConfigUsesFallback(true);
+        }
+      } catch {
+        // Non-blocking
+      }
+    }
+
+    loadEventConfig();
+    return () => {
+      cancelled = true;
+    };
+  }, [configEventId]);
 
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const params = filter !== "all" ? `?status=${filter}` : "";
-      const res = await fetch(`${API_URL}/api/admin/orders${params}`, {
+      const qs = new URLSearchParams();
+      if (filter !== "all") qs.set("status", filter);
+      if (eventFilter !== "all") qs.set("event_id", eventFilter);
+      const query = qs.toString();
+      const res = await fetch(`${API_URL}/api/admin/orders${query ? `?${query}` : ""}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to fetch orders");
@@ -217,13 +318,48 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter]);
+  }, [filter, eventFilter]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search]);
 
+  const eventLabelById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const e of events) {
+      const label = `${e.name} (${e.event_date})`.trim();
+      map.set(e.id, label || `Event ${e.id}`);
+    }
+    return map;
+  }, [events]);
+
+  const eventOptions = useMemo(
+    () => [
+      { value: "all", label: "All Events" },
+      ...events.map((e) => ({ value: String(e.id), label: `${e.name} (${e.event_date})` })),
+    ],
+    [events]
+  );
+
+  const locationOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const o of orders) {
+      const loc = (o.pickup_location || "").trim();
+      if (loc) set.add(loc);
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [orders]);
+
+  const locationFilterOptions = useMemo(() => {
+    if (locationOptions.length > 0) return locationOptions;
+    const fromConfig = (eventConfig?.locations ?? []).map((l) => l.name).filter(Boolean);
+    return Array.from(new Set(fromConfig)).sort((a, b) => a.localeCompare(b));
+  }, [locationOptions, eventConfig]);
+
   const filtered = useMemo(() => {
     let result = orders;
+    if (eventFilter !== "all") {
+      result = result.filter((o) => String(o.event_id) === eventFilter);
+    }
     if (locationFilter !== "all") {
       result = result.filter((o) => o.pickup_location === locationFilter);
     }
@@ -232,16 +368,18 @@ export default function AdminOrdersPage() {
     return result.filter(
       (o) =>
         o.name.toLowerCase().includes(q) ||
-        o.email.toLowerCase().includes(q) ||
-        o.phone_number.toLowerCase().includes(q) ||
-        o.pickup_location.toLowerCase().includes(q)
+        (o.email ?? "").toLowerCase().includes(q) ||
+        (o.phone_number ?? "").toLowerCase().includes(q) ||
+        o.pickup_location.toLowerCase().includes(q) ||
+        (eventLabelById.get(o.event_id) ?? "").toLowerCase().includes(q)
     );
-  }, [orders, locationFilter, search]);
+  }, [orders, eventFilter, locationFilter, search, eventLabelById]);
 
   const timeSlotRank = useMemo(() => {
     const uniqueSlots = new Set<string>();
-    eventConfig?.locations.forEach((loc) => {
-      loc.timeSlots.forEach((slot) => uniqueSlots.add(slot));
+    orders.forEach((o) => {
+      const slot = (o.pickup_time_slot || "").trim();
+      if (slot) uniqueSlots.add(slot);
     });
     const sortedSlots = Array.from(uniqueSlots).sort((a, b) => {
       const diff = getTimeSlotStartMinutes(a) - getTimeSlotStartMinutes(b);
@@ -253,7 +391,7 @@ export default function AdminOrdersPage() {
       rank[slot] = idx;
     });
     return rank;
-  }, [eventConfig]);
+  }, [orders]);
 
   const sorted = useMemo(() => {
     if (!sort.col) return filtered;
@@ -279,6 +417,13 @@ export default function AdminOrdersPage() {
     });
   }, [filtered, sort, timeSlotRank]);
 
+  const confirmedOrders = useMemo(() => orders.filter((o) => o.status === "confirmed"), [orders]);
+  const eligibleReminderOrders = useMemo(
+    () => confirmedOrders.filter((o) => !o.exclude_email && (o.email ?? "").trim().length > 0),
+    [confirmedOrders]
+  );
+  const excludedReminderCount = confirmedOrders.length - eligibleReminderOrders.length;
+
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
   useEffect(() => { setPage((prev) => Math.min(prev, totalPages)); }, [totalPages]);
@@ -301,10 +446,16 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to confirm order");
+        throw new Error(await getApiErrorMessage(res, "Failed to confirm order"));
       }
-      showToast("Confirmation email sent!", "success");
+      const data = await res.json();
+      if (data.email_suppressed) {
+        showToast("Order confirmed (email excluded)", "success");
+      } else if (data.email_sent) {
+        showToast("Confirmation email sent!", "success");
+      } else {
+        showToast("Order confirmed, but email failed to send", "error");
+      }
       await fetchOrders();
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to send email", "error");
@@ -324,8 +475,7 @@ export default function AdminOrdersPage() {
         body: JSON.stringify({ status: newStatus }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to update status");
+        throw new Error(await getApiErrorMessage(res, "Failed to update status"));
       }
       setOrders((prev) => {
         if (filter !== "all" && newStatus !== filter) {
@@ -351,8 +501,7 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to delete order");
+        throw new Error(await getApiErrorMessage(res, "Failed to delete order"));
       }
       setOrders((prev) => prev.filter((o) => o.id !== orderId));
       showToast("Order deleted", "success");
@@ -445,18 +594,18 @@ export default function AdminOrdersPage() {
         body: JSON.stringify({ order_ids: ids }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to send reminders");
+        throw new Error(await getApiErrorMessage(res, "Failed to send reminders"));
       }
       const data = await res.json();
+      const skipped = (data.skipped_excluded ?? 0) + (data.skipped_missing_email ?? 0);
       if (data.failed_emails > 0) {
         showToast(
-          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, failed ${data.failed_emails}`,
+          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, skipped ${skipped}, failed ${data.failed_emails}`,
           "error"
         );
       } else {
         showToast(
-          `Reminder${data.reminded !== 1 ? "s" : ""} sent to ${data.reminded} customer${data.reminded !== 1 ? "s" : ""}`,
+          `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}${skipped > 0 ? `, skipped ${skipped}` : ""}`,
           "success"
         );
       }
@@ -478,11 +627,13 @@ export default function AdminOrdersPage() {
       const res = await fetch(`${API_URL}/api/admin/orders`, {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(addOrderForm),
+        body: JSON.stringify({
+          ...addOrderForm,
+          event_id: configEventId,
+        }),
       });
       if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to create order");
+        throw new Error(await getApiErrorMessage(res, "Failed to create order"));
       }
       showToast("Order created successfully", "success");
       setShowAddOrderModal(false);
@@ -578,6 +729,7 @@ export default function AdminOrdersPage() {
             method: "POST",
             headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
             body: JSON.stringify({
+              event_id: configEventId,
               name: row.name,
               email: row.email,
               phone_number: row.phone_number,
@@ -627,6 +779,7 @@ export default function AdminOrdersPage() {
       "Email",
       "Phone",
       "Item",
+      "Event",
       "Quantity",
       "Pickup Location",
       "Pickup Time Slot",
@@ -638,9 +791,10 @@ export default function AdminOrdersPage() {
     const rows = sorted.map((order) => [
       order.id,
       order.name,
-      order.email,
-      order.phone_number,
+      order.email ?? "",
+      order.phone_number ?? "",
       order.item_name,
+      eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`,
       order.quantity,
       order.pickup_location,
       order.pickup_time_slot,
@@ -754,14 +908,13 @@ export default function AdminOrdersPage() {
             Orders
           </h1>
           <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            Clicking Send Confirmation emails the customer and marks the order confirmed automatically.
+            Clicking Send Confirmation emails the customer and marks the order confirmed automatically (unless email is excluded).
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => {
-              const confirmed = orders.filter((o) => o.status === "confirmed");
-              setRemindSelections(new Set(confirmed.map((o) => o.id)));
+              setRemindSelections(new Set(eligibleReminderOrders.map((o) => o.id)));
               setShowRemindModal(true);
             }}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
@@ -823,17 +976,28 @@ export default function AdminOrdersPage() {
             style={{ ...dropdownStyle, width: "100%" }}
           >
             <option value="all">All Locations</option>
-            {eventConfig?.locations.map((loc) => (
-              <option key={loc.id} value={loc.name}>{loc.name}</option>
+            {locationFilterOptions.map((loc) => (
+              <option key={loc} value={loc}>{loc}</option>
             ))}
           </select>
           <SelectChevron />
         </div>
 
+        {/* Event dropdown (searchable) */}
+        <div className="w-full sm:w-[320px]">
+          <SearchableSelect
+            options={eventOptions}
+            value={eventFilter}
+            onChange={setEventFilter}
+            placeholder="All Events"
+            searchPlaceholder="Search events..."
+          />
+        </div>
+
         {/* Clear filters */}
-        {(filter !== "all" || locationFilter !== "all" || search) && (
+        {(filter !== "all" || eventFilter !== "all" || locationFilter !== "all" || search) && (
           <button
-            onClick={() => { setFilter("all"); setLocationFilter("all"); setSearch(""); }}
+            onClick={() => { setFilter("all"); setEventFilter("all"); setLocationFilter("all"); setSearch(""); }}
             className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
             style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
           >
@@ -865,7 +1029,7 @@ export default function AdminOrdersPage() {
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, email, phone, location..."
+            placeholder="Search name, email, phone, location, event..."
             className="w-full pl-9 pr-4 py-2 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]"
             style={{ color: "var(--color-text)" }}
           />
@@ -988,6 +1152,7 @@ export default function AdminOrdersPage() {
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Name</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Item</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Event</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Location</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
                     <button
@@ -1060,11 +1225,26 @@ export default function AdminOrdersPage() {
                         {order.name}
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-muted)" }}>
-                        <div>{order.email}</div>
-                        <div className="text-xs">{order.phone_number}</div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span>{order.email ?? "-"}</span>
+                          {order.exclude_email && (
+                            <span
+                              className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                              style={{ background: "#f3f4f6", color: "#374151", border: "1px solid var(--color-border)" }}
+                            >
+                              Email Excluded
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-xs">{order.phone_number ?? "-"}</div>
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
                         {order.item_name} x{order.quantity}
+                      </td>
+                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
+                        <span className="block" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`}
+                        </span>
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
                         {order.pickup_location}
@@ -1107,7 +1287,22 @@ export default function AdminOrdersPage() {
                               className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap"
                               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
                             >
-                              {isConfirming ? "Sending..." : "Send Confirmation"}
+                              {isConfirming
+                                ? "Confirming..."
+                                : (order.exclude_email ? "Confirm (No Email)" : "Send Confirmation")
+                              }
+                            </button>
+                          )}
+                          {order.status === "confirmed" && (
+                            <button
+                              onClick={() => handleStatusChange(order.id, "paid")}
+                              disabled={isUpdatingStatus}
+                              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap hover:opacity-90"
+                              style={{ background: "var(--color-sage)", color: "white" }}
+                              aria-label="Mark order paid"
+                              title="Mark as paid"
+                            >
+                              {isUpdatingStatus ? "Paid..." : "Paid"}
                             </button>
                           )}
                           <button
@@ -1278,12 +1473,12 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed.
+        Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed (orders with Email Excluded will be confirmed without email).
       </Modal>
 
       {/* Add Order Modal */}
-      {showAddOrderModal && (
-        <div
+        {showAddOrderModal && (
+          <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAddOrderModal(false); }}
         >
@@ -1294,6 +1489,11 @@ export default function AdminOrdersPage() {
             <h2 className="text-xl font-bold mb-5" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
               Add Order
             </h2>
+            {configEventLabel && (
+              <p className="text-xs mb-4" style={{ color: "var(--color-muted)" }}>
+                Creating for: {configEventLabel}{configUsesFallback ? " (using active config fallback)" : ""}
+              </p>
+            )}
             <form onSubmit={handleAddOrder} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
                 <div>
@@ -1310,7 +1510,7 @@ export default function AdminOrdersPage() {
                 <div>
                   <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Email</label>
                   <input
-                    required
+                    required={!addOrderForm.exclude_email}
                     type="email"
                     value={addOrderForm.email}
                     onChange={(e) => setAddOrderForm((f) => ({ ...f, email: e.target.value }))}
@@ -1321,7 +1521,7 @@ export default function AdminOrdersPage() {
                 <div>
                   <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone</label>
                   <input
-                    required
+                    required={!addOrderForm.exclude_email}
                     type="tel"
                     value={addOrderForm.phone_number}
                     onChange={(e) => setAddOrderForm((f) => ({ ...f, phone_number: e.target.value }))}
@@ -1339,6 +1539,21 @@ export default function AdminOrdersPage() {
                     onChange={(e) => setAddOrderForm((f) => ({ ...f, quantity: parseInt(e.target.value, 10) || 1 }))}
                     style={inputStyle}
                   />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-text)" }}>
+                    <input
+                      type="checkbox"
+                      checked={addOrderForm.exclude_email}
+                      onChange={(e) => setAddOrderForm((f) => ({ ...f, exclude_email: e.target.checked }))}
+                      style={{ accentColor: "var(--color-forest)", width: "15px", height: "15px" }}
+                    />
+                    Exclude Email (no confirmation or reminder emails)
+                  </label>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    When enabled, Email and Phone are optional.
+                  </p>
                 </div>
               </div>
 
@@ -1398,6 +1613,17 @@ export default function AdminOrdersPage() {
                 </div>
               </div>
 
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Notes (admin only)</label>
+                <textarea
+                  value={addOrderForm.notes}
+                  onChange={(e) => setAddOrderForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="Internal notes for this order..."
+                  rows={3}
+                  style={{ ...inputStyle, resize: "vertical" as const, minHeight: "88px" }}
+                />
+              </div>
+
               <p className="text-xs" style={{ color: "var(--color-muted)" }}>
                 Price will be computed server-side. Order will be created with status: Pending.
               </p>
@@ -1426,8 +1652,8 @@ export default function AdminOrdersPage() {
       )}
 
       {/* Bulk Import Modal */}
-      {showBulkImportModal && (
-        <div
+        {showBulkImportModal && (
+          <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) setShowBulkImportModal(false); }}
         >
@@ -1441,6 +1667,11 @@ export default function AdminOrdersPage() {
             <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
               Upload a CSV file to create multiple orders at once. All imported orders will be set to Pending.
             </p>
+            {configEventLabel && (
+              <p className="text-xs mb-4" style={{ color: "var(--color-muted)" }}>
+                Importing into: {configEventLabel}{configUsesFallback ? " (using active config fallback)" : ""}
+              </p>
+            )}
 
             <div
               className="rounded-xl p-4 mb-4 text-xs"
@@ -1574,16 +1805,27 @@ export default function AdminOrdersPage() {
               Send Pickup Reminders
             </h2>
             <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
-              Reminder emails will be sent to all selected customers and their orders will be marked as Reminded. Uncheck anyone you want to exclude.
+              Reminder emails will be sent to all selected customers and their orders will be marked as Reminded. Orders with Email Excluded or missing email will be skipped.
             </p>
 
-            {orders.filter((o) => o.status === "confirmed").length === 0 ? (
+            {excludedReminderCount > 0 && (
+              <div
+                className="rounded-xl px-4 py-3 text-xs mb-4"
+                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+              >
+                {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible for reminder emails and will be skipped.
+              </div>
+            )}
+
+            {eligibleReminderOrders.length === 0 ? (
               <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
-                No confirmed orders to remind.
+                {confirmedOrders.length === 0
+                  ? "No confirmed orders to remind."
+                  : "No eligible confirmed orders to remind."}
               </p>
             ) : (
               <div style={{ overflowY: "auto", flex: 1, marginBottom: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" }}>
-                {orders.filter((o) => o.status === "confirmed").map((order) => (
+                {eligibleReminderOrders.map((order) => (
                   <label
                     key={order.id}
                     style={{
@@ -1610,7 +1852,7 @@ export default function AdminOrdersPage() {
                     />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{order.name}</p>
-                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email}</p>
+                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email ?? "-"}</p>
                       <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{order.pickup_location} - {order.pickup_time_slot}</p>
                     </div>
                   </label>

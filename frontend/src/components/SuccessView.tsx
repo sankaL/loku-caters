@@ -4,31 +4,17 @@ import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
-
-interface OrderResult {
-  order_id: string;
-  order: {
-    name: string;
-    email: string;
-    phone_number: string;
-    item_id: string;
-    item_name: string;
-    quantity: number;
-    pickup_location: string;
-    pickup_time_slot: string;
-    total_price: number;
-    price_per_item: number;
-    currency: string;
-    event_date: string;
-  };
-}
+import type { OrderResult } from "@/components/OrderForm";
 
 interface SuccessViewProps {
-  result: OrderResult;
+  results: OrderResult[];
 }
 
-export default function SuccessView({ result }: SuccessViewProps) {
-  const { order, order_id } = result;
+export default function SuccessView({ results }: SuccessViewProps) {
+  const first = results[0];
+  const { order } = first;
+
+  const grandTotal = results.reduce((sum, r) => sum + r.order.total_price, 0);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [message, setMessage] = useState("");
@@ -58,7 +44,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           feedback_type: "customer",
-          order_id,
+          order_id: first.order_id,
           name: order.name,
           contact: order.email,
           message: message.trim() || null,
@@ -68,7 +54,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
         setServerError("Something went wrong. Please try again.");
         return;
       }
-      captureEvent("feedback_submitted", { feedback_type: "customer", order_id });
+      captureEvent("feedback_submitted", { feedback_type: "customer", order_id: first.order_id });
       setSubmitted(true);
     } catch {
       setServerError("Unable to send. Please try again.");
@@ -111,7 +97,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
         </h2>
 
         <p className="text-base mb-5" style={{ color: "var(--color-muted)" }}>
-          Thank you, <strong style={{ color: "var(--color-text)" }}>{order.name}</strong>. Your {order.item_name} pre-order has been submitted.
+          Thank you, <strong style={{ color: "var(--color-text)" }}>{order.name}</strong>. Your pre-order has been submitted.
         </p>
 
         {/* Feedback badge */}
@@ -176,13 +162,27 @@ export default function SuccessView({ result }: SuccessViewProps) {
             Your Order
           </p>
 
+          {/* Line items */}
+          {results.map((r) => (
+            <div
+              key={r.order_id}
+              className="flex justify-between items-center text-sm border-b pb-3"
+              style={{ borderColor: "var(--color-border)" }}
+            >
+              <span style={{ color: "var(--color-muted)" }}>
+                {r.order.item_name} x {r.order.quantity}
+              </span>
+              <span className="font-semibold" style={{ color: "var(--color-text)" }}>
+                {r.order.currency} ${r.order.total_price.toFixed(2)}
+              </span>
+            </div>
+          ))}
+
+          {/* Shared pickup details */}
           {[
-            { label: "Item", value: order.item_name },
-            { label: "Quantity", value: `${order.quantity} ${order.quantity === 1 ? "portion" : "portions"}` },
             { label: "Pickup Date", value: order.event_date },
             { label: "Pickup Location", value: order.pickup_location },
             { label: "Time Slot", value: order.pickup_time_slot },
-            { label: "Order Total", value: `${order.currency} $${order.total_price.toFixed(2)}` },
           ].map(({ label, value }) => (
             <div
               key={label}
@@ -193,29 +193,38 @@ export default function SuccessView({ result }: SuccessViewProps) {
               <span className="font-semibold" style={{ color: "var(--color-text)" }}>{value}</span>
             </div>
           ))}
+
+          {/* Grand total */}
+          <div className="flex justify-between items-center text-sm pt-1">
+            <span className="font-semibold" style={{ color: "var(--color-text)" }}>Order Total</span>
+            <span className="font-bold text-lg" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              {order.currency} ${grandTotal.toFixed(2)}
+            </span>
+          </div>
         </div>
 
-        {/* E-Transfer notice */}
-        <div
-          className="rounded-2xl p-5 mb-4 flex gap-4 items-start text-left"
-          style={{ background: "#fdf8f0", border: "1px solid #e8d9b8" }}
-        >
-          <div className="mt-0.5 flex-shrink-0">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9a7a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="5" width="20" height="14" rx="2" />
-              <path d="M2 10h20" />
-            </svg>
+        {order.etransfer_enabled && order.etransfer_email && (
+          <div
+            className="rounded-2xl p-5 mb-4 flex gap-4 items-start text-left"
+            style={{ background: "#fdf8f0", border: "1px solid #e8d9b8" }}
+          >
+            <div className="mt-0.5 flex-shrink-0">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#9a7a3a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="5" width="20" height="14" rx="2" />
+                <path d="M2 10h20" />
+              </svg>
+            </div>
+            <div>
+              <p className="text-sm font-semibold mb-1" style={{ color: "#7a5a1a" }}>
+                Payment by e-Transfer
+              </p>
+              <p className="text-sm leading-relaxed" style={{ color: "#8a6a2a" }}>
+                If you would like to pay by e-Transfer, you are welcome to send your payment to{" "}
+                <strong>{order.etransfer_email}</strong> at your convenience - any time before your scheduled pickup.
+              </p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-semibold mb-1" style={{ color: "#7a5a1a" }}>
-              Payment by e-Transfer
-            </p>
-            <p className="text-sm leading-relaxed" style={{ color: "#8a6a2a" }}>
-              If you would like to pay by e-Transfer, you are welcome to send your payment to{" "}
-              <strong>jlokuliyana@yahoo.com</strong> at your convenience - any time before your scheduled pickup.
-            </p>
-          </div>
-        </div>
+        )}
 
         {/* Email notice */}
         <div
@@ -243,7 +252,9 @@ export default function SuccessView({ result }: SuccessViewProps) {
           We look forward to serving you!
         </p>
         <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-          Order reference: {order_id.slice(0, 8).toUpperCase()}
+          {results.length === 1
+            ? `Order reference: ${first.order_id.slice(0, 8).toUpperCase()}`
+            : `Order references: ${results.map((r) => r.order_id.slice(0, 8).toUpperCase()).join(", ")}`}
         </p>
       </div>
 

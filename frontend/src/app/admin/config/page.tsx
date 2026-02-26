@@ -1,159 +1,450 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect } from "react";
-import { API_URL, type Item, type Location } from "@/config/event";
+import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import { getApiErrorMessage } from "@/lib/apiError";
 
-interface ConfigState {
+type EventImageType = "tooltip" | "hero_side";
+
+interface EventItem {
+  id: number;
+  name: string;
   event_date: string;
-  currency: string;
-  items: Item[];
-  locations: Location[];
+  hero_header: string;
+  hero_header_sage: string;
+  hero_subheader: string;
+  promo_details: string | null;
+  tooltip_enabled: boolean;
+  tooltip_header: string | null;
+  tooltip_body: string | null;
+  tooltip_image_key: string | null;
+  hero_side_image_key: string | null;
+  etransfer_enabled: boolean;
+  etransfer_email: string | null;
+  is_active: boolean;
+  item_ids: string[];
+  location_ids: string[];
+  updated_at: string | null;
 }
 
-const CURRENCY_OPTIONS = ["CAD", "AUD", "USD", "GBP", "NZD", "EUR"];
+interface AdminItem {
+  id: string;
+  name: string;
+  price: number;
+  discounted_price: number | null;
+}
 
-const EMPTY_ITEM: Item = {
-  id: "",
+interface AdminLocation {
+  id: string;
+  name: string;
+}
+
+interface EventImage {
+  key: string;
+  type: EventImageType;
+  label: string;
+  path: string;
+  alt: string;
+}
+
+interface EventImageCatalog {
+  helper: {
+    tooltip_target_dir: string;
+    hero_side_target_dir: string;
+  };
+  images: EventImage[];
+}
+
+interface EventForm {
+  name: string;
+  event_date: string;
+  hero_header: string;
+  hero_header_sage: string;
+  hero_subheader: string;
+  promo_details: string;
+  tooltip_enabled: boolean;
+  tooltip_header: string;
+  tooltip_body: string;
+  tooltip_image_key: string | null;
+  hero_side_image_key: string | null;
+  etransfer_enabled: boolean;
+  etransfer_email: string;
+  item_ids: string[];
+  location_ids: string[];
+}
+
+const EMPTY_FORM: EventForm = {
   name: "",
-  description: "",
-  price: 0,
-  discounted_price: null,
+  event_date: "",
+  hero_header: "",
+  hero_header_sage: "",
+  hero_subheader: "",
+  promo_details: "",
+  tooltip_enabled: false,
+  tooltip_header: "",
+  tooltip_body: "",
+  tooltip_image_key: null,
+  hero_side_image_key: null,
+  etransfer_enabled: false,
+  etransfer_email: "",
+  item_ids: [],
+  location_ids: [],
 };
 
-const EMPTY_LOCATION: Location = {
-  id: "",
-  name: "",
-  address: "",
-  timeSlots: [],
+const EMPTY_IMAGE_CATALOG: EventImageCatalog = {
+  helper: {
+    tooltip_target_dir: "frontend/public/assets/img/tooltip",
+    hero_side_target_dir: "frontend/public/assets/img/hero-side",
+  },
+  images: [],
 };
 
-export default function AdminConfigPage() {
-  const [config, setConfig] = useState<ConfigState>({
-    event_date: "",
-    currency: "CAD",
-    items: [],
-    locations: [],
-  });
+function normalizeImageCatalog(data: unknown): EventImageCatalog {
+  if (!data || typeof data !== "object") return EMPTY_IMAGE_CATALOG;
+  const raw = data as { helper?: Record<string, unknown>; images?: unknown[] };
+  const helper = raw.helper ?? {};
+  const images = Array.isArray(raw.images) ? raw.images : [];
+  const normalizedImages: EventImage[] = images
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry) => {
+      const type: EventImageType = entry.type === "hero_side" ? "hero_side" : "tooltip";
+      return {
+        key: typeof entry.key === "string" ? entry.key : "",
+        type,
+        label: typeof entry.label === "string" ? entry.label : "",
+        path: typeof entry.path === "string" ? entry.path : "",
+        alt: typeof entry.alt === "string" ? entry.alt : "",
+      };
+    })
+    .filter((entry) => Boolean(entry.key) && Boolean(entry.path) && Boolean(entry.label));
+
+  return {
+    helper: {
+      tooltip_target_dir:
+        typeof helper.tooltip_target_dir === "string"
+          ? helper.tooltip_target_dir
+          : EMPTY_IMAGE_CATALOG.helper.tooltip_target_dir,
+      hero_side_target_dir:
+        typeof helper.hero_side_target_dir === "string"
+          ? helper.hero_side_target_dir
+          : EMPTY_IMAGE_CATALOG.helper.hero_side_target_dir,
+    },
+    images: normalizedImages,
+  };
+}
+
+function Spinner() {
+  return (
+    <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="12" r="10" opacity="0.3" />
+      <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
+    </svg>
+  );
+}
+
+interface SelectorSectionProps {
+  title: string;
+  open: boolean;
+  selectedCount: number;
+  totalCount: number;
+  onToggle: () => void;
+  children: ReactNode;
+}
+
+function SelectorSection({
+  title,
+  open,
+  selectedCount,
+  totalCount,
+  onToggle,
+  children,
+}: SelectorSectionProps) {
+  return (
+    <div className="rounded-2xl border" style={{ borderColor: "var(--color-border)", background: "white" }}>
+      <button
+        type="button"
+        onClick={onToggle}
+        className="w-full flex items-center justify-between px-4 py-3 text-left"
+      >
+        <div>
+          <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>{title}</p>
+          <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+            {selectedCount} selected of {totalCount}
+          </p>
+        </div>
+        <span className="text-sm" style={{ color: "var(--color-muted)" }}>{open ? "Hide" : "Show"}</span>
+      </button>
+      {open && <div className="px-4 pb-4 border-t" style={{ borderColor: "var(--color-border)" }}>{children}</div>}
+    </div>
+  );
+}
+
+export default function AdminEventsPage() {
+  const [events, setEvents] = useState<EventItem[]>([]);
+  const [allItems, setAllItems] = useState<AdminItem[]>([]);
+  const [allLocations, setAllLocations] = useState<AdminLocation[]>([]);
+  const [imageCatalog, setImageCatalog] = useState<EventImageCatalog>(EMPTY_IMAGE_CATALOG);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [activating, setActivating] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  const [newSlots, setNewSlots] = useState<Record<number, string>>({});
+  const [pendingToggle, setPendingToggle] = useState<{ eventId: number; eventName: string; willActivate: boolean } | null>(null);
+
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
+  const [form, setForm] = useState<EventForm>({ ...EMPTY_FORM });
+
+  const [itemsOpen, setItemsOpen] = useState(false);
+  const [locationsOpen, setLocationsOpen] = useState(false);
+  const [itemsSearch, setItemsSearch] = useState("");
+  const [locationsSearch, setLocationsSearch] = useState("");
+  const [itemsSelectedOnly, setItemsSelectedOnly] = useState(false);
+  const [locationsSelectedOnly, setLocationsSelectedOnly] = useState(false);
 
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
   };
 
-  useEffect(() => {
-    async function loadConfig() {
-      try {
-        const token = await getAdminToken();
-        if (!token) return;
-        const res = await fetch(`${API_URL}/api/admin/config`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error("Failed to load config");
-        const data = await res.json();
-        setConfig({
-          event_date: data.event?.date ?? "",
-          currency: data.currency ?? "CAD",
-          items: data.items ?? [],
-          locations: data.locations ?? [],
-        });
-      } catch {
-        showToast("Failed to load configuration", "error");
-      } finally {
-        setLoading(false);
-      }
+  const tooltipImageOptions = useMemo(
+    () => imageCatalog.images.filter((image) => image.type === "tooltip"),
+    [imageCatalog.images]
+  );
+  const heroSideImageOptions = useMemo(
+    () => imageCatalog.images.filter((image) => image.type === "hero_side"),
+    [imageCatalog.images]
+  );
+
+  const filteredItems = useMemo(() => {
+    const query = itemsSearch.trim().toLowerCase();
+    return allItems.filter((item) => {
+      if (itemsSelectedOnly && !form.item_ids.includes(item.id)) return false;
+      if (!query) return true;
+      return item.name.toLowerCase().includes(query) || item.id.toLowerCase().includes(query);
+    });
+  }, [allItems, form.item_ids, itemsSearch, itemsSelectedOnly]);
+
+  const filteredLocations = useMemo(() => {
+    const query = locationsSearch.trim().toLowerCase();
+    return allLocations.filter((location) => {
+      if (locationsSelectedOnly && !form.location_ids.includes(location.id)) return false;
+      if (!query) return true;
+      return location.name.toLowerCase().includes(query) || location.id.toLowerCase().includes(query);
+    });
+  }, [allLocations, form.location_ids, locationsSearch, locationsSelectedOnly]);
+
+  const selectedTooltipImage = useMemo(
+    () => tooltipImageOptions.find((image) => image.key === form.tooltip_image_key) ?? null,
+    [tooltipImageOptions, form.tooltip_image_key]
+  );
+  const selectedHeroSideImage = useMemo(
+    () => heroSideImageOptions.find((image) => image.key === form.hero_side_image_key) ?? null,
+    [heroSideImageOptions, form.hero_side_image_key]
+  );
+
+  const imageLabelForKey = useCallback(
+    (key: string | null, type: EventImageType) => {
+      if (!key) return "None";
+      const image = imageCatalog.images.find((entry) => entry.key === key && entry.type === type);
+      return image ? image.label : key;
+    },
+    [imageCatalog.images]
+  );
+
+  const resetSelectorState = () => {
+    setItemsOpen(false);
+    setLocationsOpen(false);
+    setItemsSearch("");
+    setLocationsSearch("");
+    setItemsSelectedOnly(false);
+    setLocationsSelectedOnly(false);
+  };
+
+  const loadData = useCallback(async () => {
+    const token = await getAdminToken();
+    if (!token) return;
+    const headers = { Authorization: `Bearer ${token}` };
+    const [eventsRes, itemsRes, locsRes, imagesRes] = await Promise.all([
+      fetch(`${API_URL}/api/admin/events`, { headers }),
+      fetch(`${API_URL}/api/admin/items`, { headers }),
+      fetch(`${API_URL}/api/admin/locations`, { headers }),
+      fetch(`${API_URL}/api/admin/event-images`, { headers }),
+    ]);
+    if (!eventsRes.ok || !itemsRes.ok || !locsRes.ok || !imagesRes.ok) {
+      throw new Error("Failed to load data");
     }
-    loadConfig();
+
+    const [eventsData, itemsData, locationsData, imageCatalogData] = await Promise.all([
+      eventsRes.json() as Promise<EventItem[]>,
+      itemsRes.json() as Promise<AdminItem[]>,
+      locsRes.json() as Promise<AdminLocation[]>,
+      imagesRes.json() as Promise<unknown>,
+    ]);
+
+    setEvents(eventsData);
+    setAllItems(itemsData);
+    setAllLocations(locationsData);
+    setImageCatalog(normalizeImageCatalog(imageCatalogData));
   }, []);
 
+  useEffect(() => {
+    setLoading(true);
+    loadData()
+      .catch(() => showToast("Failed to load events", "error"))
+      .finally(() => setLoading(false));
+  }, [loadData]);
+
+  function openAdd() {
+    setEditingEvent(null);
+    setForm({ ...EMPTY_FORM });
+    resetSelectorState();
+    setModalOpen(true);
+  }
+
+  function openEdit(event: EventItem) {
+    setEditingEvent(event);
+    setForm({
+      name: event.name,
+      event_date: event.event_date,
+      hero_header: event.hero_header,
+      hero_header_sage: event.hero_header_sage ?? "",
+      hero_subheader: event.hero_subheader,
+      promo_details: event.promo_details ?? "",
+      tooltip_enabled: event.tooltip_enabled,
+      tooltip_header: event.tooltip_header ?? "",
+      tooltip_body: event.tooltip_body ?? "",
+      tooltip_image_key: event.tooltip_image_key,
+      hero_side_image_key: event.hero_side_image_key,
+      etransfer_enabled: event.etransfer_enabled,
+      etransfer_email: event.etransfer_email ?? "",
+      item_ids: [...event.item_ids],
+      location_ids: [...event.location_ids],
+    });
+    resetSelectorState();
+    setModalOpen(true);
+  }
+
+  function toggleCheckbox(field: "item_ids" | "location_ids", id: string) {
+    setForm((prev) => {
+      const current = prev[field];
+      return {
+        ...prev,
+        [field]: current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
+      };
+    });
+  }
+
   async function handleSave() {
+    if (!form.name.trim() || !form.event_date.trim() || !form.hero_header.trim()) {
+      showToast("Event Name, Event Date, and Hero Header (White) are required", "error");
+      return;
+    }
+    if (form.tooltip_enabled && (!form.tooltip_header.trim() || !form.tooltip_body.trim())) {
+      showToast("Tooltip Header and Tooltip Body are required when tooltip is enabled", "error");
+      return;
+    }
+    if (form.etransfer_enabled && !form.etransfer_email.trim()) {
+      showToast("E-transfer email is required when e-transfer is enabled", "error");
+      return;
+    }
+
     setSaving(true);
     try {
       const token = await getAdminToken();
       if (!token) return;
+      const body = {
+        name: form.name.trim(),
+        event_date: form.event_date.trim(),
+        hero_header: form.hero_header.trim(),
+        hero_header_sage: form.hero_header_sage.trim(),
+        hero_subheader: form.hero_subheader.trim(),
+        promo_details: form.promo_details.trim() || null,
+        tooltip_enabled: form.tooltip_enabled,
+        tooltip_header: form.tooltip_enabled ? form.tooltip_header.trim() : null,
+        tooltip_body: form.tooltip_enabled ? form.tooltip_body.trim() : null,
+        tooltip_image_key: form.tooltip_enabled ? (form.tooltip_image_key || null) : null,
+        hero_side_image_key: form.hero_side_image_key || null,
+        etransfer_enabled: form.etransfer_enabled,
+        etransfer_email: form.etransfer_enabled ? form.etransfer_email.trim() : null,
+        item_ids: form.item_ids,
+        location_ids: form.location_ids,
+      };
 
-      const res = await fetch(`${API_URL}/api/admin/config`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(config),
+      const url = editingEvent
+        ? `${API_URL}/api/admin/events/${editingEvent.id}`
+        : `${API_URL}/api/admin/events`;
+      const method = editingEvent ? "PUT" : "POST";
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error("Save failed");
-      showToast("Configuration saved! Changes are now live.", "success");
-    } catch {
-      showToast("Failed to save configuration", "error");
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to save event"));
+      }
+
+      setModalOpen(false);
+      await loadData();
+      showToast(editingEvent ? "Event updated." : "Event created.", "success");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save event";
+      showToast(message, "error");
     } finally {
       setSaving(false);
     }
   }
 
-  // -------- Item helpers --------
-  function updateItem(index: number, field: keyof Item, value: string | number | null) {
-    setConfig((prev) => {
-      const items = [...prev.items];
-      items[index] = { ...items[index], [field]: value };
-      return { ...prev, items };
-    });
+  function requestToggle(event: EventItem) {
+    setPendingToggle({ eventId: event.id, eventName: event.name, willActivate: !event.is_active });
   }
 
-  function addItem() {
-    setConfig((prev) => ({ ...prev, items: [...prev.items, { ...EMPTY_ITEM, id: `item-${Date.now()}` }] }));
+  async function handleToggleConfirm() {
+    if (!pendingToggle) return;
+    const { eventId, willActivate } = pendingToggle;
+    setActivating(eventId);
+    setPendingToggle(null);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const action = willActivate ? "activate" : "deactivate";
+      const res = await fetch(`${API_URL}/api/admin/events/${eventId}/${action}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error(`${willActivate ? "Activate" : "Deactivate"} failed`);
+      await loadData();
+      showToast(willActivate ? "Event is now active." : "Event deactivated.", "success");
+    } catch {
+      showToast(`Failed to ${willActivate ? "activate" : "deactivate"} event`, "error");
+    } finally {
+      setActivating(null);
+    }
   }
 
-  function removeItem(index: number) {
-    setConfig((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
-  }
-
-  // -------- Location helpers --------
-  function updateLocation(index: number, field: keyof Location, value: string | string[]) {
-    setConfig((prev) => {
-      const locations = [...prev.locations];
-      locations[index] = { ...locations[index], [field]: value };
-      return { ...prev, locations };
-    });
-  }
-
-  function addLocation() {
-    setConfig((prev) => ({
-      ...prev,
-      locations: [...prev.locations, { ...EMPTY_LOCATION, id: `loc-${Date.now()}` }],
-    }));
-  }
-
-  function removeLocation(index: number) {
-    setConfig((prev) => ({ ...prev, locations: prev.locations.filter((_, i) => i !== index) }));
-  }
-
-  function addTimeSlot(locIndex: number) {
-    const slot = newSlots[locIndex]?.trim();
-    if (!slot) return;
-    setConfig((prev) => {
-      const locations = [...prev.locations];
-      locations[locIndex] = {
-        ...locations[locIndex],
-        timeSlots: [...locations[locIndex].timeSlots, slot],
-      };
-      return { ...prev, locations };
-    });
-    setNewSlots((prev) => ({ ...prev, [locIndex]: "" }));
-  }
-
-  function removeTimeSlot(locIndex: number, slotIndex: number) {
-    setConfig((prev) => {
-      const locations = [...prev.locations];
-      locations[locIndex] = {
-        ...locations[locIndex],
-        timeSlots: locations[locIndex].timeSlots.filter((_, i) => i !== slotIndex),
-      };
-      return { ...prev, locations };
-    });
+  async function handleDelete(event: EventItem) {
+    if (!confirm(`Delete "${event.name}"? This cannot be undone.`)) return;
+    setDeleting(event.id);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/events/${event.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Delete failed");
+      await loadData();
+      showToast("Event deleted.", "success");
+    } catch {
+      showToast("Failed to delete event", "error");
+    } finally {
+      setDeleting(null);
+    }
   }
 
   const labelClass = "block text-sm font-medium mb-1.5";
@@ -163,17 +454,13 @@ export default function AdminConfigPage() {
   if (loading) {
     return (
       <div className="flex justify-center py-16">
-        <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-          <circle cx="12" cy="12" r="10" opacity="0.3" />
-          <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
-        </svg>
+        <Spinner />
       </div>
     );
   }
 
   return (
-    <div className="p-8 max-w-3xl">
-      {/* Toast */}
+    <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
       {toast && (
         <div
           className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
@@ -187,315 +474,685 @@ export default function AdminConfigPage() {
         </div>
       )}
 
-      {/* Header */}
-      <div className="mb-8">
-        <h1
-          className="text-2xl font-bold mb-1"
-          style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1
+            className="text-2xl font-bold mb-1"
+            style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
+          >
+            Events
+          </h1>
+          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+            Manage events and set which one is live on the order page.
+          </p>
+        </div>
+        <button
+          onClick={openAdd}
+          className="px-5 py-2.5 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98] shrink-0"
+          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)";
+          }}
         >
-          Event Configuration
-        </h1>
-        <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-          Changes save to the database and appear on the order page immediately.
-        </p>
+          + Add Event
+        </button>
       </div>
 
-      <div className="space-y-6">
-        {/* Event Details */}
+      {events.length === 0 ? (
         <div
-          className="rounded-2xl p-6"
+          className="rounded-2xl p-12 text-center"
           style={{ background: "white", border: "1px solid var(--color-border)" }}
         >
-          <h2 className="text-base font-semibold mb-4" style={{ color: "var(--color-forest)" }}>
-            Event Details
-          </h2>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                Event Date
-              </label>
-              <input
-                type="text"
-                value={config.event_date}
-                onChange={(e) => setConfig((prev) => ({ ...prev, event_date: e.target.value }))}
-                placeholder="e.g. February 28th, 2026"
-                className={inputClass}
-                style={{ color: "var(--color-text)" }}
-              />
-            </div>
-            <div>
-              <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                Currency
-              </label>
-              <select
-                value={config.currency}
-                onChange={(e) => setConfig((prev) => ({ ...prev, currency: e.target.value }))}
-                className={inputClass}
-                style={{ color: "var(--color-text)" }}
-              >
-                {CURRENCY_OPTIONS.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-          </div>
+          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+            No events yet. Create one to get started.
+          </p>
         </div>
-
-        {/* Items */}
-        <div
-          className="rounded-2xl p-6"
-          style={{ background: "white", border: "1px solid var(--color-border)" }}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold" style={{ color: "var(--color-forest)" }}>
-              Menu Items
-            </h2>
-            <button
-              onClick={addItem}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all"
-              style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-              Add Item
-            </button>
-          </div>
-
-          <div className="space-y-4">
-            {config.items.map((item, idx) => (
+      ) : (
+        <div className="space-y-4">
+          {events.map((event) => {
+            const eventItems = allItems.filter((i) => event.item_ids.includes(i.id));
+            const eventLocations = allLocations.filter((l) => event.location_ids.includes(l.id));
+            return (
               <div
-                key={idx}
-                className="rounded-xl p-4 space-y-3"
-                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
+                key={event.id}
+                className="rounded-2xl p-6"
+                style={{ background: "white", border: "1px solid var(--color-border)" }}
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--color-sage)" }}>
-                    Item {idx + 1}
-                  </span>
-                  <button
-                    onClick={() => removeItem(idx)}
-                    className="text-xs text-red-500 hover:text-red-700 transition-colors"
-                  >
-                    Remove
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelClass} style={{ color: "var(--color-text)" }}>Name</label>
-                    <input
-                      type="text"
-                      value={item.name}
-                      onChange={(e) => updateItem(idx, "name", e.target.value)}
-                      className={inputClass}
-                      style={{ color: "var(--color-text)" }}
-                    />
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3 mb-1">
+                      <h2 className="text-base font-semibold truncate" style={{ color: "var(--color-forest)" }}>
+                        {event.name}
+                      </h2>
+                      <span
+                        className="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold"
+                        style={
+                          event.is_active
+                            ? { background: "#d1fae5", color: "#065f46" }
+                            : { background: "#f3f4f6", color: "#6b7280" }
+                        }
+                      >
+                        {event.is_active ? "ACTIVE" : "INACTIVE"}
+                      </span>
+                    </div>
+                    <p className="text-sm mb-3" style={{ color: "var(--color-muted)" }}>{event.event_date}</p>
+                    <p className="text-xs mb-1" style={{ color: "var(--color-muted)" }}>
+                      Hero: {event.hero_header}
+                      {event.hero_header_sage ? ` / ${event.hero_header_sage}` : ""}
+                    </p>
+                    <p className="text-xs mb-2" style={{ color: "var(--color-muted)" }}>
+                      Tooltip: {event.tooltip_enabled ? "Enabled" : "Disabled"} | Tooltip image: {imageLabelForKey(event.tooltip_image_key, "tooltip")} | Side image: {imageLabelForKey(event.hero_side_image_key, "hero_side")} | E-transfer: {event.etransfer_enabled ? event.etransfer_email || "Enabled" : "Disabled"}
+                    </p>
+
+                    {eventItems.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-2">
+                        {eventItems.map((item) => (
+                          <span
+                            key={item.id}
+                            className="px-2.5 py-1 rounded-lg text-xs font-medium"
+                            style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                          >
+                            {item.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                    {eventLocations.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {eventLocations.map((location) => (
+                          <span
+                            key={location.id}
+                            className="px-2.5 py-1 rounded-lg text-xs font-medium"
+                            style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0" }}
+                          >
+                            {location.name}
+                          </span>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <label className={labelClass} style={{ color: "var(--color-text)" }}>Item ID</label>
-                    <input
-                      type="text"
-                      value={item.id}
-                      onChange={(e) => updateItem(idx, "id", e.target.value)}
-                      className={inputClass}
-                      style={{ color: "var(--color-text)" }}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className={labelClass} style={{ color: "var(--color-text)" }}>Description</label>
-                  <input
-                    type="text"
-                    value={item.description ?? ""}
-                    onChange={(e) => updateItem(idx, "description", e.target.value)}
-                    className={inputClass}
-                    style={{ color: "var(--color-text)" }}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelClass} style={{ color: "var(--color-text)" }}>Regular Price ({config.currency})</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={item.price}
-                      onChange={(e) => updateItem(idx, "price", parseFloat(e.target.value) || 0)}
-                      className={inputClass}
-                      style={{ color: "var(--color-text)" }}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClass} style={{ color: "var(--color-text)" }}>Discounted Price (optional)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      value={item.discounted_price ?? ""}
-                      placeholder="Leave blank for no discount"
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        updateItem(idx, "discounted_price", val === "" ? null : parseFloat(val) || 0);
+
+                  <div className="flex items-center gap-3 shrink-0">
+                    <button
+                      onClick={() => openEdit(event)}
+                      className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                      style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+                      onMouseEnter={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "var(--color-cream)";
                       }}
-                      className={inputClass}
-                      style={{ color: "var(--color-text)" }}
-                    />
+                      onMouseLeave={(e) => {
+                        (e.currentTarget as HTMLButtonElement).style.background = "white";
+                      }}
+                    >
+                      Edit
+                    </button>
+                    {!event.is_active && (
+                      <button
+                        onClick={() => handleDelete(event)}
+                        disabled={deleting === event.id}
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all disabled:opacity-60"
+                        style={{ background: "#fee2e2", color: "#991b1b" }}
+                        onMouseEnter={(e) => {
+                          if (deleting !== event.id) (e.currentTarget as HTMLButtonElement).style.background = "#fecaca";
+                        }}
+                        onMouseLeave={(e) => {
+                          (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2";
+                        }}
+                      >
+                        {deleting === event.id ? "..." : "Delete"}
+                      </button>
+                    )}
+                    {/* Active toggle */}
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        role="switch"
+                        aria-checked={event.is_active}
+                        onClick={() => requestToggle(event)}
+                        disabled={activating === event.id}
+                        title={event.is_active ? "Deactivate event" : "Activate event"}
+                        style={{
+                          width: "44px",
+                          height: "24px",
+                          borderRadius: "12px",
+                          background: event.is_active ? "var(--color-forest)" : "var(--color-border)",
+                          border: "none",
+                          cursor: activating === event.id ? "not-allowed" : "pointer",
+                          position: "relative",
+                          transition: "background 0.2s",
+                          flexShrink: 0,
+                          opacity: activating === event.id ? 0.5 : 1,
+                          padding: 0,
+                        }}
+                      >
+                        <span
+                          style={{
+                            position: "absolute",
+                            top: "2px",
+                            left: event.is_active ? "22px" : "2px",
+                            width: "20px",
+                            height: "20px",
+                            borderRadius: "50%",
+                            background: "var(--color-cream)",
+                            transition: "left 0.2s",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+                          }}
+                        />
+                      </button>
+                      <span style={{ fontSize: "10px", color: event.is_active ? "var(--color-forest)" : "var(--color-muted)", fontWeight: 600 }}>
+                        {activating === event.id ? "..." : (event.is_active ? "Live" : "Off")}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-            ))}
-            {config.items.length === 0 && (
-              <p className="text-sm text-center py-4" style={{ color: "var(--color-muted)" }}>
-                No items. Add one above.
-              </p>
-            )}
+            );
+          })}
+        </div>
+      )}
+
+      {/* Activate / Deactivate confirmation dialog */}
+      {pendingToggle && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.5)" }}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl shadow-2xl p-8"
+            style={{ background: "white" }}
+          >
+            <h3
+              style={{
+                fontFamily: "var(--font-serif)",
+                color: "var(--color-forest)",
+                fontSize: "1.15rem",
+                fontWeight: 700,
+                marginBottom: "12px",
+              }}
+            >
+              {pendingToggle.willActivate ? "Activate event?" : "Deactivate event?"}
+            </h3>
+            <p style={{ color: "var(--color-muted)", fontSize: "14px", lineHeight: 1.65, marginBottom: "28px" }}>
+              {pendingToggle.willActivate
+                ? <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will go live immediately and become the active event on the order page. Any currently active event will be taken offline.</>
+                : <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will be taken offline immediately. The order page will show the no-events placeholder until another event is activated.</>
+              }
+            </p>
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
+              <button
+                type="button"
+                onClick={() => setPendingToggle(null)}
+                style={{ color: "var(--color-muted)", fontSize: "14px", fontWeight: 500, cursor: "pointer", border: "none", background: "none" }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleToggleConfirm}
+                disabled={!!activating}
+                style={{
+                  background: pendingToggle.willActivate ? "var(--color-forest)" : "#dc2626",
+                  color: "white",
+                  padding: "10px 22px",
+                  borderRadius: "12px",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                  cursor: activating ? "not-allowed" : "pointer",
+                  border: "none",
+                  opacity: activating ? 0.6 : 1,
+                }}
+              >
+                {pendingToggle.willActivate ? "Activate" : "Deactivate"}
+              </button>
+            </div>
           </div>
         </div>
+      )}
 
-        {/* Locations */}
+      {modalOpen && (
         <div
-          className="rounded-2xl p-6"
-          style={{ background: "white", border: "1px solid var(--color-border)" }}
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ background: "rgba(0,0,0,0.45)" }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setModalOpen(false);
+          }}
         >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-base font-semibold" style={{ color: "var(--color-forest)" }}>
-              Pickup Locations
-            </h2>
-            <button
-              onClick={addLocation}
-              className="px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all"
-              style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}
-            >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-              Add Location
-            </button>
-          </div>
+          <div
+            className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-y-auto"
+            style={{ background: "white", maxHeight: "90vh" }}
+          >
+            <div className="px-8 py-6 border-b" style={{ borderColor: "var(--color-border)" }}>
+              <h2 className="text-lg font-semibold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+                {editingEvent ? "Edit Event" : "New Event"}
+              </h2>
+            </div>
 
-          <div className="space-y-5">
-            {config.locations.map((loc, locIdx) => (
-              <div
-                key={locIdx}
-                className="rounded-xl p-4 space-y-3"
-                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--color-sage)" }}>
-                    Location {locIdx + 1}
-                  </span>
-                  <button
-                    onClick={() => removeLocation(locIdx)}
-                    className="text-xs text-red-500 hover:text-red-700 transition-colors"
-                  >
-                    Remove
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className={labelClass} style={{ color: "var(--color-text)" }}>Location Name</label>
-                    <input
-                      type="text"
-                      value={loc.name}
-                      onChange={(e) => updateLocation(locIdx, "name", e.target.value)}
-                      placeholder="e.g. Woodbridge"
-                      className={inputClass}
-                      style={{ color: "var(--color-text)" }}
-                    />
-                  </div>
-                  <div>
-                    <label className={labelClass} style={{ color: "var(--color-text)" }}>Location ID</label>
-                    <input
-                      type="text"
-                      value={loc.id}
-                      onChange={(e) => updateLocation(locIdx, "id", e.target.value)}
-                      placeholder="e.g. woodbridge"
-                      className={inputClass}
-                      style={{ color: "var(--color-text)" }}
-                    />
-                  </div>
+            <div className="px-8 py-6 space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                    Event Name <span style={{ color: "#dc2626" }}>*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.name}
+                    onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                    placeholder="e.g. February 2026 Batch"
+                    className={inputClass}
+                    style={{ color: "var(--color-text)" }}
+                  />
                 </div>
 
                 <div>
                   <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                    Pickup Address
-                    <span className="ml-1 font-normal" style={{ color: "var(--color-muted)" }}>(included in confirmation email)</span>
+                    Event Date <span style={{ color: "#dc2626" }}>*</span>
                   </label>
                   <input
                     type="text"
-                    value={loc.address ?? ""}
-                    onChange={(e) => updateLocation(locIdx, "address", e.target.value)}
-                    placeholder="e.g. 123 Main St, Woodbridge, ON L4H 1A1"
+                    value={form.event_date}
+                    onChange={(e) => setForm((p) => ({ ...p, event_date: e.target.value }))}
+                    placeholder="e.g. February 28th, 2026"
+                    className={inputClass}
+                    style={{ color: "var(--color-text)" }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                  Hero Header (White) <span style={{ color: "#dc2626" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={form.hero_header}
+                  onChange={(e) => setForm((p) => ({ ...p, hero_header: e.target.value }))}
+                  placeholder="e.g. We're Making"
+                  className={inputClass}
+                  style={{ color: "var(--color-text)" }}
+                />
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                    Hero Header (Sage) <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.hero_header_sage}
+                    onChange={(e) => setForm((p) => ({ ...p, hero_header_sage: e.target.value }))}
+                    placeholder="e.g. Lamprais"
                     className={inputClass}
                     style={{ color: "var(--color-text)" }}
                   />
                 </div>
 
                 <div>
-                  <label className={labelClass} style={{ color: "var(--color-text)" }}>Time Slots</label>
-                  <div className="flex flex-wrap gap-2 mb-2">
-                    {loc.timeSlots.map((slot, slotIdx) => (
-                      <span
-                        key={slotIdx}
-                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium"
-                        style={{ background: "white", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
-                      >
-                        {slot}
-                        <button
-                          onClick={() => removeTimeSlot(locIdx, slotIdx)}
-                          className="text-red-400 hover:text-red-600 transition-colors leading-none"
-                          aria-label="Remove time slot"
-                        >
-                          x
-                        </button>
-                      </span>
-                    ))}
-                    {loc.timeSlots.length === 0 && (
-                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>No time slots yet.</p>
-                    )}
-                  </div>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newSlots[locIdx] ?? ""}
-                      onChange={(e) => setNewSlots((prev) => ({ ...prev, [locIdx]: e.target.value }))}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addTimeSlot(locIdx); } }}
-                      placeholder="e.g. 12:00 PM - 1:00 PM"
-                      className="flex-1 px-3 py-2 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]"
-                      style={{ color: "var(--color-text)" }}
-                    />
-                    <button
-                      onClick={() => addTimeSlot(locIdx)}
-                      className="px-3 py-2 rounded-xl text-sm font-medium transition-all"
-                      style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                    >
-                      Add
-                    </button>
-                  </div>
+                  <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                    Hero Subheader <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.hero_subheader}
+                    onChange={(e) => setForm((p) => ({ ...p, hero_subheader: e.target.value }))}
+                    placeholder="e.g. A fresh batch, made with love."
+                    className={inputClass}
+                    style={{ color: "var(--color-text)" }}
+                  />
                 </div>
               </div>
-            ))}
-            {config.locations.length === 0 && (
-              <p className="text-sm text-center py-4" style={{ color: "var(--color-muted)" }}>
-                No locations. Add one above.
-              </p>
-            )}
+
+              <div>
+                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                  Promo Details <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
+                </label>
+                <textarea
+                  value={form.promo_details}
+                  onChange={(e) => setForm((p) => ({ ...p, promo_details: e.target.value }))}
+                  placeholder="e.g. Special launch price for this batch."
+                  rows={2}
+                  className={inputClass}
+                  style={{ color: "var(--color-text)", resize: "vertical" }}
+                />
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Tooltip</p>
+                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      Enable this only when the event needs additional contextual info.
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
+                    <input
+                      type="checkbox"
+                      checked={form.tooltip_enabled}
+                      onChange={(e) => setForm((p) => ({
+                        ...p,
+                        tooltip_enabled: e.target.checked,
+                        tooltip_header: e.target.checked ? p.tooltip_header : "",
+                        tooltip_body: e.target.checked ? p.tooltip_body : "",
+                        tooltip_image_key: e.target.checked ? p.tooltip_image_key : null,
+                      }))}
+                      style={{ accentColor: "var(--color-sage)" }}
+                    />
+                    Enable Tooltip
+                  </label>
+                </div>
+
+                {form.tooltip_enabled ? (
+                  <div className="space-y-4 mt-3">
+                    <div>
+                      <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                        Tooltip Header <span style={{ color: "#dc2626" }}>*</span>
+                      </label>
+                      <input
+                        type="text"
+                        value={form.tooltip_header}
+                        onChange={(e) => setForm((p) => ({ ...p, tooltip_header: e.target.value }))}
+                        placeholder="e.g. What is Lamprais?"
+                        className={inputClass}
+                        style={{ color: "var(--color-text)", background: "white" }}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                        Tooltip Body <span style={{ color: "#dc2626" }}>*</span>
+                      </label>
+                      <textarea
+                        value={form.tooltip_body}
+                        onChange={(e) => setForm((p) => ({ ...p, tooltip_body: e.target.value }))}
+                        placeholder="Describe what customers should know for this event."
+                        rows={3}
+                        className={inputClass}
+                        style={{ color: "var(--color-text)", background: "white", resize: "vertical" }}
+                      />
+                    </div>
+                    <div>
+                      <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                        Tooltip Image <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
+                      </label>
+                      <select
+                        value={form.tooltip_image_key ?? ""}
+                        onChange={(e) => setForm((p) => ({ ...p, tooltip_image_key: e.target.value || null }))}
+                        className={inputClass}
+                        style={{ color: "var(--color-text)", background: "white" }}
+                      >
+                        <option value="">None</option>
+                        {tooltipImageOptions.map((image) => (
+                          <option key={image.key} value={image.key}>
+                            {image.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    {selectedTooltipImage && (
+                      <div className="rounded-xl overflow-hidden border" style={{ borderColor: "var(--color-border)", background: "white" }}>
+                        <img src={selectedTooltipImage.path} alt={selectedTooltipImage.alt} className="w-full h-auto" />
+                        <p className="px-3 py-2 text-xs" style={{ color: "var(--color-muted)" }}>
+                          {selectedTooltipImage.path}
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs mt-3" style={{ color: "var(--color-muted)" }}>
+                    Tooltip fields stay hidden until this toggle is enabled.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "white" }}>
+                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                  Hero Side Image <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
+                </label>
+                <select
+                  value={form.hero_side_image_key ?? ""}
+                  onChange={(e) => setForm((p) => ({ ...p, hero_side_image_key: e.target.value || null }))}
+                  className={inputClass}
+                  style={{ color: "var(--color-text)" }}
+                >
+                  <option value="">None</option>
+                  {heroSideImageOptions.map((image) => (
+                    <option key={image.key} value={image.key}>
+                      {image.label}
+                    </option>
+                  ))}
+                </select>
+                {selectedHeroSideImage && (
+                  <div className="mt-3 rounded-xl overflow-hidden border" style={{ borderColor: "var(--color-border)" }}>
+                    <img src={selectedHeroSideImage.path} alt={selectedHeroSideImage.alt} className="w-full h-auto" />
+                    <p className="px-3 py-2 text-xs" style={{ color: "var(--color-muted)" }}>
+                      {selectedHeroSideImage.path}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
+                <div className="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>E-transfer</p>
+                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      When enabled, this payment section appears after submit and in confirmation emails.
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
+                    <input
+                      type="checkbox"
+                      checked={form.etransfer_enabled}
+                      onChange={(e) => setForm((p) => ({
+                        ...p,
+                        etransfer_enabled: e.target.checked,
+                        etransfer_email: e.target.checked ? p.etransfer_email : "",
+                      }))}
+                      style={{ accentColor: "var(--color-sage)" }}
+                    />
+                    Enable E-transfer
+                  </label>
+                </div>
+                {form.etransfer_enabled ? (
+                  <div className="mt-3">
+                    <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                      E-transfer Email <span style={{ color: "#dc2626" }}>*</span>
+                    </label>
+                    <input
+                      type="email"
+                      value={form.etransfer_email}
+                      onChange={(e) => setForm((p) => ({ ...p, etransfer_email: e.target.value }))}
+                      placeholder="payments@example.com"
+                      className={inputClass}
+                      style={{ color: "var(--color-text)", background: "white" }}
+                    />
+                  </div>
+                ) : (
+                  <p className="text-xs mt-3" style={{ color: "var(--color-muted)" }}>
+                    E-transfer fields stay hidden until this toggle is enabled.
+                  </p>
+                )}
+              </div>
+
+              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "white" }}>
+                <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-text)" }}>Image Helper</p>
+                <p className="text-xs mb-2" style={{ color: "var(--color-muted)" }}>
+                  Place files in these folders, then add an entry to <code>config/event-images.json</code> and run <code>make sync-config</code>.
+                </p>
+                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                  Tooltip images folder: <code>{imageCatalog.helper.tooltip_target_dir}</code>
+                </p>
+                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                  Hero side images folder: <code>{imageCatalog.helper.hero_side_target_dir}</code>
+                </p>
+              </div>
+
+              <SelectorSection
+                title="Items"
+                open={itemsOpen}
+                selectedCount={form.item_ids.length}
+                totalCount={allItems.length}
+                onToggle={() => setItemsOpen((v) => !v)}
+              >
+                {allItems.length === 0 ? (
+                  <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
+                    No items found. Add items first.
+                  </p>
+                ) : (
+                  <div className="space-y-3 pt-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        value={itemsSearch}
+                        onChange={(e) => setItemsSearch(e.target.value)}
+                        placeholder="Search items by name..."
+                        className={inputClass}
+                        style={{ color: "var(--color-text)" }}
+                      />
+                      <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
+                        <input
+                          type="checkbox"
+                          checked={itemsSelectedOnly}
+                          onChange={(e) => setItemsSelectedOnly(e.target.checked)}
+                          style={{ accentColor: "var(--color-sage)" }}
+                        />
+                        Show selected only
+                      </label>
+                    </div>
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {filteredItems.map((item) => (
+                        <label
+                          key={item.id}
+                          className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
+                          style={{
+                            border: `1px solid ${form.item_ids.includes(item.id) ? "var(--color-sage)" : "var(--color-border)"}`,
+                            background: form.item_ids.includes(item.id) ? "#f0fdf4" : "white",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={form.item_ids.includes(item.id)}
+                            onChange={() => toggleCheckbox("item_ids", item.id)}
+                            className="rounded"
+                            style={{ accentColor: "var(--color-sage)" }}
+                          />
+                          <span className="flex-1 text-sm font-medium" style={{ color: "var(--color-text)" }}>
+                            {item.name}
+                          </span>
+                          <span className="text-sm" style={{ color: "var(--color-muted)" }}>
+                            {CURRENCY} ${item.discounted_price != null ? item.discounted_price.toFixed(2) : item.price.toFixed(2)}
+                          </span>
+                        </label>
+                      ))}
+                      {filteredItems.length === 0 && (
+                        <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
+                          No matching items.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </SelectorSection>
+
+              <SelectorSection
+                title="Locations"
+                open={locationsOpen}
+                selectedCount={form.location_ids.length}
+                totalCount={allLocations.length}
+                onToggle={() => setLocationsOpen((v) => !v)}
+              >
+                {allLocations.length === 0 ? (
+                  <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
+                    No locations found. Add locations first.
+                  </p>
+                ) : (
+                  <div className="space-y-3 pt-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <input
+                        type="text"
+                        value={locationsSearch}
+                        onChange={(e) => setLocationsSearch(e.target.value)}
+                        placeholder="Search locations by name..."
+                        className={inputClass}
+                        style={{ color: "var(--color-text)" }}
+                      />
+                      <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
+                        <input
+                          type="checkbox"
+                          checked={locationsSelectedOnly}
+                          onChange={(e) => setLocationsSelectedOnly(e.target.checked)}
+                          style={{ accentColor: "var(--color-sage)" }}
+                        />
+                        Show selected only
+                      </label>
+                    </div>
+                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                      {filteredLocations.map((location) => (
+                        <label
+                          key={location.id}
+                          className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
+                          style={{
+                            border: `1px solid ${form.location_ids.includes(location.id) ? "var(--color-sage)" : "var(--color-border)"}`,
+                            background: form.location_ids.includes(location.id) ? "#f0fdf4" : "white",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={form.location_ids.includes(location.id)}
+                            onChange={() => toggleCheckbox("location_ids", location.id)}
+                            className="rounded"
+                            style={{ accentColor: "var(--color-sage)" }}
+                          />
+                          <span className="text-sm font-medium" style={{ color: "var(--color-text)" }}>
+                            {location.name}
+                          </span>
+                        </label>
+                      ))}
+                      {filteredLocations.length === 0 && (
+                        <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
+                          No matching locations.
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </SelectorSection>
+            </div>
+
+            <div className="px-8 py-5 border-t flex justify-end gap-3" style={{ borderColor: "var(--color-border)" }}>
+              <button
+                onClick={() => setModalOpen(false)}
+                className="px-5 py-2.5 rounded-2xl text-sm font-medium transition-all"
+                style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+                onMouseEnter={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "var(--color-cream)";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "white";
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSave}
+                disabled={saving}
+                className="px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+                style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                onMouseEnter={(e) => {
+                  if (!saving) (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
+                }}
+                onMouseLeave={(e) => {
+                  (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)";
+                }}
+              >
+                {saving ? "Saving..." : editingEvent ? "Save Changes" : "Create Event"}
+              </button>
+            </div>
           </div>
         </div>
-
-        {/* Save */}
-        <div className="flex justify-end">
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="px-8 py-3.5 rounded-2xl text-sm font-semibold tracking-wide transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-            onMouseEnter={(e) => {
-              if (!saving) (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)";
-            }}
-          >
-            {saving ? "Saving..." : "Save Configuration"}
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }

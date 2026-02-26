@@ -5,52 +5,53 @@ import Header from "@/components/Header";
 import HeroSection from "@/components/HeroSection";
 import OrderForm from "@/components/OrderForm";
 import SuccessView from "@/components/SuccessView";
+import NoEventPage from "@/components/NoEventPage";
 import { fetchEventConfig, type EventConfig } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
+import type { OrderResult } from "@/components/OrderForm";
 import FeedbackModal from "@/components/FeedbackModal";
 
-interface OrderResult {
-  order_id: string;
-  order: {
-    name: string;
-    email: string;
-    phone_number: string;
-    item_id: string;
-    item_name: string;
-    quantity: number;
-    pickup_location: string;
-    pickup_time_slot: string;
-    total_price: number;
-    price_per_item: number;
-    currency: string;
-    event_date: string;
-  };
-}
-
 export default function Home() {
-  const [orderResult, setOrderResult] = useState<OrderResult | null>(null);
+  const [orderResults, setOrderResults] = useState<OrderResult[] | null>(null);
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [configError, setConfigError] = useState(false);
+  const [noActiveEvent, setNoActiveEvent] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
 
   useEffect(() => {
     fetchEventConfig()
-      .then(setEventConfig)
+      .then((config) => {
+        if (config === null) setNoActiveEvent(true);
+        else setEventConfig(config);
+      })
       .catch(() => setConfigError(true));
   }, []);
 
-  function handleOrderSuccess(result: OrderResult) {
-    captureEvent("order_submitted", {
-      order_id: result.order_id,
-      item_id: result.order.item_id,
-      quantity: result.order.quantity,
-      total_price: result.order.total_price,
-      currency: result.order.currency,
-      pickup_location: result.order.pickup_location,
-      pickup_time_slot: result.order.pickup_time_slot,
+  function handleOrderSuccess(results: OrderResult[]) {
+    results.forEach((result) => {
+      captureEvent("order_submitted", {
+        order_id: result.order_id,
+        item_id: result.order.item_id,
+        quantity: result.order.quantity,
+        total_price: result.order.total_price,
+        currency: result.order.currency,
+        pickup_location: result.order.pickup_location,
+        pickup_time_slot: result.order.pickup_time_slot,
+      });
     });
+    setOrderResults(results);
+  }
 
-    setOrderResult(result);
+  if (noActiveEvent) {
+    return (
+      <main
+        className="min-h-screen"
+        style={{ background: "var(--color-cream)" }}
+      >
+        <Header />
+        <NoEventPage />
+      </main>
+    );
   }
 
   return (
@@ -59,9 +60,18 @@ export default function Home() {
       style={{ background: "var(--color-cream)" }}
     >
       <Header />
-      {!orderResult && (
+      {!orderResults && (
         <HeroSection
           eventDate={eventConfig?.event.date ?? ""}
+          heroHeader={eventConfig?.hero_header ?? ""}
+          heroHeaderSage={eventConfig?.hero_header_sage ?? ""}
+          heroSubheader={eventConfig?.hero_subheader ?? ""}
+          promoDetails={eventConfig?.promo_details}
+          tooltipEnabled={eventConfig?.tooltip_enabled ?? false}
+          tooltipHeader={eventConfig?.tooltip_header}
+          tooltipBody={eventConfig?.tooltip_body}
+          tooltipImagePath={eventConfig?.tooltip_image_path}
+          heroSideImagePath={eventConfig?.hero_side_image_path}
           onFeedbackClick={() => {
             captureEvent("feedback_modal_opened");
             setFeedbackOpen(true);
@@ -77,7 +87,7 @@ export default function Home() {
             className="text-xs font-semibold tracking-widest uppercase"
             style={{ color: "var(--color-sage)" }}
           >
-            {orderResult ? "Order Placed" : "Pre-Order Below"}
+            {orderResults ? "Order Confirmed" : "Pre-Order Below"}
           </p>
           <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
         </div>
@@ -100,13 +110,12 @@ export default function Home() {
             </svg>
           </div>
         </div>
-      ) : orderResult ? (
-        <SuccessView result={orderResult} />
+      ) : orderResults ? (
+        <SuccessView results={orderResults} />
       ) : (
         <OrderForm
           items={eventConfig.items}
           locations={eventConfig.locations}
-          currency={eventConfig.currency}
           onSuccess={handleOrderSuccess}
         />
       )}
