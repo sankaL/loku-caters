@@ -829,8 +829,14 @@ def admin_update_order(
         raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
 
     total_price = float(order.total_price)
-    if order.item_id != item.id or order.quantity != body.quantity:
+    if order.item_id != item.id:
         total_price = _compute_total_price(item, body.quantity)
+    elif order.quantity != body.quantity:
+        if order.quantity > 0:
+            historical_unit = float(order.total_price) / order.quantity
+            total_price = round(historical_unit * body.quantity, 2)
+        else:
+            total_price = _compute_total_price(item, body.quantity)
 
     order.name = body.name
     order.email = str(body.email) if body.email is not None else None
