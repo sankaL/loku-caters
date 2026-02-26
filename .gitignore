@@ -43,3 +43,6 @@ build/
 
 #reference files
 .ref*
+
+# backup data
+backup-data/*
