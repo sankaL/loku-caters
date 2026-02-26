@@ -594,6 +594,17 @@ def _order_dict(order: Order) -> dict:
         "created_at": order.created_at.isoformat() if order.created_at else None,
     }
 
+
+def _effective_item_price(item: Item) -> float:
+    if item.discounted_price is not None:
+        return float(item.discounted_price)
+    return float(item.price)
+
+
+def _compute_total_price(item: Item, quantity: int) -> float:
+    return round(_effective_item_price(item) * quantity, 2)
+
+
 @router.post("/orders", status_code=201)
 def admin_create_order(
     body: AdminOrderCreate,
@@ -633,8 +644,7 @@ def admin_create_order(
     if pickup_time_slot not in (location.time_slots or []):
         raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
 
-    price = float(item.discounted_price) if item.discounted_price is not None else float(item.price)
-    total_price = price * body.quantity
+    total_price = _compute_total_price(item, body.quantity)
 
     order = Order(
         id=str(uuid.uuid4()),
@@ -817,15 +827,9 @@ def admin_update_order(
     if pickup_time_slot not in (location.time_slots or []):
         raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
 
-    total_price: float
-    if order.item_id == item.id and order.quantity == body.quantity:
-        total_price = float(order.total_price)
-    elif order.item_id == item.id:
-        historical_unit = float(order.total_price) / order.quantity
-        total_price = historical_unit * body.quantity
-    else:
-        price = float(item.discounted_price) if item.discounted_price is not None else float(item.price)
-        total_price = price * body.quantity
+    total_price = float(order.total_price)
+    if order.item_id != item.id or order.quantity != body.quantity:
+        total_price = _compute_total_price(item, body.quantity)
 
     order.name = body.name
     order.email = str(body.email) if body.email is not None else None
