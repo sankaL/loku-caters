@@ -21,6 +21,7 @@ interface Order {
   pickup_time_slot: string;
   total_price: number;
   status: string;
+  reminded: boolean;
   notes?: string | null;
   exclude_email?: boolean;
   created_at: string;
@@ -40,7 +41,6 @@ const PAGE_SIZE = 15;
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fef3c7", color: "#92400e", label: "Pending" },
   confirmed: { bg: "#d1fae5", color: "#065f46", label: "Confirmed" },
-  reminded:  { bg: "#fdf0e8", color: "#7a3f1e", label: "Reminded" },
   paid:      { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
@@ -204,6 +204,7 @@ export default function AdminOrdersPage() {
   const [showRemindModal, setShowRemindModal] = useState(false);
   const [remindSelections, setRemindSelections] = useState<Set<string>>(new Set());
   const [remindLoading, setRemindLoading] = useState(false);
+  const [remindSearch, setRemindSearch] = useState("");
 
   // Reset selection when filter/orders change
   useEffect(() => { setSelectedIds(new Set()); }, [filter, eventFilter, locationFilter, orders]);
@@ -419,7 +420,7 @@ export default function AdminOrdersPage() {
 
   const confirmedOrders = useMemo(() => orders.filter((o) => o.status === "confirmed"), [orders]);
   const eligibleReminderOrders = useMemo(
-    () => confirmedOrders.filter((o) => !o.exclude_email && (o.email ?? "").trim().length > 0),
+    () => confirmedOrders.filter((o) => !o.reminded && !o.exclude_email && (o.email ?? "").trim().length > 0),
     [confirmedOrders]
   );
   const excludedReminderCount = confirmedOrders.length - eligibleReminderOrders.length;
@@ -597,7 +598,7 @@ export default function AdminOrdersPage() {
         throw new Error(await getApiErrorMessage(res, "Failed to send reminders"));
       }
       const data = await res.json();
-      const skipped = (data.skipped_excluded ?? 0) + (data.skipped_missing_email ?? 0);
+      const skipped = (data.skipped_already_reminded ?? 0) + (data.skipped_excluded ?? 0) + (data.skipped_missing_email ?? 0);
       if (data.failed_emails > 0) {
         showToast(
           `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, skipped ${skipped}, failed ${data.failed_emails}`,
@@ -915,6 +916,7 @@ export default function AdminOrdersPage() {
           <button
             onClick={() => {
               setRemindSelections(new Set(eligibleReminderOrders.map((o) => o.id)));
+              setRemindSearch("");
               setShowRemindModal(true);
             }}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
@@ -1179,6 +1181,14 @@ export default function AdminOrdersPage() {
                     </button>
                   </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                    <span className="flex items-center gap-1 uppercase tracking-wider font-semibold" title="Reminded">
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                      </svg>
+                    </span>
+                  </th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
                     <button
                       onClick={() => toggleSort("date")}
                       className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
@@ -1275,6 +1285,20 @@ export default function AdminOrdersPage() {
                           </span>
                         </div>
                       </td>
+                      <td className="px-4 py-3 text-center" title={order.reminded ? "Reminder sent" : "Not reminded"}>
+                        {order.reminded ? (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                          </svg>
+                        ) : (
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#d1d5db" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+                            <line x1="1" y1="1" x2="23" y2="23"/>
+                          </svg>
+                        )}
+                      </td>
                       <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: "var(--color-muted)" }}>
                         {formatDate(order.created_at)}
                       </td>
@@ -1293,7 +1317,7 @@ export default function AdminOrdersPage() {
                               }
                             </button>
                           )}
-                          {order.status === "confirmed" && (
+                          {["confirmed", "picked_up"].includes(order.status) && (
                             <button
                               onClick={() => handleStatusChange(order.id, "paid")}
                               disabled={isUpdatingStatus}
@@ -1793,93 +1817,165 @@ export default function AdminOrdersPage() {
       )}
 
       {/* Remind Modal */}
-      {showRemindModal && (
-        <div
-          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowRemindModal(false); }}
-        >
+      {showRemindModal && (() => {
+        const searchLower = remindSearch.trim().toLowerCase();
+        const filteredRemindOrders = searchLower
+          ? eligibleReminderOrders.filter(
+              (o) =>
+                o.name.toLowerCase().includes(searchLower) ||
+                (o.email ?? "").toLowerCase().includes(searchLower)
+            )
+          : eligibleReminderOrders;
+        const allFilteredSelected = filteredRemindOrders.length > 0 && filteredRemindOrders.every((o) => remindSelections.has(o.id));
+
+        return (
           <div
-            style={{ background: "white", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: "540px", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+            onMouseDown={(e) => { if (e.target === e.currentTarget) setShowRemindModal(false); }}
           >
-            <h2 className="text-xl font-bold mb-1" style={{ color: "var(--color-bark)", fontFamily: "var(--font-serif)" }}>
-              Send Pickup Reminders
-            </h2>
-            <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
-              Reminder emails will be sent to all selected customers and their orders will be marked as Reminded. Orders with Email Excluded or missing email will be skipped.
-            </p>
-
-            {excludedReminderCount > 0 && (
-              <div
-                className="rounded-xl px-4 py-3 text-xs mb-4"
-                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
-              >
-                {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible for reminder emails and will be skipped.
-              </div>
-            )}
-
-            {eligibleReminderOrders.length === 0 ? (
-              <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
-                {confirmedOrders.length === 0
-                  ? "No confirmed orders to remind."
-                  : "No eligible confirmed orders to remind."}
+            <div
+              style={{ background: "white", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: "540px", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+            >
+              <h2 className="text-xl font-bold mb-1" style={{ color: "var(--color-bark)", fontFamily: "var(--font-serif)" }}>
+                Send Pickup Reminders
+              </h2>
+              <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
+                Reminder emails will be sent to all selected customers. Only confirmed orders that have not yet been reminded are shown.
               </p>
-            ) : (
-              <div style={{ overflowY: "auto", flex: 1, marginBottom: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" }}>
-                {eligibleReminderOrders.map((order) => (
-                  <label
-                    key={order.id}
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      gap: "0.75rem",
-                      padding: "0.875rem 1rem",
-                      borderBottom: "1px solid var(--color-border)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={remindSelections.has(order.id)}
-                      onChange={(e) => {
-                        setRemindSelections((prev) => {
-                          const next = new Set(prev);
-                          if (e.target.checked) next.add(order.id);
-                          else next.delete(order.id);
-                          return next;
-                        });
-                      }}
-                      style={{ marginTop: "2px", accentColor: "var(--color-bark)", width: "15px", height: "15px", flexShrink: 0 }}
-                    />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{order.name}</p>
-                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email ?? "-"}</p>
-                      <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{order.pickup_location} - {order.pickup_time_slot}</p>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            )}
 
-            <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
-              <button
-                onClick={() => setShowRemindModal(false)}
-                className="px-4 py-2 rounded-xl text-sm font-medium"
-                style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSendReminders}
-                disabled={remindLoading || remindSelections.size === 0}
-                className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
-              >
-                {remindLoading ? "Sending..." : `Send Reminder${remindSelections.size !== 1 ? "s" : ""} (${remindSelections.size})`}
-              </button>
+              {excludedReminderCount > 0 && (
+                <div
+                  className="rounded-xl px-4 py-3 text-xs mb-4"
+                  style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+                >
+                  {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible (excluded or missing email).
+                </div>
+              )}
+
+              {eligibleReminderOrders.length === 0 ? (
+                <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
+                  {confirmedOrders.length === 0
+                    ? "No confirmed orders to remind."
+                    : "All confirmed orders have already been reminded or are not eligible."}
+                </p>
+              ) : (
+                <>
+                  <div className="relative mb-3">
+                    <svg
+                      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+                    >
+                      <circle cx="11" cy="11" r="8"/>
+                      <path d="m21 21-4.35-4.35"/>
+                    </svg>
+                    <input
+                      type="text"
+                      placeholder="Search by name or email..."
+                      value={remindSearch}
+                      onChange={(e) => setRemindSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 rounded-xl text-sm"
+                      style={{ border: "1px solid var(--color-border)", background: "var(--color-cream)", color: "var(--color-text)", outline: "none" }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      {filteredRemindOrders.length} of {eligibleReminderOrders.length} shown &middot; {remindSelections.size} selected
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setRemindSelections((prev) => {
+                            const next = new Set(prev);
+                            for (const o of filteredRemindOrders) next.add(o.id);
+                            return next;
+                          });
+                        }}
+                        className="text-xs font-medium px-2 py-1 rounded-lg transition-opacity hover:opacity-70"
+                        style={{ color: "var(--color-forest)" }}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRemindSelections((prev) => {
+                            const next = new Set(prev);
+                            for (const o of filteredRemindOrders) next.delete(o.id);
+                            return next;
+                          });
+                        }}
+                        className="text-xs font-medium px-2 py-1 rounded-lg transition-opacity hover:opacity-70"
+                        style={{ color: "var(--color-muted)" }}
+                      >
+                        Unselect all
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ overflowY: "auto", maxHeight: "320px", marginBottom: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" }}>
+                    {filteredRemindOrders.length === 0 ? (
+                      <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
+                        No orders match your search.
+                      </p>
+                    ) : (
+                      filteredRemindOrders.map((order) => (
+                        <label
+                          key={order.id}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "0.75rem",
+                            padding: "0.875rem 1rem",
+                            borderBottom: "1px solid var(--color-border)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={remindSelections.has(order.id)}
+                            onChange={(e) => {
+                              setRemindSelections((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(order.id);
+                                else next.delete(order.id);
+                                return next;
+                              });
+                            }}
+                            style={{ marginTop: "2px", accentColor: "var(--color-bark)", width: "15px", height: "15px", flexShrink: 0 }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{order.name}</p>
+                            <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email ?? "-"}</p>
+                            <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{order.pickup_location} - {order.pickup_time_slot}</p>
+                          </div>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
+                <button
+                  onClick={() => setShowRemindModal(false)}
+                  className="px-4 py-2 rounded-xl text-sm font-medium"
+                  style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendReminders}
+                  disabled={remindLoading || remindSelections.size === 0}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+                >
+                  {remindLoading ? "Sending..." : `Send Reminder${remindSelections.size !== 1 ? "s" : ""} (${remindSelections.size})`}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

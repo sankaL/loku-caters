@@ -589,6 +589,7 @@ def _order_dict(order: Order) -> dict:
         "pickup_time_slot": order.pickup_time_slot,
         "total_price": float(order.total_price),
         "status": order.status,
+        "reminded": bool(order.reminded),
         "notes": order.notes,
         "exclude_email": bool(order.exclude_email),
         "created_at": order.created_at.isoformat() if order.created_at else None,
@@ -714,14 +715,18 @@ def admin_bulk_remind(
 
     reminded_count = 0
     failed_emails = 0
+    skipped_already_reminded = 0
     skipped_excluded = 0
     skipped_missing_email = 0
 
-    for order_id in requested_ids:
+    for order_id in unique_ids:
         order = orders_by_id.get(order_id)
         if order is None:
             continue
         if order.status != OrderStatus.CONFIRMED:
+            continue
+        if order.reminded:
+            skipped_already_reminded += 1
             continue
 
         if order.exclude_email:
@@ -768,7 +773,7 @@ def admin_bulk_remind(
             print(f"[email] Failed to send reminder to {order.email}: {exc}")
             continue
 
-        order.status = OrderStatus.REMINDED
+        order.reminded = True
         reminded_count += 1
 
     db.commit()
@@ -776,6 +781,7 @@ def admin_bulk_remind(
         "success": True,
         "reminded": reminded_count,
         "failed_emails": failed_emails,
+        "skipped_already_reminded": skipped_already_reminded,
         "skipped_excluded": skipped_excluded,
         "skipped_missing_email": skipped_missing_email,
     }
@@ -828,8 +834,14 @@ def admin_update_order(
         raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
 
     total_price = float(order.total_price)
-    if order.item_id != item.id or order.quantity != body.quantity:
+    if order.item_id != item.id:
         total_price = _compute_total_price(item, body.quantity)
+    elif order.quantity != body.quantity:
+        if order.quantity > 0:
+            historical_unit = float(order.total_price) / order.quantity
+            total_price = round(historical_unit * body.quantity, 2)
+        else:
+            total_price = _compute_total_price(item, body.quantity)
 
     order.name = body.name
     order.email = str(body.email) if body.email is not None else None
