@@ -598,7 +598,7 @@ export default function AdminOrdersPage() {
         throw new Error(await getApiErrorMessage(res, "Failed to send reminders"));
       }
       const data = await res.json();
-      const skipped = (data.skipped_excluded ?? 0) + (data.skipped_missing_email ?? 0);
+      const skipped = (data.skipped_already_reminded ?? 0) + (data.skipped_excluded ?? 0) + (data.skipped_missing_email ?? 0);
       if (data.failed_emails > 0) {
         showToast(
           `Sent ${data.reminded} reminder${data.reminded !== 1 ? "s" : ""}, skipped ${skipped}, failed ${data.failed_emails}`,

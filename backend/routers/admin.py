@@ -715,14 +715,18 @@ def admin_bulk_remind(
 
     reminded_count = 0
     failed_emails = 0
+    skipped_already_reminded = 0
     skipped_excluded = 0
     skipped_missing_email = 0
 
-    for order_id in requested_ids:
+    for order_id in unique_ids:
         order = orders_by_id.get(order_id)
         if order is None:
             continue
         if order.status != OrderStatus.CONFIRMED:
+            continue
+        if order.reminded:
+            skipped_already_reminded += 1
             continue
 
         if order.exclude_email:
@@ -777,6 +781,7 @@ def admin_bulk_remind(
         "success": True,
         "reminded": reminded_count,
         "failed_emails": failed_emails,
+        "skipped_already_reminded": skipped_already_reminded,
         "skipped_excluded": skipped_excluded,
         "skipped_missing_email": skipped_missing_email,
     }
