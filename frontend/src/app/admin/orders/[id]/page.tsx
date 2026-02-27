@@ -22,6 +22,9 @@ interface Order {
   total_price: number;
   status: string;
   reminded: boolean;
+  paid: boolean;
+  payment_method: string | null;
+  payment_method_other: string | null;
   notes?: string | null;
   exclude_email?: boolean;
   created_at: string;
@@ -49,7 +52,6 @@ interface EditOrderForm {
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fef3c7", color: "#92400e", label: "Pending" },
   confirmed: { bg: "#d1fae5", color: "#065f46", label: "Confirmed" },
-  paid:      { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
   cancelled: { bg: "#f3f4f6", color: "#374151", label: "Cancelled" },
@@ -60,6 +62,51 @@ const STATUS_OPTIONS = Object.entries(STATUS_STYLES).map(([value, s]) => ({
   label: s.label,
 }));
 
+const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
+  pending: ["pending", "confirmed", "cancelled"],
+  confirmed: ["confirmed", "picked_up", "no_show", "cancelled"],
+  picked_up: ["picked_up", "no_show", "cancelled"],
+  no_show: ["no_show", "picked_up", "cancelled"],
+  cancelled: ["cancelled", "picked_up", "no_show"],
+};
+
+const BanknoteIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2" />
+    <path d="M6 12h.01M18 12h.01" />
+  </svg>
+);
+
+const CashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2" />
+    <path d="M6 12h.01M18 12h.01" />
+  </svg>
+);
+
+const EtransferIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <path d="M2 10h20" />
+    <path d="M6 15h4" />
+    <path d="M14 15h4" />
+  </svg>
+);
+
+const OtherPayIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+    <circle cx="12" cy="17" r=".5" fill="currentColor" />
+  </svg>
+);
+
 export default function OrderDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
@@ -69,9 +116,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [notFound, setNotFound] = useState(false);
 
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [updatingPayment, setUpdatingPayment] = useState(false);
   const [sendingEmail, setSendingEmail] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  const [showPaidModal, setShowPaidModal] = useState(false);
+  const [showUnpayModal, setShowUnpayModal] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "etransfer" | "other">("cash");
+  const [paymentMethodOther, setPaymentMethodOther] = useState("");
 
   const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
   const [events, setEvents] = useState<AdminEvent[]>([]);
@@ -184,6 +237,16 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     return `${e.name} (${e.event_date})`;
   }, [events, order]);
 
+  const statusOptions = useMemo(() => {
+    const current = order?.status;
+    if (!current) return STATUS_OPTIONS;
+    const allowed = ALLOWED_STATUS_TRANSITIONS[current] ?? STATUS_OPTIONS.map((o) => o.value);
+    const options = allowed
+      .map((value) => STATUS_OPTIONS.find((o) => o.value === value))
+      .filter((o): o is { value: string; label: string } => !!o);
+    return options.length > 0 ? options : STATUS_OPTIONS;
+  }, [order?.status]);
+
   const editTimeSlots = useMemo(() => {
     if (!eventConfig || !editForm?.pickup_location) return [];
     const loc = eventConfig.locations.find((l) => l.name === editForm.pickup_location);
@@ -235,6 +298,37 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       showToast(err instanceof Error ? err.message : "Failed to update status", "error");
     } finally {
       setUpdatingStatus(false);
+    }
+  }
+
+  async function handlePaymentUpdate(payload: { paid: boolean; payment_method?: string; payment_method_other?: string }): Promise<boolean> {
+    if (!order) return false;
+    setUpdatingPayment(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/${id}/payment`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to update payment"));
+      }
+      const data = await res.json();
+      setOrder((prev) => prev ? {
+        ...prev,
+        paid: !!data.paid,
+        payment_method: data.payment_method ?? null,
+        payment_method_other: data.payment_method_other ?? null,
+      } : prev);
+      showToast(!!data.paid ? "Marked paid" : "Marked unpaid", "success");
+      return true;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update payment", "error");
+      return false;
+    } finally {
+      setUpdatingPayment(false);
     }
   }
 
@@ -461,7 +555,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           <div>
             <p style={{ ...labelStyle, marginBottom: "8px" }}>Status</p>
             <CustomSelect
-              options={STATUS_OPTIONS}
+              options={statusOptions}
               value={order.status}
               onChange={handleStatusChange}
               disabled={updatingStatus}
@@ -480,6 +574,59 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               : (order.exclude_email ? "Confirm (No Email)" : "Send Confirmation Email")
             }
           </button>
+
+          <div>
+            <p style={{ ...labelStyle, marginBottom: "8px" }}>Payment</p>
+            <div className="flex items-center justify-between gap-2">
+              <span
+                className="text-[10px] py-0.5 rounded-full font-semibold text-center inline-block"
+                style={{
+                  width: "3.5rem",
+                  background: order.paid ? "var(--color-sage)" : "var(--color-cream)",
+                  color: order.paid ? "white" : "var(--color-muted)",
+                  border: "1px solid var(--color-border)",
+                }}
+              >
+                {order.paid ? "Paid" : "Unpaid"}
+              </span>
+
+              {order.paid ? (
+                <button
+                  onClick={() => setShowUnpayModal(true)}
+                  disabled={updatingPayment}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ background: "#dc2626", color: "white" }}
+                  aria-label="Mark order unpaid"
+                  title="Mark as unpaid"
+                >
+                  <BanknoteIcon />
+                </button>
+              ) : (
+                <button
+                  onClick={() => { setPaymentMethod("cash"); setPaymentMethodOther(""); setShowPaidModal(true); }}
+                  disabled={updatingPayment || order.status === "pending"}
+                  className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  style={{ background: "var(--color-sage)", color: "white" }}
+                  aria-label="Mark order paid"
+                  title={order.status === "pending" ? "Confirm order first" : "Mark as paid"}
+                >
+                  <BanknoteIcon />
+                </button>
+              )}
+            </div>
+
+            <p className="text-xs mt-2" style={{ color: "var(--color-muted)" }}>
+              Method: {!order.paid
+                ? "-"
+                : order.payment_method === "cash"
+                  ? "Cash"
+                  : order.payment_method === "etransfer"
+                    ? "E-transfer"
+                    : order.payment_method === "other"
+                      ? `Other${order.payment_method_other ? ` (${order.payment_method_other})` : ""}`
+                      : (order.payment_method ?? "-")}
+            </p>
+          </div>
 
           <button
             onClick={() => setShowEditModal(true)}
@@ -698,6 +845,131 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={showPaidModal}
+        onClose={() => {
+          if (updatingPayment) return;
+          setShowPaidModal(false);
+        }}
+        title="Mark Paid"
+        actions={
+          <>
+            <button
+              onClick={() => setShowPaidModal(false)}
+              disabled={updatingPayment}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                if (order.status === "pending") {
+                  showToast("Confirm the order before marking it paid", "error");
+                  return;
+                }
+                const other = paymentMethodOther.trim();
+                if (paymentMethod === "other" && !other) {
+                  showToast("Enter payment details for Other", "error");
+                  return;
+                }
+
+                const ok = await handlePaymentUpdate({
+                  paid: true,
+                  payment_method: paymentMethod,
+                  payment_method_other: paymentMethod === "other" ? other : undefined,
+                });
+                if (ok) setShowPaidModal(false);
+              }}
+              disabled={updatingPayment}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Save
+            </button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p style={{ color: "var(--color-muted)" }}>
+            Set payment information for <span className="font-semibold" style={{ color: "var(--color-text)" }}>{order.name}</span>.
+          </p>
+
+          <div className="flex gap-2">
+            {(["cash", "etransfer", "other"] as const).map((method) => {
+              const selected = paymentMethod === method;
+              const labels = { cash: "Cash", etransfer: "E-transfer", other: "Other" };
+              const icons = { cash: <CashIcon />, etransfer: <EtransferIcon />, other: <OtherPayIcon /> };
+              return (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setPaymentMethod(method)}
+                  className="flex-1 flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 transition-all text-xs font-semibold"
+                  style={{
+                    borderColor: selected ? "var(--color-forest)" : "var(--color-border)",
+                    background: selected ? "rgba(18,39,15,0.07)" : "var(--color-cream)",
+                    color: selected ? "var(--color-forest)" : "var(--color-muted)",
+                  }}
+                >
+                  {icons[method]}
+                  {labels[method]}
+                </button>
+              );
+            })}
+          </div>
+
+          {paymentMethod === "other" && (
+            <div>
+              <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>
+                Details <span style={{ color: "red" }}>*</span>
+              </label>
+              <input
+                value={paymentMethodOther}
+                onChange={(e) => setPaymentMethodOther(e.target.value)}
+                placeholder="e.g. Gift card, split payment, etc."
+                style={inputStyle}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={showUnpayModal}
+        onClose={() => {
+          if (updatingPayment) return;
+          setShowUnpayModal(false);
+        }}
+        title="Mark Unpaid"
+        variant="danger"
+        actions={
+          <>
+            <button
+              onClick={() => setShowUnpayModal(false)}
+              disabled={updatingPayment}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const ok = await handlePaymentUpdate({ paid: false });
+                if (ok) setShowUnpayModal(false);
+              }}
+              disabled={updatingPayment}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "#dc2626", color: "white" }}
+            >
+              Mark unpaid
+            </button>
+          </>
+        }
+      >
+        This will set paid to false and clear the payment method.
+      </Modal>
 
       <Modal
         isOpen={showDeleteModal}

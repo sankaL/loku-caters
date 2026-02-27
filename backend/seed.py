@@ -54,7 +54,9 @@ SEED_ORDERS = [
         "pickup_location": "Welland",
         "pickup_time_slot": "3:00 PM - 4:00 PM",
         "total_price": 60.00,
-        "status": OrderStatus.PAID,
+        "status": OrderStatus.CONFIRMED,
+        "paid": True,
+        "payment_method": "cash",
         "offset_hours": -24,
     },
     # Welland - no_show

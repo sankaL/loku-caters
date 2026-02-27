@@ -27,6 +27,9 @@ App tables live in the `public` schema but are not intended to be accessed via S
 | `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from items table price |
 | `status` | `TEXT` | default `'pending'` | See valid values below |
 | `reminded` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether a pickup reminder email has been sent; independent of order status |
+| `paid` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether payment has been recorded; independent of order status |
+| `payment_method` | `TEXT` | NULLABLE | Required when `paid = true`; one of `cash`, `etransfer`, `other` |
+| `payment_method_other` | `TEXT` | NULLABLE | Required when `payment_method = 'other'`; cleared when `paid = false` |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
 
 ### Order status values
@@ -35,10 +38,17 @@ App tables live in the `public` schema but are not intended to be accessed via S
 |---|---|
 | `pending` | Order submitted, awaiting admin review |
 | `confirmed` | Confirmed by admin via admin panel; confirmation email may be sent unless email is excluded or delivery fails |
-| `paid` | Payment received |
 | `picked_up` | Customer collected the order |
 | `no_show` | Customer did not pick up |
 | `cancelled` | Order cancelled |
+
+### Payment fields and invariants
+
+Payment is tracked separately from `status` and enforced via API validation and database CHECK constraints:
+- When `paid = false`, both `payment_method` and `payment_method_other` must be NULL.
+- When `paid = true`, `payment_method` must be set to one of `cash`, `etransfer`, `other`.
+- When `payment_method = 'other'`, `payment_method_other` must be non-empty.
+- When `payment_method` is `cash` or `etransfer`, `payment_method_other` must be NULL.
 
 ---
 
@@ -133,6 +143,8 @@ Stores visitor feedback from users who cannot participate in the current batch. 
 | `other_details` | `TEXT` | nullable | Free text; populated only when `reason = 'other'` |
 | `message` | `TEXT` | nullable | Free-form feedback message; primarily used for customer feedback |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+| `status` | `VARCHAR` | NOT NULL, default `'new'` | Admin triage state: `new`, `in_progress`, or `resolved` |
+| `admin_comment` | `TEXT` | nullable | Internal admin note; not visible to submitters |
 
 ### Allowed `reason` values
 
@@ -173,6 +185,8 @@ alembic upgrade head
 | `0012_order_notes_exclude_email` | adds `notes` and `exclude_email` to `orders`; makes `email` and `phone_number` nullable |
 | `0013_orders_event_id` | adds `event_id` to `orders` and backfills to the active event |
 | `0014_add_reminded_boolean` | adds `reminded` boolean to `orders`; backfills existing `status='reminded'` rows to `reminded=true, status='confirmed'` |
+| `0015_feedback_status_comment` | adds `status` (VARCHAR, default `'new'`) and `admin_comment` (TEXT, nullable) to `feedback` |
+| `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true` |
 
 ---
 

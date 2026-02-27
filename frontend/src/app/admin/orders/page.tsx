@@ -22,6 +22,9 @@ interface Order {
   total_price: number;
   status: string;
   reminded: boolean;
+  paid: boolean;
+  payment_method: string | null;
+  payment_method_other: string | null;
   notes?: string | null;
   exclude_email?: boolean;
   created_at: string;
@@ -41,10 +44,17 @@ const PAGE_SIZE = 15;
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
   pending:   { bg: "#fef3c7", color: "#92400e", label: "Pending" },
   confirmed: { bg: "#d1fae5", color: "#065f46", label: "Confirmed" },
-  paid:      { bg: "#dbeafe", color: "#1e40af", label: "Paid" },
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
   cancelled: { bg: "#f3f4f6", color: "#374151", label: "Cancelled" },
+};
+
+const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
+  pending: ["pending", "confirmed", "cancelled"],
+  confirmed: ["confirmed", "picked_up", "no_show", "cancelled"],
+  picked_up: ["picked_up", "no_show", "cancelled"],
+  no_show: ["no_show", "picked_up", "cancelled"],
+  cancelled: ["cancelled", "picked_up", "no_show"],
 };
 
 function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
@@ -102,6 +112,43 @@ function SelectChevron() {
     </svg>
   );
 }
+
+const BanknoteIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2" />
+    <path d="M6 12h.01M18 12h.01" />
+  </svg>
+);
+
+const CashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="6" width="20" height="12" rx="2" />
+    <circle cx="12" cy="12" r="2" />
+    <path d="M6 12h.01M18 12h.01" />
+  </svg>
+);
+
+const EtransferIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="5" width="20" height="14" rx="2" />
+    <path d="M2 10h20" />
+    <path d="M6 15h4" />
+    <path d="M14 15h4" />
+  </svg>
+);
+
+const OtherPayIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+    <circle cx="12" cy="17" r=".5" fill="currentColor" />
+  </svg>
+);
 
 interface AddOrderForm {
   name: string;
@@ -166,6 +213,7 @@ export default function AdminOrdersPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
   const [filter, setFilter] = useState<string>("all");
+  const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [eventFilter, setEventFilter] = useState<string>("all");
   const [locationFilter, setLocationFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
@@ -173,6 +221,7 @@ export default function AdminOrdersPage() {
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
+  const [updatingPayment, setUpdatingPayment] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [sort, setSort] = useState<{ col: SortCol | null; dir: "asc" | "desc" }>({ col: null, dir: "asc" });
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -182,6 +231,12 @@ export default function AdminOrdersPage() {
 
   // Single delete modal
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  // Payment modals
+  const [paymentTarget, setPaymentTarget] = useState<Order | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<"cash" | "etransfer" | "other">("cash");
+  const [paymentMethodOther, setPaymentMethodOther] = useState("");
+  const [unpayTarget, setUnpayTarget] = useState<Order | null>(null);
 
   // Multi-select state
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -194,6 +249,10 @@ export default function AdminOrdersPage() {
   const [showAddOrderModal, setShowAddOrderModal] = useState(false);
   const [addOrderForm, setAddOrderForm] = useState<AddOrderForm>(EMPTY_ADD_FORM);
   const [addingOrder, setAddingOrder] = useState(false);
+  const [addModalEventId, setAddModalEventId] = useState<number | null>(null);
+  const [addModalEventConfig, setAddModalEventConfig] = useState<EventConfig | null>(null);
+  const [addModalEventSearch, setAddModalEventSearch] = useState("");
+  const [showAddEventDropdown, setShowAddEventDropdown] = useState(false);
 
   // Bulk import modal
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
@@ -207,8 +266,8 @@ export default function AdminOrdersPage() {
   const [remindSearch, setRemindSearch] = useState("");
 
   // Reset selection when filter/orders change
-  useEffect(() => { setSelectedIds(new Set()); }, [filter, eventFilter, locationFilter, orders]);
-  useEffect(() => { setPage(1); }, [eventFilter, locationFilter]);
+  useEffect(() => { setSelectedIds(new Set()); }, [filter, paymentFilter, eventFilter, locationFilter, orders]);
+  useEffect(() => { setPage(1); }, [paymentFilter, eventFilter, locationFilter]);
 
   // Switching event should not keep a stale location selection
   useEffect(() => {
@@ -299,6 +358,23 @@ export default function AdminOrdersPage() {
     };
   }, [configEventId]);
 
+  useEffect(() => {
+    if (!showAddOrderModal || addModalEventId === null) return;
+    let cancelled = false;
+    async function loadModalConfig() {
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const res = await fetch(`${API_URL}/api/admin/events/${addModalEventId}/config`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok && !cancelled) setAddModalEventConfig(await res.json());
+      } catch { /* non-blocking */ }
+    }
+    loadModalConfig();
+    return () => { cancelled = true; };
+  }, [addModalEventId, showAddOrderModal]);
+
   const fetchOrders = useCallback(async () => {
     setLoading(true);
     try {
@@ -306,6 +382,8 @@ export default function AdminOrdersPage() {
       if (!token) return;
       const qs = new URLSearchParams();
       if (filter !== "all") qs.set("status", filter);
+      if (paymentFilter === "paid") qs.set("paid", "true");
+      if (paymentFilter === "unpaid") qs.set("paid", "false");
       if (eventFilter !== "all") qs.set("event_id", eventFilter);
       const query = qs.toString();
       const res = await fetch(`${API_URL}/api/admin/orders${query ? `?${query}` : ""}`, {
@@ -319,7 +397,7 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter, eventFilter]);
+  }, [filter, paymentFilter, eventFilter]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search]);
@@ -420,7 +498,7 @@ export default function AdminOrdersPage() {
 
   const confirmedOrders = useMemo(() => orders.filter((o) => o.status === "confirmed"), [orders]);
   const eligibleReminderOrders = useMemo(
-    () => confirmedOrders.filter((o) => !o.reminded && !o.exclude_email && (o.email ?? "").trim().length > 0),
+    () => confirmedOrders.filter((o) => !o.paid && !o.reminded && !o.exclude_email && (o.email ?? "").trim().length > 0),
     [confirmedOrders]
   );
   const excludedReminderCount = confirmedOrders.length - eligibleReminderOrders.length;
@@ -489,6 +567,54 @@ export default function AdminOrdersPage() {
       showToast(err instanceof Error ? err.message : "Failed to update status", "error");
     } finally {
       setUpdatingStatus(null);
+    }
+  }
+
+  async function handlePaymentUpdate(
+    orderId: string,
+    payload: { paid: boolean; payment_method?: string; payment_method_other?: string }
+  ): Promise<boolean> {
+    setUpdatingPayment(orderId);
+    try {
+      const token = await getAdminToken();
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/payment`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to update payment"));
+      }
+      const data = await res.json();
+      const nextPaid = !!data.paid;
+
+      setOrders((prev) => {
+        const matchesPayment =
+          paymentFilter === "all" ||
+          (paymentFilter === "paid" && nextPaid) ||
+          (paymentFilter === "unpaid" && !nextPaid);
+        if (!matchesPayment) return prev.filter((o) => o.id !== orderId);
+
+        return prev.map((o) =>
+          o.id === orderId
+            ? {
+              ...o,
+              paid: nextPaid,
+              payment_method: data.payment_method ?? null,
+              payment_method_other: data.payment_method_other ?? null,
+            }
+            : o
+        );
+      });
+
+      showToast(nextPaid ? "Marked paid" : "Marked unpaid", "success");
+      return true;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to update payment", "error");
+      return false;
+    } finally {
+      setUpdatingPayment(null);
     }
   }
 
@@ -621,6 +747,10 @@ export default function AdminOrdersPage() {
 
   async function handleAddOrder(e: React.FormEvent) {
     e.preventDefault();
+    if (addModalEventId === null) {
+      showToast("Please select an event", "error");
+      return;
+    }
     setAddingOrder(true);
     try {
       const token = await getAdminToken();
@@ -630,7 +760,7 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           ...addOrderForm,
-          event_id: configEventId,
+          event_id: addModalEventId,
         }),
       });
       if (!res.ok) {
@@ -786,6 +916,9 @@ export default function AdminOrdersPage() {
       "Pickup Time Slot",
       "Total Price",
       "Status",
+      "Paid",
+      "Payment Method",
+      "Payment Method Other",
       "Created At",
     ];
 
@@ -801,6 +934,9 @@ export default function AdminOrdersPage() {
       order.pickup_time_slot,
       order.total_price.toFixed(2),
       order.status,
+      order.paid ? "TRUE" : "FALSE",
+      order.payment_method ?? "",
+      order.payment_method_other ?? "",
       order.created_at,
     ]);
 
@@ -864,10 +1000,31 @@ export default function AdminOrdersPage() {
 
   // Time slots for selected location in the add order form
   const addOrderTimeSlots = useMemo(() => {
-    if (!eventConfig || !addOrderForm.pickup_location) return [];
-    const loc = eventConfig.locations.find((l) => l.name === addOrderForm.pickup_location);
+    if (!addModalEventConfig || !addOrderForm.pickup_location) return [];
+    const loc = addModalEventConfig.locations.find((l) => l.name === addOrderForm.pickup_location);
     return loc?.timeSlots ?? [];
-  }, [eventConfig, addOrderForm.pickup_location]);
+  }, [addModalEventConfig, addOrderForm.pickup_location]);
+
+  const normalizedAddModalEventQuery = useMemo(() => {
+    return addModalEventSearch
+      .toLowerCase()
+      .replace(/[()]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }, [addModalEventSearch]);
+
+  const filteredAddModalEvents = useMemo(() => {
+    const q = normalizedAddModalEventQuery;
+    if (!q) return events;
+    return events.filter((e) => {
+      const haystack = `${e.name} ${e.event_date}`
+        .toLowerCase()
+        .replace(/[()]/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
+      return haystack.includes(q);
+    });
+  }, [events, normalizedAddModalEventQuery]);
 
   const validBulkRows = bulkImportRows.filter((r) => !r._error);
   const invalidBulkRows = bulkImportRows.filter((r) => r._error);
@@ -929,7 +1086,15 @@ export default function AdminOrdersPage() {
             Remind
           </button>
           <button
-            onClick={() => { setShowAddOrderModal(true); setAddOrderForm(EMPTY_ADD_FORM); }}
+            onClick={() => {
+              setShowAddOrderModal(true);
+              setAddOrderForm(EMPTY_ADD_FORM);
+              setAddModalEventId(configEventId);
+              setAddModalEventConfig(configEventId ? eventConfig : null);
+              const matchedEvent = configEventId ? events.find(e => e.id === configEventId) : null;
+              setAddModalEventSearch(matchedEvent ? `${matchedEvent.name} (${matchedEvent.event_date})` : "");
+              setShowAddEventDropdown(false);
+            }}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
             style={{ background: "var(--color-forest)", color: "var(--color-cream)", border: "1px solid var(--color-forest)" }}
           >
@@ -970,6 +1135,20 @@ export default function AdminOrdersPage() {
           <SelectChevron />
         </div>
 
+        {/* Payment dropdown */}
+        <div className="relative w-full sm:w-auto">
+          <select
+            value={paymentFilter}
+            onChange={(e) => setPaymentFilter(e.target.value)}
+            style={{ ...dropdownStyle, width: "100%" }}
+          >
+            <option value="all">All Payments</option>
+            <option value="paid">Paid</option>
+            <option value="unpaid">Unpaid</option>
+          </select>
+          <SelectChevron />
+        </div>
+
         {/* Location dropdown */}
         <div className="relative w-full sm:w-auto">
           <select
@@ -997,9 +1176,9 @@ export default function AdminOrdersPage() {
         </div>
 
         {/* Clear filters */}
-        {(filter !== "all" || eventFilter !== "all" || locationFilter !== "all" || search) && (
+        {(filter !== "all" || paymentFilter !== "all" || eventFilter !== "all" || locationFilter !== "all" || search) && (
           <button
-            onClick={() => { setFilter("all"); setEventFilter("all"); setLocationFilter("all"); setSearch(""); }}
+            onClick={() => { setFilter("all"); setPaymentFilter("all"); setEventFilter("all"); setLocationFilter("all"); setSearch(""); }}
             className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
             style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
           >
@@ -1180,6 +1359,8 @@ export default function AdminOrdersPage() {
                       Status <SortIcon active={sort.col === "status"} dir={sort.dir} />
                     </button>
                   </th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Paid</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Method</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
                     <span className="flex items-center gap-1 uppercase tracking-wider font-semibold" title="Reminded">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1204,6 +1385,7 @@ export default function AdminOrdersPage() {
                   const statusStyle = STATUS_STYLES[order.status] ?? STATUS_STYLES.pending;
                   const isConfirming = confirming === order.id;
                   const isUpdatingStatus = updatingStatus === order.id;
+                  const isUpdatingPayment = updatingPayment === order.id;
                   const isDeleting = deleting === order.id;
                   const isSelected = selectedIds.has(order.id);
                   return (
@@ -1274,9 +1456,13 @@ export default function AdminOrdersPage() {
                             className="appearance-none pl-2.5 pr-6 py-1 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-sage)] disabled:opacity-60 transition-opacity"
                             style={{ background: statusStyle.bg, color: statusStyle.color }}
                           >
-                            {Object.entries(STATUS_STYLES).map(([val, s]) => (
-                              <option key={val} value={val}>{s.label}</option>
-                            ))}
+                            {(ALLOWED_STATUS_TRANSITIONS[order.status] ?? Object.keys(STATUS_STYLES))
+                              .filter((val) => STATUS_STYLES[val])
+                              .map((val) => (
+                                <option key={val} value={val}>
+                                  {STATUS_STYLES[val].label}
+                                </option>
+                              ))}
                           </select>
                           <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center" style={{ color: statusStyle.color }}>
                             <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
@@ -1284,6 +1470,69 @@ export default function AdminOrdersPage() {
                             </svg>
                           </span>
                         </div>
+                      </td>
+                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className="text-[10px] py-0.5 rounded-full font-semibold text-center inline-block"
+                            style={{
+                              width: "3.5rem",
+                              background: order.paid ? "var(--color-sage)" : "var(--color-cream)",
+                              color: order.paid ? "white" : "var(--color-muted)",
+                              border: "1px solid var(--color-border)",
+                            }}
+                          >
+                            {order.paid ? "Paid" : "Unpaid"}
+                          </span>
+
+                          {order.paid ? (
+                            <button
+                              onClick={() => setUnpayTarget(order)}
+                              disabled={isUpdatingPayment}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{ background: "#dc2626", color: "white" }}
+                              aria-label="Mark order unpaid"
+                              title="Mark as unpaid"
+                            >
+                              <BanknoteIcon />
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => {
+                                setPaymentTarget(order);
+                                setPaymentMethod("cash");
+                                setPaymentMethodOther("");
+                              }}
+                              disabled={isUpdatingPayment || order.status === "pending"}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{ background: "var(--color-sage)", color: "white" }}
+                              aria-label="Mark order paid"
+                              title={order.status === "pending" ? "Confirm order first" : "Mark as paid"}
+                            >
+                              <BanknoteIcon />
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
+                        {!order.paid ? (
+                          <span style={{ color: "var(--color-muted)" }}>-</span>
+                        ) : order.payment_method === "cash" ? (
+                          "Cash"
+                        ) : order.payment_method === "etransfer" ? (
+                          "E-transfer"
+                        ) : order.payment_method === "other" ? (
+                          <div className="leading-tight">
+                            <div>Other</div>
+                            {order.payment_method_other && (
+                              <div className="text-xs" style={{ color: "var(--color-muted)" }}>
+                                {order.payment_method_other}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ color: "var(--color-muted)" }}>{order.payment_method ?? "-"}</span>
+                        )}
                       </td>
                       <td className="px-4 py-3 text-center" title={order.reminded ? "Reminder sent" : "Not reminded"}>
                         {order.reminded ? (
@@ -1315,18 +1564,6 @@ export default function AdminOrdersPage() {
                                 ? "Confirming..."
                                 : (order.exclude_email ? "Confirm (No Email)" : "Send Confirmation")
                               }
-                            </button>
-                          )}
-                          {["confirmed", "picked_up"].includes(order.status) && (
-                            <button
-                              onClick={() => handleStatusChange(order.id, "paid")}
-                              disabled={isUpdatingStatus}
-                              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap hover:opacity-90"
-                              style={{ background: "var(--color-sage)", color: "white" }}
-                              aria-label="Mark order paid"
-                              title="Mark as paid"
-                            >
-                              {isUpdatingStatus ? "Paid..." : "Paid"}
                             </button>
                           )}
                           <button
@@ -1500,6 +1737,137 @@ export default function AdminOrdersPage() {
         Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed (orders with Email Excluded will be confirmed without email).
       </Modal>
 
+      {/* Mark paid modal */}
+      <Modal
+        isOpen={!!paymentTarget}
+        onClose={() => {
+          if (paymentTarget && updatingPayment === paymentTarget.id) return;
+          setPaymentTarget(null);
+        }}
+        title="Mark Paid"
+        actions={
+          <>
+            <button
+              onClick={() => setPaymentTarget(null)}
+              disabled={!!paymentTarget && updatingPayment === paymentTarget.id}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = paymentTarget;
+                if (!target) return;
+                if (target.status === "pending") {
+                  showToast("Confirm the order before marking it paid", "error");
+                  return;
+                }
+                const other = paymentMethodOther.trim();
+                if (paymentMethod === "other" && !other) {
+                  showToast("Enter payment details for Other", "error");
+                  return;
+                }
+
+                const ok = await handlePaymentUpdate(target.id, {
+                  paid: true,
+                  payment_method: paymentMethod,
+                  payment_method_other: paymentMethod === "other" ? other : undefined,
+                });
+                if (ok) setPaymentTarget(null);
+              }}
+              disabled={!!paymentTarget && updatingPayment === paymentTarget.id}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Save
+            </button>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-3">
+          <p style={{ color: "var(--color-muted)" }}>
+            Set payment information for <span className="font-semibold" style={{ color: "var(--color-text)" }}>{paymentTarget?.name ?? "this order"}</span>.
+          </p>
+
+          <div className="flex gap-2">
+            {(["cash", "etransfer", "other"] as const).map((method) => {
+              const selected = paymentMethod === method;
+              const labels = { cash: "Cash", etransfer: "E-transfer", other: "Other" };
+              const icons = { cash: <CashIcon />, etransfer: <EtransferIcon />, other: <OtherPayIcon /> };
+              return (
+                <button
+                  key={method}
+                  type="button"
+                  onClick={() => setPaymentMethod(method)}
+                  className="flex-1 flex flex-col items-center gap-1.5 py-3 rounded-xl border-2 transition-all text-xs font-semibold"
+                  style={{
+                    borderColor: selected ? "var(--color-forest)" : "var(--color-border)",
+                    background: selected ? "rgba(18,39,15,0.07)" : "var(--color-cream)",
+                    color: selected ? "var(--color-forest)" : "var(--color-muted)",
+                  }}
+                >
+                  {icons[method]}
+                  {labels[method]}
+                </button>
+              );
+            })}
+          </div>
+
+          {paymentMethod === "other" && (
+            <div>
+              <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>
+                Details <span style={{ color: "red" }}>*</span>
+              </label>
+              <input
+                value={paymentMethodOther}
+                onChange={(e) => setPaymentMethodOther(e.target.value)}
+                placeholder="e.g. Gift card, split payment, etc."
+                style={inputStyle}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
+
+      {/* Mark unpaid modal */}
+      <Modal
+        isOpen={!!unpayTarget}
+        onClose={() => {
+          if (unpayTarget && updatingPayment === unpayTarget.id) return;
+          setUnpayTarget(null);
+        }}
+        title="Mark Unpaid"
+        variant="danger"
+        actions={
+          <>
+            <button
+              onClick={() => setUnpayTarget(null)}
+              disabled={!!unpayTarget && updatingPayment === unpayTarget.id}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = unpayTarget;
+                if (!target) return;
+                const ok = await handlePaymentUpdate(target.id, { paid: false });
+                if (ok) setUnpayTarget(null);
+              }}
+              disabled={!!unpayTarget && updatingPayment === unpayTarget.id}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "#dc2626", color: "white" }}
+            >
+              Mark unpaid
+            </button>
+          </>
+        }
+      >
+        This will set paid to false and clear the payment method.
+      </Modal>
+
       {/* Add Order Modal */}
         {showAddOrderModal && (
           <div
@@ -1513,12 +1881,70 @@ export default function AdminOrdersPage() {
             <h2 className="text-xl font-bold mb-5" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
               Add Order
             </h2>
-            {configEventLabel && (
-              <p className="text-xs mb-4" style={{ color: "var(--color-muted)" }}>
-                Creating for: {configEventLabel}{configUsesFallback ? " (using active config fallback)" : ""}
-              </p>
-            )}
             <form onSubmit={handleAddOrder} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              {/* Event selector combobox */}
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>
+                  Event <span style={{ color: "red" }}>*</span>
+                </label>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={addModalEventSearch}
+                    onChange={(e) => {
+                      const nextSearch = e.target.value;
+                      setAddModalEventSearch(nextSearch);
+                      setShowAddEventDropdown(true);
+                      const selectedEvent = addModalEventId ? events.find((evt) => evt.id === addModalEventId) : null;
+                      const selectedEventLabel = selectedEvent
+                        ? `${selectedEvent.name} (${selectedEvent.event_date})`
+                        : "";
+                      if (!selectedEvent || nextSearch !== selectedEventLabel) {
+                        setAddModalEventId(null);
+                        setAddModalEventConfig(null);
+                        setAddOrderForm((f) => ({ ...f, item_id: "", pickup_location: "", pickup_time_slot: "" }));
+                      }
+                    }}
+                    onFocus={() => setShowAddEventDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowAddEventDropdown(false), 150)}
+                    placeholder="Search events..."
+                    style={{ ...inputStyle, paddingRight: "2rem" }}
+                  />
+                  {showAddEventDropdown && (
+                    <div style={{
+                      position: "absolute", top: "100%", left: 0, right: 0,
+                      background: "white", border: "1px solid var(--color-border)",
+                      borderRadius: "12px", boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                      zIndex: 200, maxHeight: "200px", overflowY: "auto", marginTop: "4px"
+                    }}>
+                      {filteredAddModalEvents.map((e) => (
+                          <div
+                            key={e.id}
+                            onMouseDown={() => {
+                              setAddModalEventId(e.id);
+                              setAddModalEventSearch(`${e.name} (${e.event_date})`);
+                              setShowAddEventDropdown(false);
+                              setAddOrderForm(f => ({ ...f, item_id: "", pickup_location: "", pickup_time_slot: "" }));
+                            }}
+                            style={{
+                              padding: "8px 12px", cursor: "pointer",
+                              background: addModalEventId === e.id ? "var(--color-cream)" : "white",
+                              display: "flex", justifyContent: "space-between", alignItems: "center"
+                            }}
+                          >
+                            <span style={{ fontWeight: 500 }}>{e.name}</span>
+                            <span style={{ fontSize: "12px", color: "var(--color-muted)" }}>
+                              {e.event_date}{e.is_active ? " (active)" : ""}
+                            </span>
+                          </div>
+                        ))}
+                      {filteredAddModalEvents.length === 0 && (
+                        <div style={{ padding: "8px 12px", color: "var(--color-muted)", fontSize: "13px" }}>No events found</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
                 <div>
                   <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Name</label>
@@ -1591,7 +2017,7 @@ export default function AdminOrdersPage() {
                     style={{ ...inputStyle, paddingRight: "2rem" }}
                   >
                     <option value="">Select item...</option>
-                    {eventConfig?.items.map((item) => (
+                    {addModalEventConfig?.items.map((item) => (
                       <option key={item.id} value={item.id}>{item.name}</option>
                     ))}
                   </select>
@@ -1610,7 +2036,7 @@ export default function AdminOrdersPage() {
                       style={{ ...inputStyle, paddingRight: "2rem" }}
                     >
                       <option value="">Select location...</option>
-                      {eventConfig?.locations.map((loc) => (
+                      {addModalEventConfig?.locations.map((loc) => (
                         <option key={loc.id} value={loc.name}>{loc.name}</option>
                       ))}
                     </select>
@@ -1826,7 +2252,6 @@ export default function AdminOrdersPage() {
                 (o.email ?? "").toLowerCase().includes(searchLower)
             )
           : eligibleReminderOrders;
-        const allFilteredSelected = filteredRemindOrders.length > 0 && filteredRemindOrders.every((o) => remindSelections.has(o.id));
 
         return (
           <div
@@ -1840,7 +2265,7 @@ export default function AdminOrdersPage() {
                 Send Pickup Reminders
               </h2>
               <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
-                Reminder emails will be sent to all selected customers. Only confirmed orders that have not yet been reminded are shown.
+                Reminder emails will be sent to all selected customers. Only confirmed, unpaid orders that have not yet been reminded are shown.
               </p>
 
               {excludedReminderCount > 0 && (
@@ -1848,7 +2273,7 @@ export default function AdminOrdersPage() {
                   className="rounded-xl px-4 py-3 text-xs mb-4"
                   style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
                 >
-                  {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible (excluded or missing email).
+                  {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible (paid, excluded, or missing email).
                 </div>
               )}
 
