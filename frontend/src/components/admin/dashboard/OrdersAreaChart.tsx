@@ -1,46 +1,59 @@
 "use client";
 
+import * as React from "react";
 import {
   AreaChart,
   Area,
   XAxis,
-  YAxis,
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
 } from "recharts";
-import DashboardCard from "./DashboardCard";
-
-interface DataPoint {
-  date: string;
-  label: string;
-  count: number;
-  revenue: number;
-}
+import type { RevenueTimePoint } from "@/lib/dashboardUtils";
 
 type Range = "7d" | "30d" | "1y";
 
-interface OrdersAreaChartProps {
-  data: DataPoint[];
+interface RevenueOverTimeChartProps {
+  data: RevenueTimePoint[];
+  topItems: { itemId: string; itemName: string }[];
   range: Range;
   onRangeChange: (r: Range) => void;
   currency: string;
 }
 
+// Index 0 = bottom of stack (largest item, darkest), last index = top (lightest)
+const AREA_COLORS = ["#12270F", "#3A5C28", "#729152", "#4A7C59", "#9CB070", "#C5D9A3"];
+
 function fmt(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency }).format(amount);
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency,
+    maximumFractionDigits: 0,
+  }).format(amount);
 }
 
-interface CustomTooltipProps {
+// ---------------------------------------------------------------------------
+// Custom tooltip
+// ---------------------------------------------------------------------------
+interface TooltipProps {
   active?: boolean;
-  payload?: { value: number; payload: DataPoint }[];
-  label?: string;
+  payload?: ReadonlyArray<{ dataKey: string; value: number }>;
+  label?: string | number;
   currency: string;
+  topItems: { itemId: string; itemName: string }[];
+  hasOther: boolean;
 }
 
-function CustomTooltip({ active, payload, currency }: CustomTooltipProps) {
+function CustomTooltip({ active, payload, label, currency, topItems, hasOther }: TooltipProps) {
   if (!active || !payload?.length) return null;
-  const point = payload[0].payload;
+
+  const valMap = new Map<string, number>();
+  for (const p of payload) valMap.set(p.dataKey, p.value);
+
+  const total =
+    topItems.reduce((s, item) => s + (valMap.get(item.itemId) ?? 0), 0) +
+    (hasOther ? (valMap.get("__other__") ?? 0) : 0);
+
   return (
     <div
       style={{
@@ -49,128 +62,215 @@ function CustomTooltip({ active, payload, currency }: CustomTooltipProps) {
         borderRadius: 12,
         padding: "10px 14px",
         fontSize: 12,
-        boxShadow: "0 4px 12px rgba(0,0,0,0.08)",
+        boxShadow: "0 4px 16px rgba(18,39,15,0.10)",
+        minWidth: 170,
       }}
     >
-      <p style={{ fontWeight: 700, color: "var(--color-forest)", margin: "0 0 6px" }}>
-        {point.label}
+      {label != null && (
+        <p style={{ margin: "0 0 8px", fontWeight: 600, color: "var(--color-muted)", fontSize: 11, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+          {String(label)}
+        </p>
+      )}
+      <p style={{ margin: "0 0 6px", fontWeight: 700, color: "var(--color-forest)", fontSize: 14 }}>
+        {fmt(total, currency)}
       </p>
-      <p style={{ margin: "0 0 2px", color: "var(--color-text)" }}>
-        <span style={{ fontWeight: 600 }}>{point.count}</span> orders
-      </p>
-      <p style={{ margin: 0, color: "var(--color-muted)" }}>{fmt(point.revenue, currency)}</p>
+      <div style={{ borderTop: "1px solid var(--color-border)", marginBottom: 6, marginTop: 6 }} />
+      {/* Show items top-to-bottom = lightest first (top of stack) so order matches visual */}
+      {[...topItems].reverse().map((item, i) => {
+        const colorIdx = topItems.length - 1 - i;
+        return (
+          <div key={item.itemId} style={{ display: "flex", alignItems: "center", gap: 7, margin: "3px 0", color: "var(--color-text)" }}>
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: AREA_COLORS[colorIdx], flexShrink: 0, display: "inline-block" }} />
+            <span style={{ flex: 1, color: "var(--color-muted)" }}>{item.itemName}</span>
+            <span style={{ fontWeight: 600 }}>{fmt(valMap.get(item.itemId) ?? 0, currency)}</span>
+          </div>
+        );
+      })}
+      {hasOther && (
+        <div style={{ display: "flex", alignItems: "center", gap: 7, margin: "3px 0", color: "var(--color-text)" }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: AREA_COLORS[5], flexShrink: 0, display: "inline-block" }} />
+          <span style={{ flex: 1, color: "var(--color-muted)" }}>Other</span>
+          <span style={{ fontWeight: 600 }}>{fmt(valMap.get("__other__") ?? 0, currency)}</span>
+        </div>
+      )}
     </div>
   );
 }
 
-const dropdownStyle: React.CSSProperties = {
-  appearance: "none",
-  WebkitAppearance: "none",
-  background: "white",
-  color: "var(--color-text)",
-  border: "1px solid var(--color-border)",
-  borderRadius: "0.75rem",
-  padding: "0.375rem 1.75rem 0.375rem 0.625rem",
-  fontSize: "0.8rem",
-  cursor: "pointer",
-  outline: "none",
-};
-
-function SelectChevron() {
+// ---------------------------------------------------------------------------
+// Custom legend
+// ---------------------------------------------------------------------------
+function ChartLegend({
+  topItems,
+  hasOther,
+}: {
+  topItems: { itemId: string; itemName: string }[];
+  hasOther: boolean;
+}) {
+  const entries = [
+    ...topItems.map((item, i) => ({ label: item.itemName, color: AREA_COLORS[i] })),
+    ...(hasOther ? [{ label: "Other", color: AREA_COLORS[5] }] : []),
+  ];
   return (
-    <svg
-      width="11"
-      height="11"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      style={{
-        position: "absolute",
-        right: 8,
-        top: "50%",
-        transform: "translateY(-50%)",
-        pointerEvents: "none",
-        color: "var(--color-muted)",
-      }}
-    >
-      <path d="M5 8l5 5 5-5" />
-    </svg>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", justifyContent: "center", marginTop: 12 }}>
+      {entries.map(({ label, color }) => (
+        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--color-muted)" }}>
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0, display: "inline-block" }} />
+          {label}
+        </div>
+      ))}
+    </div>
   );
 }
 
-// Determine x-axis tick interval to avoid crowding
+// ---------------------------------------------------------------------------
+// X-axis tick interval
+// ---------------------------------------------------------------------------
 function tickInterval(range: Range): number {
-  if (range === "1y") return 0; // show all 12 months
-  if (range === "7d") return 0; // show all 7 days
-  // 30d: show every 5 days
-  return 4;
+  if (range === "1y") return 0;
+  if (range === "7d") return 0;
+  return 4; // 30d: every 5th label
 }
 
-export default function OrdersAreaChart({ data, range, onRangeChange, currency }: OrdersAreaChartProps) {
+// ---------------------------------------------------------------------------
+// Main chart
+// ---------------------------------------------------------------------------
+export default function OrdersAreaChart({
+  data,
+  topItems,
+  range,
+  onRangeChange,
+  currency,
+}: RevenueOverTimeChartProps) {
+  // Compute "Other" revenue per point (total minus top-item sum)
+  const dataWithOther = React.useMemo(() => {
+    return data.map((point) => {
+      const itemSum = topItems.reduce((s, item) => s + ((point[item.itemId] as number) ?? 0), 0);
+      return { ...point, __other__: Math.max(0, point.totalRevenue - itemSum) };
+    });
+  }, [data, topItems]);
+
+  const hasOther = dataWithOther.some((p) => p.__other__ > 0);
   const interval = tickInterval(range);
 
-  const rangeAction = (
-    <div style={{ position: "relative", display: "inline-block" }}>
-      <select
-        value={range}
-        onChange={(e) => onRangeChange(e.target.value as Range)}
-        style={dropdownStyle}
-      >
-        <option value="7d">Last 7 days</option>
-        <option value="30d">Last 30 days</option>
-        <option value="1y">Last year</option>
-      </select>
-      <SelectChevron />
-    </div>
-  );
-
   return (
-    <DashboardCard
-      title="Orders Over Time"
-      subtitle="Daily order volume"
-      action={rangeAction}
+    <div
+      style={{
+        background: "white",
+        border: "1px solid var(--color-border)",
+        borderRadius: 24,
+        overflow: "hidden",
+      }}
     >
-      <ResponsiveContainer width="100%" height={200}>
-        <AreaChart data={data} margin={{ top: 4, right: 4, left: -16, bottom: 0 }}>
-          <defs>
-            <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%" stopColor="#12270F" stopOpacity={0.15} />
-              <stop offset="95%" stopColor="#12270F" stopOpacity={0} />
-            </linearGradient>
-          </defs>
-          <CartesianGrid
-            strokeDasharray="3 3"
-            stroke="var(--color-border)"
-            vertical={false}
-          />
-          <XAxis
-            dataKey="label"
-            tick={{ fontSize: 11, fill: "var(--color-muted)" } as React.SVGProps<SVGTextElement>}
-            axisLine={false}
-            tickLine={false}
-            interval={interval}
-          />
-          <YAxis
-            allowDecimals={false}
-            tick={{ fontSize: 11, fill: "var(--color-muted)" } as React.SVGProps<SVGTextElement>}
-            axisLine={false}
-            tickLine={false}
-            width={32}
-          />
-          <Tooltip content={<CustomTooltip currency={currency} />} />
-          <Area
-            type="monotone"
-            dataKey="count"
-            stroke="#12270F"
-            strokeWidth={2}
-            fill="url(#areaGradient)"
-            activeDot={{ r: 5, fill: "#729152", stroke: "white", strokeWidth: 2 }}
-          />
-        </AreaChart>
-      </ResponsiveContainer>
-    </DashboardCard>
+      {/* Header - matches shadcn CardHeader with border-b */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+          padding: "16px 24px",
+          borderBottom: "1px solid var(--color-border)",
+        }}
+      >
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontFamily: "var(--font-serif)", fontSize: 15, fontWeight: 600, color: "var(--color-forest)", margin: 0 }}>
+            Revenue Over Time
+          </p>
+          <p style={{ fontSize: 12, color: "var(--color-muted)", margin: "2px 0 0" }}>
+            Total and per-item revenue
+          </p>
+        </div>
+        <select
+          value={range}
+          onChange={(e) => onRangeChange(e.target.value as Range)}
+          style={{
+            background: "white",
+            color: "var(--color-text)",
+            border: "1px solid var(--color-border)",
+            borderRadius: "0.75rem",
+            padding: "0.375rem 2.5rem 0.375rem 0.75rem",
+            fontSize: "0.8rem",
+            cursor: "pointer",
+            outline: "none",
+            flexShrink: 0,
+          }}
+        >
+          <option value="7d">Last 7 days</option>
+          <option value="30d">Last 30 days</option>
+          <option value="1y">Last year</option>
+        </select>
+      </div>
+
+      {/* Chart body */}
+      <div style={{ padding: "16px 8px 4px" }}>
+        <ResponsiveContainer width="100%" height={250}>
+          <AreaChart data={dataWithOther} margin={{ top: 4, right: 12, left: 12, bottom: 0 }}>
+            <defs>
+              {topItems.map((item, i) => (
+                <linearGradient key={item.itemId} id={`fill_${i}`} x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={AREA_COLORS[i]} stopOpacity={0.85} />
+                  <stop offset="95%" stopColor={AREA_COLORS[i]} stopOpacity={0.1} />
+                </linearGradient>
+              ))}
+              {hasOther && (
+                <linearGradient id="fill_other" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={AREA_COLORS[5]} stopOpacity={0.85} />
+                  <stop offset="95%" stopColor={AREA_COLORS[5]} stopOpacity={0.1} />
+                </linearGradient>
+              )}
+            </defs>
+
+            <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="3 3" />
+
+            <XAxis
+              dataKey="label"
+              tickLine={false}
+              axisLine={false}
+              tick={{ fontSize: 11, fill: "var(--color-muted)" } as React.SVGProps<SVGTextElement>}
+              tickMargin={8}
+              interval={interval}
+            />
+
+            <Tooltip
+              cursor={{ stroke: "var(--color-border)", strokeWidth: 1 }}
+              content={(props) => (
+                <CustomTooltip
+                  {...props}
+                  currency={currency}
+                  topItems={topItems}
+                  hasOther={hasOther}
+                />
+              )}
+            />
+
+            {/* Render topItems in order: index 0 = bottom of stack (largest, darkest) */}
+            {topItems.map((item, i) => (
+              <Area
+                key={item.itemId}
+                type="natural"
+                dataKey={item.itemId}
+                stackId="a"
+                stroke={AREA_COLORS[i]}
+                strokeWidth={1.5}
+                fill={`url(#fill_${i})`}
+              />
+            ))}
+
+            {hasOther && (
+              <Area
+                type="natural"
+                dataKey="__other__"
+                stackId="a"
+                stroke={AREA_COLORS[5]}
+                strokeWidth={1.5}
+                fill="url(#fill_other)"
+              />
+            )}
+          </AreaChart>
+        </ResponsiveContainer>
+
+        <ChartLegend topItems={topItems} hasOther={hasOther} />
+      </div>
+    </div>
   );
 }

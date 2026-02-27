@@ -6,6 +6,7 @@ import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import CustomSelect from "@/components/ui/CustomSelect";
+import SearchableSelect from "@/components/ui/SearchableSelect";
 import Modal from "@/components/ui/Modal";
 
 interface Order {
@@ -135,6 +136,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
+  const [siblingOrders, setSiblingOrders] = useState<Order[]>([]);
+  const [loadingSiblings, setLoadingSiblings] = useState(false);
+  const [siblingVersion, setSiblingVersion] = useState(0);
+  const [showAddItemModal, setShowAddItemModal] = useState(false);
+  const [addItemSearch, setAddItemSearch] = useState("");
+  const [addItemId, setAddItemId] = useState("");
+  const [addItemQty, setAddItemQty] = useState(1);
+  const [addingItem, setAddingItem] = useState(false);
+
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -229,6 +239,35 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     }
     loadEvents();
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function fetchSiblings() {
+      if (!order?.email || !order?.event_id) {
+        if (!cancelled) {
+          setSiblingOrders([]);
+          setLoadingSiblings(false);
+        }
+        return;
+      }
+      setLoadingSiblings(true);
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const url = `${API_URL}/api/admin/orders?event_id=${order.event_id}&email=${encodeURIComponent(order.email)}`;
+        const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled) setSiblingOrders(Array.isArray(data) ? data : []);
+      } catch {
+        // Non-blocking
+      } finally {
+        if (!cancelled) setLoadingSiblings(false);
+      }
+    }
+    fetchSiblings();
+    return () => { cancelled = true; };
+  }, [order?.email, order?.event_id, siblingVersion]);
 
   const eventLabel = useMemo(() => {
     if (!order) return "";
@@ -418,6 +457,44 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       showToast(err instanceof Error ? err.message : "Failed to delete order", "error");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleAddItem() {
+    if (!order || !addItemId) return;
+    setAddingItem(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/orders`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          event_id: order.event_id,
+          name: order.name,
+          email: order.email ?? "",
+          phone_number: order.phone_number ?? "",
+          item_id: addItemId,
+          quantity: addItemQty,
+          pickup_location: order.pickup_location,
+          pickup_time_slot: order.pickup_time_slot,
+          notes: "",
+          exclude_email: order.exclude_email ?? false,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to add item"));
+      }
+      setShowAddItemModal(false);
+      setAddItemId("");
+      setAddItemQty(1);
+      setAddItemSearch("");
+      setSiblingVersion((v) => v + 1);
+      showToast("Item added successfully", "success");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to add item", "error");
+    } finally {
+      setAddingItem(false);
     }
   }
 
@@ -697,7 +774,201 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             {order.notes ? order.notes : "-"}
           </p>
         </div>
+
+        {/* Customer Order Items */}
+        <div style={cardStyle} className="md:col-span-3">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>
+              Customer Order Items
+              {order.email && (
+                <span className="ml-2 text-xs font-normal" style={{ color: "var(--color-muted)" }}>
+                  ({order.email})
+                </span>
+              )}
+            </h2>
+            <button
+              onClick={() => { setAddItemId(""); setAddItemQty(1); setAddItemSearch(""); setShowAddItemModal(true); }}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              + Add Item
+            </button>
+          </div>
+
+          {loadingSiblings ? (
+            <div className="flex justify-center py-6">
+              <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="10" opacity="0.3" />
+                <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
+              </svg>
+            </div>
+          ) : siblingOrders.length === 0 ? (
+            <p className="text-sm" style={{ color: "var(--color-muted)" }}>No orders found for this customer and event.</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+                <thead>
+                  <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
+                    <th className="text-left pb-2 pr-4" style={{ ...labelStyle, paddingBottom: "8px" }}>Item</th>
+                    <th className="text-left pb-2 pr-4" style={{ ...labelStyle, paddingBottom: "8px" }}>Qty</th>
+                    <th className="text-left pb-2 pr-4" style={{ ...labelStyle, paddingBottom: "8px" }}>Total</th>
+                    <th className="text-left pb-2 pr-4" style={{ ...labelStyle, paddingBottom: "8px" }}>Status</th>
+                    <th className="text-left pb-2" style={{ ...labelStyle, paddingBottom: "8px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {siblingOrders.map((sibling) => {
+                    const isCurrent = sibling.id === order.id;
+                    const siblingStatus = STATUS_STYLES[sibling.status] ?? STATUS_STYLES.pending;
+                    return (
+                      <tr
+                        key={sibling.id}
+                        style={{
+                          background: isCurrent ? "#f0fdf4" : "transparent",
+                          borderBottom: "1px solid var(--color-border)",
+                        }}
+                      >
+                        <td className="py-2.5 pr-4" style={{ color: "var(--color-text)", fontWeight: 500 }}>
+                          {sibling.item_name}
+                          {isCurrent && (
+                            <span className="ml-2 text-xs px-1.5 py-0.5 rounded-full font-semibold"
+                              style={{ background: "#d1fae5", color: "#065f46" }}>
+                              current
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2.5 pr-4" style={{ color: "var(--color-text)" }}>{sibling.quantity}</td>
+                        <td className="py-2.5 pr-4" style={{ color: "var(--color-forest)", fontWeight: 700 }}>
+                          ${sibling.total_price.toFixed(2)}
+                        </td>
+                        <td className="py-2.5 pr-4">
+                          <span className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                            style={{ background: siblingStatus.bg, color: siblingStatus.color }}>
+                            {siblingStatus.label}
+                          </span>
+                        </td>
+                        <td className="py-2.5">
+                          {!isCurrent && (
+                            <a
+                              href={`/admin/orders/${sibling.id}`}
+                              className="text-xs font-semibold"
+                              style={{ color: "var(--color-forest)" }}
+                            >
+                              View
+                            </a>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot>
+                  <tr style={{ borderTop: "2px solid var(--color-border)" }}>
+                    <td colSpan={2} className="pt-3 pr-4" style={{ ...labelStyle }}>Combined Total</td>
+                    <td className="pt-3" style={{ color: "var(--color-forest)", fontWeight: 700, fontSize: "14px" }}>
+                      ${siblingOrders.reduce((s, o) => s + o.total_price, 0).toFixed(2)}
+                    </td>
+                    <td colSpan={2} />
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Add Item Modal */}
+      {showAddItemModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAddItemModal(false); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "480px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-5" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              Add Item
+            </h2>
+            <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div>
+                <label className="block text-xs font-semibold mb-2" style={{ color: "var(--color-muted)" }}>Search and Select Item</label>
+                {eventConfig?.items && eventConfig.items.length > 0 ? (
+                  <div className="space-y-3">
+                    <input
+                      type="text"
+                      value={addItemSearch}
+                      onChange={(e) => setAddItemSearch(e.target.value)}
+                      placeholder="Search items..."
+                      className="w-full px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
+                      style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
+                    />
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {eventConfig.items
+                        .filter((item) => {
+                          const q = addItemSearch.trim().toLowerCase();
+                          return !q || item.name.toLowerCase().includes(q);
+                        })
+                        .map((item) => {
+                          const isSelected = addItemId === item.id;
+                          const price = item.discounted_price ?? item.price;
+                          return (
+                            <button
+                              key={item.id}
+                              type="button"
+                              onClick={() => setAddItemId(item.id)}
+                              className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all"
+                              style={{
+                                border: `1px solid ${isSelected ? "var(--color-sage)" : "var(--color-border)"}`,
+                                background: isSelected ? "#f0fdf4" : "white",
+                              }}
+                            >
+                              <span className="text-sm font-medium" style={{ color: "var(--color-text)" }}>{item.name}</span>
+                              <span className="text-sm font-semibold ml-3 shrink-0" style={{ color: "var(--color-forest)" }}>${price.toFixed(2)}</span>
+                            </button>
+                          );
+                        })}
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm" style={{ color: "var(--color-muted)" }}>No items available for this event.</p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Quantity</label>
+                <input
+                  type="number"
+                  min={1}
+                  value={addItemQty}
+                  onChange={(e) => setAddItemQty(parseInt(e.target.value, 10) || 1)}
+                  style={inputStyle}
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddItemModal(false)}
+                  className="px-4 py-2 rounded-xl text-sm font-medium"
+                  style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={!addItemId || addingItem}
+                  onClick={handleAddItem}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                  style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                >
+                  {addingItem ? "Adding..." : "Add Item"}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Edit Order Modal */}
       {showEditModal && editForm && (
@@ -735,9 +1006,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone (Optional)</label>
                   <input
-                    required={!editForm.exclude_email}
                     type="tel"
                     value={editForm.phone_number}
                     onChange={(e) => setEditForm((f) => f ? ({ ...f, phone_number: e.target.value }) : f)}
@@ -767,18 +1037,19 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     Exclude Email (no confirmation or reminder emails)
                   </label>
                   <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
-                    When enabled, Email and Phone are optional.
+                    When enabled, Email is optional.
                   </p>
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Item</label>
-                <CustomSelect
+                <SearchableSelect
                   options={editItemOptions}
                   value={editForm.item_id}
                   onChange={(v) => setEditForm((f) => f ? ({ ...f, item_id: v }) : f)}
                   disabled={!eventConfig}
+                  searchPlaceholder="Search items..."
                 />
                 {configUsesFallback && (
                   <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>

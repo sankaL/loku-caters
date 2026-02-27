@@ -223,6 +223,102 @@ export function computeOrdersOverTime(
   return buckets;
 }
 
+export interface RevenueTimePoint {
+  date: string;
+  label: string;
+  totalRevenue: number;
+  [itemId: string]: number | string;
+}
+
+export interface RevenueOverTimeResult {
+  data: RevenueTimePoint[];
+  topItems: { itemId: string; itemName: string }[];
+}
+
+export function computeRevenueOverTime(
+  orders: Order[],
+  range: "7d" | "30d" | "1y"
+): RevenueOverTimeResult {
+  const active = orders.filter(isActive);
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
+
+  // Track per-item name lookup
+  const itemNames = new Map<string, string>();
+  for (const o of active) {
+    const id = (o.item_id || o.item_name || "unknown").trim() || "unknown";
+    if (!itemNames.has(id)) {
+      itemNames.set(id, (o.item_name || o.item_id || "Unknown item").trim() || "Unknown item");
+    }
+  }
+
+  // Build buckets
+  type Bucket = { date: string; label: string; totalRevenue: number; itemRevenue: Map<string, number> };
+  const buckets: Bucket[] = [];
+
+  if (range === "1y") {
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      buckets.push({ date: key, label: MONTH_NAMES[d.getMonth()], totalRevenue: 0, itemRevenue: new Map() });
+    }
+    for (const o of active) {
+      const key = o.created_at.substring(0, 7);
+      const bucket = buckets.find((b) => b.date === key);
+      if (!bucket) continue;
+      const id = (o.item_id || o.item_name || "unknown").trim() || "unknown";
+      bucket.totalRevenue += o.total_price;
+      bucket.itemRevenue.set(id, (bucket.itemRevenue.get(id) ?? 0) + o.total_price);
+    }
+  } else {
+    const days = range === "7d" ? 7 : 30;
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now);
+      d.setDate(d.getDate() - i);
+      const dateStr = toLocalDateKey(d);
+      const label = `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
+      buckets.push({ date: dateStr, label, totalRevenue: 0, itemRevenue: new Map() });
+    }
+    for (const o of active) {
+      const createdAt = new Date(o.created_at);
+      if (Number.isNaN(createdAt.getTime())) continue;
+      const dateStr = toLocalDateKey(createdAt);
+      const bucket = buckets.find((b) => b.date === dateStr);
+      if (!bucket) continue;
+      const id = (o.item_id || o.item_name || "unknown").trim() || "unknown";
+      bucket.totalRevenue += o.total_price;
+      bucket.itemRevenue.set(id, (bucket.itemRevenue.get(id) ?? 0) + o.total_price);
+    }
+  }
+
+  // Compute total revenue per item across all buckets
+  const itemTotals = new Map<string, number>();
+  for (const bucket of buckets) {
+    for (const [id, rev] of bucket.itemRevenue) {
+      itemTotals.set(id, (itemTotals.get(id) ?? 0) + rev);
+    }
+  }
+
+  // Top 5 items by revenue
+  const topItems = Array.from(itemTotals.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+    .map(([itemId]) => ({ itemId, itemName: itemNames.get(itemId) ?? itemId }));
+
+  const topIds = new Set(topItems.map((t) => t.itemId));
+
+  // Build final data points
+  const data: RevenueTimePoint[] = buckets.map((b) => {
+    const point: RevenueTimePoint = { date: b.date, label: b.label, totalRevenue: b.totalRevenue };
+    for (const id of topIds) {
+      point[id] = b.itemRevenue.get(id) ?? 0;
+    }
+    return point;
+  });
+
+  return { data, topItems };
+}
+
 function calcMetrics(subset: Order[]) {
   const nonCancelled = subset.filter((o) => o.status !== "cancelled");
   const totalOrders = nonCancelled.length;

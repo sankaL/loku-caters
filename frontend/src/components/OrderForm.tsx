@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { API_URL, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
 import Modal from "@/components/ui/Modal";
@@ -10,7 +10,7 @@ export interface OrderResult {
   order: {
     name: string;
     email: string;
-    phone_number: string;
+    phone_number: string | null;
     item_id: string;
     item_name: string;
     quantity: number;
@@ -52,6 +52,8 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   const [submitting, setSubmitting] = useState(false);
   const [serverError, setServerError] = useState("");
   const [showErrorModal, setShowErrorModal] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerSearch, setPickerSearch] = useState("");
 
   const timeSlots = form.pickup_location
     ? (locations.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
@@ -64,6 +66,21 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   const grandTotal = selectedLines.reduce((sum, { item, qty }) => {
     return sum + (item.discounted_price ?? item.price) * qty;
   }, 0);
+
+  const pickerItems = useMemo(() => {
+    const q = pickerSearch.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((i) =>
+      i.name.toLowerCase().includes(q) ||
+      (i.description ?? "").toLowerCase().includes(q)
+    );
+  }, [items, pickerSearch]);
+
+  useEffect(() => {
+    if (!pickerOpen) return;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, [pickerOpen]);
 
   function changeQty(itemId: string, delta: number) {
     setQuantities((prev) => ({
@@ -96,7 +113,6 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
     if (!form.name.trim()) newErrors.name = "Please enter your name.";
     if (!form.pickup_location) newErrors.pickup_location = "Please select a pickup location.";
     if (!form.pickup_time_slot) newErrors.pickup_time_slot = "Please select a time slot.";
-    if (!form.phone_number.trim()) newErrors.phone_number = "Please enter your phone number.";
     if (!form.email.trim()) {
       newErrors.email = "Please enter your email address.";
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
@@ -193,78 +209,43 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
             {errors.name && <p className="mt-1 text-xs text-red-500">{errors.name}</p>}
           </div>
 
-          {/* Items */}
+          {/* Items -- Cart + Browse button */}
           <div>
             <label className="block text-sm font-medium mb-2" style={{ color: "var(--color-text)" }}>
-              What would you like to order?
+              Your Items
             </label>
-            <div className="space-y-3">
-              {items.map((item) => {
-                const qty = quantities[item.id] ?? 0;
-                const price = item.discounted_price ?? item.price;
-                const isSelected = qty > 0;
-                return (
-                  <div
-                    key={item.id}
-                    className="rounded-2xl p-4 transition-all"
-                    style={{
-                      border: `1px solid ${isSelected ? "var(--color-sage)" : "var(--color-border)"}`,
-                      background: isSelected ? "#f0fdf4" : "var(--color-cream)",
-                    }}
-                  >
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>
-                          {item.name}
-                        </p>
-                        {item.description && (
-                          <p className="text-xs mt-0.5 leading-relaxed" style={{ color: "var(--color-muted)" }}>
-                            {item.description}
-                          </p>
-                        )}
-                        <div className="mt-1.5 flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
-                            ${price.toFixed(2)}
-                          </span>
-                          {item.discounted_price != null && (
-                            <>
-                              <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
-                                ${item.price.toFixed(2)}
-                              </span>
-                              <span
-                                className="text-xs font-semibold px-1.5 py-0.5 rounded-full"
-                                style={{ background: "#fef2f2", color: "#c53030", border: "1px solid #fecaca" }}
-                              >
-                                Save ${(item.price - item.discounted_price).toFixed(2)}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
 
-                      {/* Quantity stepper */}
+            {selectedLines.length === 0 ? (
+              <div style={{ border: "1px dashed var(--color-border)", borderRadius: 16, padding: "20px 16px", textAlign: "center" }}>
+                <p className="text-sm" style={{ color: "var(--color-muted)" }}>No items added yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-2 mb-3">
+                {selectedLines.map(({ item, qty }) => {
+                  const price = item.discounted_price ?? item.price;
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-3 rounded-xl px-4 py-2.5"
+                      style={{ border: "1px solid var(--color-sage)", background: "#f0fdf4" }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
+                        <p className="text-xs" style={{ color: "var(--color-muted)" }}>${price.toFixed(2)} each</p>
+                      </div>
                       <div className="flex items-center gap-0 shrink-0">
                         <button
                           type="button"
                           onClick={() => changeQty(item.id, -1)}
-                          disabled={qty <= 0}
-                          className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all disabled:opacity-30"
-                          style={{
-                            borderColor: isSelected ? "var(--color-sage)" : "var(--color-border)",
-                            color: "var(--color-forest)",
-                            background: "white",
-                          }}
+                          className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
+                          style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
                           aria-label={`Decrease ${item.name} quantity`}
                         >
                           -
                         </button>
                         <div
                           className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b"
-                          style={{
-                            borderColor: isSelected ? "var(--color-sage)" : "var(--color-border)",
-                            color: "var(--color-text)",
-                            background: "white",
-                          }}
+                          style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}
                         >
                           {qty}
                         </div>
@@ -272,21 +253,32 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                           type="button"
                           onClick={() => changeQty(item.id, 1)}
                           className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
-                          style={{
-                            borderColor: isSelected ? "var(--color-sage)" : "var(--color-border)",
-                            color: "var(--color-forest)",
-                            background: "white",
-                          }}
+                          style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
                           aria-label={`Increase ${item.name} quantity`}
                         >
                           +
                         </button>
                       </div>
+                      <p className="text-sm font-bold shrink-0" style={{ color: "var(--color-forest)" }}>
+                        ${(price * qty).toFixed(2)}
+                      </p>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => { setPickerOpen(true); setPickerSearch(""); }}
+              className="w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
+              style={{ background: "var(--color-sage)", color: "white", border: "1px solid var(--color-sage)" }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                <path d="M4 6h16M4 12h16M4 18h16" />
+              </svg>
+              See Menu
+            </button>
             {errors.items && <p className="mt-1.5 text-xs text-red-500">{errors.items}</p>}
           </div>
 
@@ -328,7 +320,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
           {/* Phone */}
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
-              Phone Number
+              Phone Number <span style={{ color: "var(--color-muted)", fontWeight: 400 }}>(Optional)</span>
             </label>
             <input
               type="tel"
@@ -434,6 +426,163 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
           <p className="text-xs text-center" style={{ color: "var(--color-muted)" }}>
             By submitting, you agree that we may contact you via email to confirm your order.
           </p>
+
+          {/* Item Picker overlay */}
+          {pickerOpen && (
+            <>
+              {/* Backdrop */}
+              <div
+                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200 }}
+                onClick={() => setPickerOpen(false)}
+              />
+
+              {/* Sheet: bottom-sheet on mobile, centered modal on md+ */}
+              <div
+                className="animate-slide-up left-0 right-0 bottom-0 md:bottom-auto md:top-1/2 md:-translate-y-1/2 md:left-1/2 md:-translate-x-1/2 md:right-auto md:max-w-lg md:w-full md:rounded-3xl"
+                style={{
+                  position: "fixed",
+                  zIndex: 201,
+                  background: "white",
+                  borderRadius: "24px 24px 0 0",
+                  border: "1px solid var(--color-border)",
+                  maxHeight: "80vh",
+                  display: "flex",
+                  flexDirection: "column",
+                }}
+              >
+                {/* Header */}
+                <div
+                  className="flex items-center justify-between px-5 py-4 border-b shrink-0"
+                  style={{ borderColor: "var(--color-border)" }}
+                >
+                  <h3 className="text-base font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+                    Add Items
+                  </h3>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(false)}
+                    aria-label="Close item picker"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-semibold transition-all"
+                    style={{ color: "var(--color-muted)", background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
+                  >
+                    X
+                  </button>
+                </div>
+
+                {/* Search */}
+                <div className="px-5 py-3 border-b shrink-0" style={{ borderColor: "var(--color-border)" }}>
+                  <input
+                    type="text"
+                    value={pickerSearch}
+                    onChange={(e) => setPickerSearch(e.target.value)}
+                    placeholder="Search items..."
+                    autoFocus
+                    className="w-full px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
+                    style={{
+                      borderColor: "var(--color-border)",
+                      color: "var(--color-text)",
+                    }}
+                  />
+                </div>
+
+                {/* Item list */}
+                <div className="overflow-y-auto flex-1 px-5 py-3 space-y-2">
+                  {pickerItems.length === 0 ? (
+                    <p className="text-sm py-4 text-center" style={{ color: "var(--color-muted)" }}>No items match your search.</p>
+                  ) : (
+                    pickerItems.map((item) => {
+                      const qty = quantities[item.id] ?? 0;
+                      const inCart = qty > 0;
+                      const price = item.discounted_price ?? item.price;
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all"
+                          style={{
+                            border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
+                            background: inCart ? "#f0fdf4" : "white",
+                          }}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
+                            {item.description && (
+                              <p className="text-xs mt-0.5 truncate" style={{ color: "var(--color-muted)" }}>{item.description}</p>
+                            )}
+                            <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+                                ${price.toFixed(2)}
+                              </span>
+                              {item.discounted_price != null && (
+                                <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
+                                  ${item.price.toFixed(2)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {inCart ? (
+                            <div className="flex items-center gap-0 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => changeQty(item.id, -1)}
+                                className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
+                                style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                                aria-label={`Decrease ${item.name} quantity`}
+                              >
+                                -
+                              </button>
+                              <div
+                                className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b"
+                                style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}
+                              >
+                                {qty}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => changeQty(item.id, 1)}
+                                className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
+                                style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                                aria-label={`Increase ${item.name} quantity`}
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => changeQty(item.id, 1)}
+                              className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                              style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                            >
+                              + Add
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+
+                {/* Footer */}
+                <div
+                  className="px-5 py-4 border-t shrink-0 flex items-center justify-between gap-3"
+                  style={{ borderColor: "var(--color-border)" }}
+                >
+                  <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+                    {selectedLines.length} item{selectedLines.length !== 1 ? "s" : ""} selected
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setPickerOpen(false)}
+                    className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
+                    style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
         </form>
       </div>
 

@@ -13,7 +13,7 @@ import {
   computeTimeSlotBreakdown,
   computeTopCustomers,
   filterOpenOrders,
-  computeOrdersOverTime,
+  computeRevenueOverTime,
   computeKPIs,
 } from "@/lib/dashboardUtils";
 import RevenueRadialChart from "@/components/admin/dashboard/RevenueRadialChart";
@@ -259,7 +259,7 @@ export default function DashboardPage() {
   const timeSlots = computeTimeSlotBreakdown(orders);
   const topCustomers = computeTopCustomers(orders, 5);
   const openOrders = filterOpenOrders(orders);
-  const timeline = computeOrdersOverTime(orders, range);
+  const { data: timeline, topItems: timelineItems } = computeRevenueOverTime(orders, range);
   const kpis: KPIData = computeKPIs(orders);
 
   const currMonthRevenue = revenue.monthly[revenue.monthly.length - 1]?.revenue ?? 0;
@@ -348,6 +348,7 @@ export default function DashboardPage() {
         ) : (
           <OrdersAreaChart
             data={timeline}
+            topItems={timelineItems}
             range={range}
             onRangeChange={setRange}
             currency={currency}

@@ -818,7 +818,6 @@ export default function AdminOrdersPage() {
       const errors: string[] = [];
       if (!row.name) errors.push("name is required");
       if (!row.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) errors.push("valid email required");
-      if (!row.phone_number) errors.push("phone is required");
       if (row.quantity < 1) errors.push("quantity must be >= 1");
       if (eventConfig) {
         const validItem = eventConfig.items.find((i) => i.id === row.item_id);
@@ -1418,7 +1417,9 @@ export default function AdminOrdersPage() {
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-muted)" }}>
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span>{order.email ?? "-"}</span>
+                          {(order.email || !order.exclude_email) && (
+                            <span>{order.email ?? "-"}</span>
+                          )}
                           {order.exclude_email && (
                             <span
                               className="text-[10px] px-2 py-0.5 rounded-full font-semibold"
@@ -1428,7 +1429,9 @@ export default function AdminOrdersPage() {
                             </span>
                           )}
                         </div>
-                        <div className="text-xs">{order.phone_number ?? "-"}</div>
+                        {order.phone_number && (
+                          <div className="text-xs">{order.phone_number}</div>
+                        )}
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
                         {order.item_name} x{order.quantity}
@@ -1969,9 +1972,8 @@ export default function AdminOrdersPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone</label>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone (Optional)</label>
                   <input
-                    required={!addOrderForm.exclude_email}
                     type="tel"
                     value={addOrderForm.phone_number}
                     onChange={(e) => setAddOrderForm((f) => ({ ...f, phone_number: e.target.value }))}
