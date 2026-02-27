@@ -498,10 +498,10 @@ export default function AdminOrdersPage() {
 
   const confirmedOrders = useMemo(() => orders.filter((o) => o.status === "confirmed"), [orders]);
   const eligibleReminderOrders = useMemo(
-    () => confirmedOrders.filter((o) => !o.paid && !o.reminded && !o.exclude_email && (o.email ?? "").trim().length > 0),
+    () => confirmedOrders.filter((o) => !o.reminded && !o.exclude_email && (o.email ?? "").trim().length > 0),
     [confirmedOrders]
   );
-  const excludedReminderCount = confirmedOrders.length - eligibleReminderOrders.length;
+  const ineligibleReminderCount = confirmedOrders.length - eligibleReminderOrders.length;
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -2267,15 +2267,15 @@ export default function AdminOrdersPage() {
                 Send Pickup Reminders
               </h2>
               <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
-                Reminder emails will be sent to all selected customers. Only confirmed, unpaid orders that have not yet been reminded are shown.
+                Reminder emails will be sent to all selected customers. Only confirmed orders that have not yet been reminded are shown.
               </p>
 
-              {excludedReminderCount > 0 && (
+              {ineligibleReminderCount > 0 && (
                 <div
                   className="rounded-xl px-4 py-3 text-xs mb-4"
                   style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
                 >
-                  {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible (excluded or missing email).
+                  {ineligibleReminderCount} confirmed order{ineligibleReminderCount !== 1 ? "s are" : " is"} not eligible (already reminded, excluded, or missing email).
                 </div>
               )}
 
