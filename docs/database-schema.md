@@ -186,7 +186,7 @@ alembic upgrade head
 | `0013_orders_event_id` | adds `event_id` to `orders` and backfills to the active event |
 | `0014_add_reminded_boolean` | adds `reminded` boolean to `orders`; backfills existing `status='reminded'` rows to `reminded=true, status='confirmed'` |
 | `0015_feedback_status_comment` | adds `status` (VARCHAR, default `'new'`) and `admin_comment` (TEXT, nullable) to `feedback` |
-| `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true` |
+| `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true, payment_method='etransfer', payment_method_other=NULL` |
 
 ---
 

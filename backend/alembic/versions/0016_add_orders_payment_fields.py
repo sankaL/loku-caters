@@ -49,8 +49,8 @@ def upgrade() -> None:
     op.execute(
         sa.text(
             "UPDATE orders "
-            "SET paid = TRUE, payment_method = 'other', payment_method_other = 'legacy', status = 'confirmed' "
-            "WHERE status = 'paid'"
+            "SET paid = TRUE, payment_method = 'etransfer', payment_method_other = NULL, status = 'confirmed' "
+            "WHERE lower(status) = 'paid'"
         )
     )
 
@@ -64,7 +64,7 @@ def downgrade() -> None:
         sa.text(
             "UPDATE orders "
             "SET status = 'paid' "
-            "WHERE paid = TRUE AND status = 'confirmed' AND payment_method = 'other' AND payment_method_other = 'legacy'"
+            "WHERE paid = TRUE AND status = 'confirmed' AND payment_method = 'etransfer' AND payment_method_other IS NULL"
         )
     )
 
