@@ -5,11 +5,24 @@ from event_config import CURRENCY
 resend.api_key = settings.resend_api_key
 
 
-def _build_etransfer_section_html(order_data: dict) -> str:
+def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -> str:
     etransfer_enabled = bool(order_data.get("etransfer_enabled"))
     etransfer_email = str(order_data.get("etransfer_email") or "").strip()
     if not etransfer_enabled or not etransfer_email:
         return ""
+
+    if reminder:
+        payment_copy_html = (
+            "If you have not yet sent your e-Transfer payment, you are welcome to do so at any time "
+            "before your pickup by sending to "
+            f"<strong>{etransfer_email}</strong>. If you have already sent your payment, "
+            "please disregard this notice."
+        )
+    else:
+        payment_copy_html = (
+            "If you would like to pay by e-Transfer, you are welcome to send your payment to "
+            f"<strong>{etransfer_email}</strong> at your convenience - any time before your scheduled pickup."
+        )
 
     return f"""
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#fdf8f0;border-radius:12px;overflow:hidden;margin-bottom:24px;border:1px solid #e8d9b8;">
@@ -17,8 +30,7 @@ def _build_etransfer_section_html(order_data: dict) -> str:
                   <td style="padding:20px 24px;">
                     <p style="margin:0 0 6px;font-size:14px;font-weight:700;color:#7a5a1a;">Payment by e-Transfer</p>
                     <p style="margin:0;font-size:14px;color:#8a6a2a;line-height:1.6;">
-                      If you would like to pay by e-Transfer, you are welcome to send your payment to
-                      <strong>{etransfer_email}</strong> at your convenience - any time before your scheduled pickup.
+                      {payment_copy_html}
                     </p>
                   </td>
                 </tr>
@@ -173,7 +185,7 @@ def send_reminder(order_data: dict) -> None:
     email = order_data["email"]
     address = order_data.get("address", "")
     event_date = order_data.get("event_date", "")
-    etransfer_section_html = _build_etransfer_section_html(order_data)
+    etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
 
     location_display = pickup_location
     if address:

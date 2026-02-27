@@ -796,8 +796,6 @@ def admin_bulk_remind(
             continue
         if order.status != OrderStatus.CONFIRMED:
             continue
-        if order.paid:
-            continue
         if order.reminded:
             skipped_already_reminded += 1
             continue
