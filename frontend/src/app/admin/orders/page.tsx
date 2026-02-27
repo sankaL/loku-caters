@@ -2275,7 +2275,7 @@ export default function AdminOrdersPage() {
                   className="rounded-xl px-4 py-3 text-xs mb-4"
                   style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
                 >
-                  {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible (paid, excluded, or missing email).
+                  {excludedReminderCount} confirmed order{excludedReminderCount !== 1 ? "s are" : " is"} not eligible (excluded or missing email).
                 </div>
               )}
 
