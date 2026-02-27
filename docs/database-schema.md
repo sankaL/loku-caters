@@ -20,7 +20,7 @@ App tables live in the `public` schema but are not intended to be accessed via S
 | `quantity` | `INTEGER` | NOT NULL, CHECK >= 1 | Number of portions |
 | `pickup_location` | `TEXT` | NOT NULL | Matches a location name in the `locations` table |
 | `pickup_time_slot` | `TEXT` | NOT NULL | Matches a time slot for that location |
-| `phone_number` | `TEXT` | NULLABLE | Admin may omit when `exclude_email = true` |
+| `phone_number` | `TEXT` | NULLABLE | Always optional for both customers and admin |
 | `email` | `TEXT` | NULLABLE | Used to send Resend confirmation/reminders unless excluded |
 | `notes` | `TEXT` | NULLABLE | Admin-only internal notes |
 | `exclude_email` | `BOOLEAN` | NOT NULL, default `false` | When true, admin actions will not send confirmation/reminder emails |
@@ -187,6 +187,7 @@ alembic upgrade head
 | `0014_add_reminded_boolean` | adds `reminded` boolean to `orders`; backfills existing `status='reminded'` rows to `reminded=true, status='confirmed'` |
 | `0015_feedback_status_comment` | adds `status` (VARCHAR, default `'new'`) and `admin_comment` (TEXT, nullable) to `feedback` |
 | `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true, payment_method='etransfer', payment_method_other=NULL` |
+| `0017_phone_optional` | updates `ck_orders_contact_required_unless_excluded` constraint to only require `email` (not `phone_number`) when `exclude_email` is false |
 
 ---
 

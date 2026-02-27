@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
@@ -147,20 +147,45 @@ function Spinner() {
 interface SelectorSectionProps {
   title: string;
   open: boolean;
-  selectedCount: number;
-  totalCount: number;
   onToggle: () => void;
-  children: ReactNode;
+  allItems: { id: string; label: string; sublabel?: string }[];
+  selectedIds: string[];
+  onSelect: (id: string) => void;
+  onDeselect: (id: string) => void;
+  search: string;
+  onSearchChange: (q: string) => void;
+  searchPlaceholder?: string;
+  emptyLabel?: string;
 }
 
 function SelectorSection({
   title,
   open,
-  selectedCount,
-  totalCount,
   onToggle,
-  children,
+  allItems,
+  selectedIds,
+  onSelect,
+  onDeselect,
+  search,
+  onSearchChange,
+  searchPlaceholder = "Search...",
+  emptyLabel = "Nothing selected yet.",
 }: SelectorSectionProps) {
+  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  const selectedItems = useMemo(() => {
+    return allItems.filter((item) => selectedSet.has(item.id));
+  }, [allItems, selectedSet]);
+
+  const unselectedItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const unselected = allItems.filter((item) => !selectedSet.has(item.id));
+    if (!q) return unselected;
+    return unselected.filter((item) => item.label.toLowerCase().includes(q));
+  }, [allItems, selectedSet, search]);
+
+  const allSelected = allItems.length > 0 && allItems.every((item) => selectedSet.has(item.id));
+
   return (
     <div className="rounded-2xl border" style={{ borderColor: "var(--color-border)", background: "white" }}>
       <button
@@ -171,12 +196,86 @@ function SelectorSection({
         <div>
           <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>{title}</p>
           <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-            {selectedCount} selected of {totalCount}
+            {selectedItems.length} selected of {allItems.length}
           </p>
         </div>
         <span className="text-sm" style={{ color: "var(--color-muted)" }}>{open ? "Hide" : "Show"}</span>
       </button>
-      {open && <div className="px-4 pb-4 border-t" style={{ borderColor: "var(--color-border)" }}>{children}</div>}
+
+      {selectedItems.length > 0 ? (
+        <div className="px-4 pb-3 flex flex-wrap gap-2">
+          {selectedItems.map((item) => (
+            <span
+              key={item.id}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
+              style={{ background: "#f0fdf4", border: "1px solid var(--color-sage)", color: "var(--color-forest)" }}
+            >
+              {item.label}
+              {item.sublabel && (
+                <span style={{ color: "var(--color-sage)", fontWeight: 400 }}>{item.sublabel}</span>
+              )}
+              <button
+                type="button"
+                onClick={() => onDeselect(item.id)}
+                aria-label={`Remove ${item.label}`}
+                className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-green-200 transition-all text-xs leading-none"
+                style={{ color: "var(--color-forest)" }}
+              >
+                x
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        !open && (
+          <div className="px-4 pb-3">
+            <p className="text-xs" style={{ color: "var(--color-muted)" }}>{emptyLabel}</p>
+          </div>
+        )
+      )}
+
+      {open && (
+        <div className="px-4 pb-4 border-t" style={{ borderColor: "var(--color-border)" }}>
+          {allItems.length === 0 ? (
+            <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>No items found.</p>
+          ) : allSelected ? (
+            <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>All items selected.</p>
+          ) : (
+            <div className="space-y-3 pt-3">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => onSearchChange(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="w-full px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
+                style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
+              />
+              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
+                {unselectedItems.length === 0 ? (
+                  <p className="text-sm py-2" style={{ color: "var(--color-muted)" }}>No matching items.</p>
+                ) : (
+                  unselectedItems.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => onSelect(item.id)}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left cursor-pointer transition-all hover:bg-gray-50"
+                      style={{ border: "1px solid var(--color-border)", background: "white" }}
+                    >
+                      <span className="flex-1 text-sm font-medium" style={{ color: "var(--color-text)" }}>
+                        {item.label}
+                      </span>
+                      {item.sublabel && (
+                        <span className="text-sm" style={{ color: "var(--color-muted)" }}>{item.sublabel}</span>
+                      )}
+                    </button>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -200,11 +299,9 @@ export default function AdminEventsPage() {
 
   const [itemsOpen, setItemsOpen] = useState(false);
   const [locationsOpen, setLocationsOpen] = useState(false);
+  const [tooltipOpen, setTooltipOpen] = useState(false);
   const [itemsSearch, setItemsSearch] = useState("");
   const [locationsSearch, setLocationsSearch] = useState("");
-  const [itemsSelectedOnly, setItemsSelectedOnly] = useState(false);
-  const [locationsSelectedOnly, setLocationsSelectedOnly] = useState(false);
-
   const showToast = (message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
@@ -218,24 +315,6 @@ export default function AdminEventsPage() {
     () => imageCatalog.images.filter((image) => image.type === "hero_side"),
     [imageCatalog.images]
   );
-
-  const filteredItems = useMemo(() => {
-    const query = itemsSearch.trim().toLowerCase();
-    return allItems.filter((item) => {
-      if (itemsSelectedOnly && !form.item_ids.includes(item.id)) return false;
-      if (!query) return true;
-      return item.name.toLowerCase().includes(query) || item.id.toLowerCase().includes(query);
-    });
-  }, [allItems, form.item_ids, itemsSearch, itemsSelectedOnly]);
-
-  const filteredLocations = useMemo(() => {
-    const query = locationsSearch.trim().toLowerCase();
-    return allLocations.filter((location) => {
-      if (locationsSelectedOnly && !form.location_ids.includes(location.id)) return false;
-      if (!query) return true;
-      return location.name.toLowerCase().includes(query) || location.id.toLowerCase().includes(query);
-    });
-  }, [allLocations, form.location_ids, locationsSearch, locationsSelectedOnly]);
 
   const selectedTooltipImage = useMemo(
     () => tooltipImageOptions.find((image) => image.key === form.tooltip_image_key) ?? null,
@@ -260,8 +339,7 @@ export default function AdminEventsPage() {
     setLocationsOpen(false);
     setItemsSearch("");
     setLocationsSearch("");
-    setItemsSelectedOnly(false);
-    setLocationsSelectedOnly(false);
+    setTooltipOpen(false);
   };
 
   const loadData = useCallback(async () => {
@@ -818,91 +896,103 @@ export default function AdminEventsPage() {
                 />
               </div>
 
-              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
-                <div className="flex items-center justify-between gap-3 mb-2">
+              <div className="rounded-2xl border" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
+                <button
+                  type="button"
+                  onClick={() => setTooltipOpen((v) => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-left"
+                >
                   <div>
                     <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Tooltip</p>
                     <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                      Enable this only when the event needs additional contextual info.
+                      {form.tooltip_enabled ? "Enabled" : "Disabled"} -- expand to configure
                     </p>
                   </div>
-                  <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
-                    <input
-                      type="checkbox"
-                      checked={form.tooltip_enabled}
-                      onChange={(e) => setForm((p) => ({
-                        ...p,
-                        tooltip_enabled: e.target.checked,
-                        tooltip_header: e.target.checked ? p.tooltip_header : "",
-                        tooltip_body: e.target.checked ? p.tooltip_body : "",
-                        tooltip_image_key: e.target.checked ? p.tooltip_image_key : null,
-                      }))}
-                      style={{ accentColor: "var(--color-sage)" }}
-                    />
-                    Enable Tooltip
-                  </label>
-                </div>
+                  <span className="text-sm" style={{ color: "var(--color-muted)" }}>{tooltipOpen ? "Hide" : "Show"}</span>
+                </button>
 
-                {form.tooltip_enabled ? (
-                  <div className="space-y-4 mt-3">
-                    <div>
-                      <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                        Tooltip Header <span style={{ color: "#dc2626" }}>*</span>
+                {tooltipOpen && (
+                  <div className="px-4 pb-4 border-t" style={{ borderColor: "var(--color-border)" }}>
+                    <div className="flex items-center justify-end pt-3 mb-3">
+                      <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
+                        <input
+                          type="checkbox"
+                          checked={form.tooltip_enabled}
+                          onChange={(e) => setForm((p) => ({
+                            ...p,
+                            tooltip_enabled: e.target.checked,
+                            tooltip_header: e.target.checked ? p.tooltip_header : "",
+                            tooltip_body: e.target.checked ? p.tooltip_body : "",
+                            tooltip_image_key: e.target.checked ? p.tooltip_image_key : null,
+                          }))}
+                          style={{ accentColor: "var(--color-sage)" }}
+                        />
+                        Enable Tooltip
                       </label>
-                      <input
-                        type="text"
-                        value={form.tooltip_header}
-                        onChange={(e) => setForm((p) => ({ ...p, tooltip_header: e.target.value }))}
-                        placeholder="e.g. What is Lamprais?"
-                        className={inputClass}
-                        style={{ color: "var(--color-text)", background: "white" }}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                        Tooltip Body <span style={{ color: "#dc2626" }}>*</span>
-                      </label>
-                      <textarea
-                        value={form.tooltip_body}
-                        onChange={(e) => setForm((p) => ({ ...p, tooltip_body: e.target.value }))}
-                        placeholder="Describe what customers should know for this event."
-                        rows={3}
-                        className={inputClass}
-                        style={{ color: "var(--color-text)", background: "white", resize: "vertical" }}
-                      />
-                    </div>
-                    <div>
-                      <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                        Tooltip Image <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
-                      </label>
-                      <select
-                        value={form.tooltip_image_key ?? ""}
-                        onChange={(e) => setForm((p) => ({ ...p, tooltip_image_key: e.target.value || null }))}
-                        className={inputClass}
-                        style={{ color: "var(--color-text)", background: "white" }}
-                      >
-                        <option value="">None</option>
-                        {tooltipImageOptions.map((image) => (
-                          <option key={image.key} value={image.key}>
-                            {image.label}
-                          </option>
-                        ))}
-                      </select>
                     </div>
 
-                    {selectedTooltipImage && (
-                      <div className="rounded-xl overflow-hidden border" style={{ borderColor: "var(--color-border)", background: "white" }}>
-                        <img src={selectedTooltipImage.path} alt={selectedTooltipImage.alt} className="w-full h-auto" />
-                        <p className="px-3 py-2 text-xs" style={{ color: "var(--color-muted)" }}>
-                          {selectedTooltipImage.path}
-                        </p>
+                    {form.tooltip_enabled ? (
+                      <div className="space-y-4">
+                        <div>
+                          <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                            Tooltip Header <span style={{ color: "#dc2626" }}>*</span>
+                          </label>
+                          <input
+                            type="text"
+                            value={form.tooltip_header}
+                            onChange={(e) => setForm((p) => ({ ...p, tooltip_header: e.target.value }))}
+                            placeholder="e.g. What is Lamprais?"
+                            className={inputClass}
+                            style={{ color: "var(--color-text)", background: "white" }}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                            Tooltip Body <span style={{ color: "#dc2626" }}>*</span>
+                          </label>
+                          <textarea
+                            value={form.tooltip_body}
+                            onChange={(e) => setForm((p) => ({ ...p, tooltip_body: e.target.value }))}
+                            placeholder="Describe what customers should know for this event."
+                            rows={3}
+                            className={inputClass}
+                            style={{ color: "var(--color-text)", background: "white", resize: "vertical" }}
+                          />
+                        </div>
+                        <div>
+                          <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                            Tooltip Image <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
+                          </label>
+                          <select
+                            value={form.tooltip_image_key ?? ""}
+                            onChange={(e) => setForm((p) => ({ ...p, tooltip_image_key: e.target.value || null }))}
+                            className={inputClass}
+                            style={{ color: "var(--color-text)", background: "white" }}
+                          >
+                            <option value="">None</option>
+                            {tooltipImageOptions.map((image) => (
+                              <option key={image.key} value={image.key}>
+                                {image.label}
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+
+                        {selectedTooltipImage && (
+                          <div className="rounded-xl overflow-hidden border" style={{ borderColor: "var(--color-border)", background: "white" }}>
+                            <img src={selectedTooltipImage.path} alt={selectedTooltipImage.alt} className="w-full h-auto" />
+                            <p className="px-3 py-2 text-xs" style={{ color: "var(--color-muted)" }}>
+                              {selectedTooltipImage.path}
+                            </p>
+                          </div>
+                        )}
                       </div>
+                    ) : (
+                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                        Tooltip fields stay hidden until this toggle is enabled.
+                      </p>
                     )}
                   </div>
-                ) : (
-                  <p className="text-xs mt-3" style={{ color: "var(--color-muted)" }}>
-                    Tooltip fields stay hidden until this toggle is enabled.
-                  </p>
                 )}
               </div>
 
@@ -992,133 +1082,37 @@ export default function AdminEventsPage() {
               <SelectorSection
                 title="Items"
                 open={itemsOpen}
-                selectedCount={form.item_ids.length}
-                totalCount={allItems.length}
                 onToggle={() => setItemsOpen((v) => !v)}
-              >
-                {allItems.length === 0 ? (
-                  <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
-                    No items found. Add items first.
-                  </p>
-                ) : (
-                  <div className="space-y-3 pt-3">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <input
-                        type="text"
-                        value={itemsSearch}
-                        onChange={(e) => setItemsSearch(e.target.value)}
-                        placeholder="Search items by name..."
-                        className={inputClass}
-                        style={{ color: "var(--color-text)" }}
-                      />
-                      <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
-                        <input
-                          type="checkbox"
-                          checked={itemsSelectedOnly}
-                          onChange={(e) => setItemsSelectedOnly(e.target.checked)}
-                          style={{ accentColor: "var(--color-sage)" }}
-                        />
-                        Show selected only
-                      </label>
-                    </div>
-                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                      {filteredItems.map((item) => (
-                        <label
-                          key={item.id}
-                          className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
-                          style={{
-                            border: `1px solid ${form.item_ids.includes(item.id) ? "var(--color-sage)" : "var(--color-border)"}`,
-                            background: form.item_ids.includes(item.id) ? "#f0fdf4" : "white",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={form.item_ids.includes(item.id)}
-                            onChange={() => toggleCheckbox("item_ids", item.id)}
-                            className="rounded"
-                            style={{ accentColor: "var(--color-sage)" }}
-                          />
-                          <span className="flex-1 text-sm font-medium" style={{ color: "var(--color-text)" }}>
-                            {item.name}
-                          </span>
-                          <span className="text-sm" style={{ color: "var(--color-muted)" }}>
-                            {CURRENCY} ${item.discounted_price != null ? item.discounted_price.toFixed(2) : item.price.toFixed(2)}
-                          </span>
-                        </label>
-                      ))}
-                      {filteredItems.length === 0 && (
-                        <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
-                          No matching items.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </SelectorSection>
+                allItems={allItems.map((item) => ({
+                  id: item.id,
+                  label: item.name,
+                  sublabel: `${CURRENCY} $${(item.discounted_price ?? item.price).toFixed(2)}`,
+                }))}
+                selectedIds={form.item_ids}
+                onSelect={(id) => toggleCheckbox("item_ids", id)}
+                onDeselect={(id) => toggleCheckbox("item_ids", id)}
+                search={itemsSearch}
+                onSearchChange={setItemsSearch}
+                searchPlaceholder="Search items by name..."
+                emptyLabel="No items selected yet."
+              />
 
               <SelectorSection
                 title="Locations"
                 open={locationsOpen}
-                selectedCount={form.location_ids.length}
-                totalCount={allLocations.length}
                 onToggle={() => setLocationsOpen((v) => !v)}
-              >
-                {allLocations.length === 0 ? (
-                  <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
-                    No locations found. Add locations first.
-                  </p>
-                ) : (
-                  <div className="space-y-3 pt-3">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                      <input
-                        type="text"
-                        value={locationsSearch}
-                        onChange={(e) => setLocationsSearch(e.target.value)}
-                        placeholder="Search locations by name..."
-                        className={inputClass}
-                        style={{ color: "var(--color-text)" }}
-                      />
-                      <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
-                        <input
-                          type="checkbox"
-                          checked={locationsSelectedOnly}
-                          onChange={(e) => setLocationsSelectedOnly(e.target.checked)}
-                          style={{ accentColor: "var(--color-sage)" }}
-                        />
-                        Show selected only
-                      </label>
-                    </div>
-                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                      {filteredLocations.map((location) => (
-                        <label
-                          key={location.id}
-                          className="flex items-center gap-3 px-4 py-3 rounded-xl cursor-pointer transition-all"
-                          style={{
-                            border: `1px solid ${form.location_ids.includes(location.id) ? "var(--color-sage)" : "var(--color-border)"}`,
-                            background: form.location_ids.includes(location.id) ? "#f0fdf4" : "white",
-                          }}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={form.location_ids.includes(location.id)}
-                            onChange={() => toggleCheckbox("location_ids", location.id)}
-                            className="rounded"
-                            style={{ accentColor: "var(--color-sage)" }}
-                          />
-                          <span className="text-sm font-medium" style={{ color: "var(--color-text)" }}>
-                            {location.name}
-                          </span>
-                        </label>
-                      ))}
-                      {filteredLocations.length === 0 && (
-                        <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>
-                          No matching locations.
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </SelectorSection>
+                allItems={allLocations.map((loc) => ({
+                  id: loc.id,
+                  label: loc.name,
+                }))}
+                selectedIds={form.location_ids}
+                onSelect={(id) => toggleCheckbox("location_ids", id)}
+                onDeselect={(id) => toggleCheckbox("location_ids", id)}
+                search={locationsSearch}
+                onSearchChange={setLocationsSearch}
+                searchPlaceholder="Search locations by name..."
+                emptyLabel="No locations selected yet."
+              />
             </div>
 
             <div className="px-8 py-5 border-t flex justify-end gap-3" style={{ borderColor: "var(--color-border)" }}>

@@ -227,8 +227,6 @@ class AdminOrderCreate(BaseModel):
         if not self.exclude_email:
             if not self.email:
                 raise ValueError("email is required unless exclude_email is true")
-            if not self.phone_number:
-                raise ValueError("phone_number is required unless exclude_email is true")
         return self
 
 
@@ -287,8 +285,6 @@ class AdminOrderUpdate(BaseModel):
         if not self.exclude_email:
             if not self.email:
                 raise ValueError("email is required unless exclude_email is true")
-            if not self.phone_number:
-                raise ValueError("phone_number is required unless exclude_email is true")
         return self
 
 
@@ -744,6 +740,7 @@ def admin_list_orders(
     status: Optional[str] = Query(None),
     event_id: Optional[int] = Query(None),
     paid: Optional[bool] = Query(None),
+    email: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
@@ -754,6 +751,8 @@ def admin_list_orders(
         query = query.filter(Order.event_id == event_id)
     if paid is not None:
         query = query.filter(Order.paid == paid)
+    if email is not None:
+        query = query.filter(Order.email == email)
     orders = query.order_by(Order.created_at.desc()).all()
     return [_order_dict(o) for o in orders]
 

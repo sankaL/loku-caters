@@ -9,7 +9,7 @@ class OrderCreate(BaseModel):
     quantity: int
     pickup_location: str
     pickup_time_slot: str
-    phone_number: str
+    phone_number: Optional[str] = None
     email: EmailStr
 
     @field_validator("quantity")
@@ -19,12 +19,20 @@ class OrderCreate(BaseModel):
             raise ValueError("Quantity must be at least 1")
         return v
 
-    @field_validator("name", "item_id", "pickup_location", "pickup_time_slot", "phone_number")
+    @field_validator("name", "item_id", "pickup_location", "pickup_time_slot")
     @classmethod
     def must_not_be_empty(cls, v: str) -> str:
         if not v.strip():
             raise ValueError("Field cannot be empty")
         return v.strip()
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def normalize_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
 
 
 class OrderResponse(BaseModel):
