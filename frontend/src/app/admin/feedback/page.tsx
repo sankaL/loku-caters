@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import Modal from "@/components/ui/Modal";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -27,6 +28,8 @@ interface FeedbackItem {
   other_details: string | null;
   message: string | null;
   created_at: string | null;
+  status: string;
+  admin_comment: string | null;
 }
 
 interface FeedbackResponse {
@@ -68,6 +71,10 @@ const REASON_COLORS: Record<string, { bg: string; text: string }> = {
   general_feedback:        { bg: "var(--color-cream)", text: "var(--color-forest)" },
   other:                   { bg: "var(--color-cream)", text: "var(--color-muted)" },
 };
+
+// ---------------------------------------------------------------------------
+// Badges
+// ---------------------------------------------------------------------------
 
 function ReasonBadge({ reason, label }: { reason: string; label: string }) {
   const colors = REASON_COLORS[reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" };
@@ -131,6 +138,31 @@ function TypeBadge({ type }: { type: string }) {
   );
 }
 
+function StatusBadge({ status }: { status: string }) {
+  const styles: Record<string, { bg: string; text: string; label: string }> = {
+    new:         { bg: "#f3f4f6", text: "#374151", label: "New" },
+    in_progress: { bg: "#fffbeb", text: "#92400e", label: "In Progress" },
+    resolved:    { bg: "#f0fdf4", text: "#166534", label: "Resolved" },
+  };
+  const s = styles[status] ?? styles.new;
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "3px 10px",
+        borderRadius: "999px",
+        fontSize: "12px",
+        fontWeight: 600,
+        background: s.bg,
+        color: s.text,
+        whiteSpace: "nowrap",
+      }}
+    >
+      {s.label}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Skeleton
 // ---------------------------------------------------------------------------
@@ -150,8 +182,154 @@ function Skeleton({ w = "100%", h = 16 }: { w?: string | number; h?: number }) {
 }
 
 // ---------------------------------------------------------------------------
+// ExpandedRow
+// ---------------------------------------------------------------------------
+
+function ExpandedRow({
+  item,
+  colSpan,
+  onStatusChange,
+  onCommentSave,
+}: {
+  item: FeedbackItem;
+  colSpan: number;
+  onStatusChange: (id: string, status: string) => Promise<void>;
+  onCommentSave: (id: string, comment: string | null) => Promise<void>;
+}) {
+  const [commentText, setCommentText] = useState(item.admin_comment ?? "");
+  const [savingComment, setSavingComment] = useState(false);
+  const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    setUpdatingStatus(true);
+    try {
+      await onStatusChange(item.id, e.target.value);
+    } finally {
+      setUpdatingStatus(false);
+    }
+  }
+
+  async function handleSaveComment() {
+    setSavingComment(true);
+    try {
+      await onCommentSave(item.id, commentText.trim() || null);
+    } finally {
+      setSavingComment(false);
+    }
+  }
+
+  return (
+    <tr>
+      <td
+        colSpan={colSpan}
+        style={{
+          padding: "16px 20px",
+          background: "#fafaf9",
+          borderBottom: "1px solid var(--color-border)",
+        }}
+      >
+        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
+          {/* Status select */}
+          <div>
+            <label
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--color-muted)",
+                display: "block",
+                marginBottom: 6,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Status
+            </label>
+            <select
+              value={item.status}
+              onChange={handleStatusChange}
+              disabled={updatingStatus}
+              style={{
+                padding: "7px 12px",
+                borderRadius: 10,
+                border: "1px solid var(--color-border)",
+                fontSize: 13,
+                color: "var(--color-text)",
+                background: "white",
+                cursor: updatingStatus ? "not-allowed" : "pointer",
+                outline: "none",
+              }}
+            >
+              <option value="new">New</option>
+              <option value="in_progress">In Progress</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </div>
+
+          {/* Admin comment */}
+          <div style={{ flex: 1, minWidth: 260 }}>
+            <label
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--color-muted)",
+                display: "block",
+                marginBottom: 6,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Internal Note
+            </label>
+            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+              <textarea
+                value={commentText}
+                onChange={(e) => setCommentText(e.target.value)}
+                placeholder="Add an internal note..."
+                rows={2}
+                style={{
+                  flex: 1,
+                  padding: "8px 12px",
+                  borderRadius: 10,
+                  border: "1px solid var(--color-border)",
+                  fontSize: 13,
+                  color: "var(--color-text)",
+                  background: "white",
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  outline: "none",
+                }}
+              />
+              <button
+                onClick={handleSaveComment}
+                disabled={savingComment}
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: 10,
+                  border: "none",
+                  background: "var(--color-forest)",
+                  color: "white",
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: savingComment ? "not-allowed" : "pointer",
+                  whiteSpace: "nowrap",
+                  opacity: savingComment ? 0.7 : 1,
+                }}
+              >
+                {savingComment ? "Saving..." : "Save note"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
+
+const COL_COUNT = 9; // checkbox, date, type, name, contact, reason, status, message, actions
 
 export default function AdminFeedbackPage() {
   const router = useRouter();
@@ -159,12 +337,36 @@ export default function AdminFeedbackPage() {
   const [data, setData] = useState<FeedbackResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+
+  // Filters
   const [typeFilter, setTypeFilter] = useState("all");
   const [reasonFilter, setReasonFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [page, setPage] = useState(1);
 
+  // Pagination
+  const [page, setPage] = useState(1);
   const PAGE_SIZE = 15;
+
+  // Selection / expansion
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  // Modals
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
+  const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
+  const [bulkStatusTarget, setBulkStatusTarget] = useState("resolved");
+
+  // Toast
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+
+  // Header checkbox ref for indeterminate state
+  const headerCheckboxRef = useRef<HTMLInputElement>(null);
+
+  // ---------------------------------------------------------------------------
+  // Load data
+  // ---------------------------------------------------------------------------
 
   useEffect(() => {
     async function load() {
@@ -195,11 +397,30 @@ export default function AdminFeedbackPage() {
     load();
   }, [router]);
 
+  // ---------------------------------------------------------------------------
+  // Toast
+  // ---------------------------------------------------------------------------
+
+  function showToast(message: string, type: "success" | "error") {
+    setToast({ message, type });
+  }
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  // ---------------------------------------------------------------------------
+  // Filtering / pagination
+  // ---------------------------------------------------------------------------
+
   const filtered = useMemo(() => {
     if (!data) return [];
     let items = data.items;
     if (typeFilter !== "all") items = items.filter((i) => i.feedback_type === typeFilter);
     if (reasonFilter !== "all") items = items.filter((i) => i.reason === reasonFilter);
+    if (statusFilter !== "all") items = items.filter((i) => i.status === statusFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       items = items.filter(
@@ -212,22 +433,267 @@ export default function AdminFeedbackPage() {
       );
     }
     return items;
-  }, [data, typeFilter, reasonFilter, searchQuery]);
+  }, [data, typeFilter, reasonFilter, statusFilter, searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [typeFilter, reasonFilter, searchQuery]);
+  useEffect(() => { setPage(1); }, [typeFilter, reasonFilter, statusFilter, searchQuery]);
+  useEffect(() => { setPage((prev) => Math.min(prev, totalPages)); }, [totalPages]);
 
   const sortedMetrics = useMemo(
     () => (data ? [...data.metrics].sort((a, b) => b.count - a.count).filter((m) => m.count > 0) : []),
     [data]
   );
 
-  const hasFilters = typeFilter !== "all" || reasonFilter !== "all" || !!searchQuery;
+  const hasFilters = typeFilter !== "all" || reasonFilter !== "all" || statusFilter !== "all" || !!searchQuery;
+
+  function recomputeMetrics(items: FeedbackItem[], template: FeedbackMetric[]): FeedbackMetric[] {
+    const nonCustomerCount = items.filter((i) => i.feedback_type === "non_customer").length;
+    return template.map((metric) => {
+      const count = items.filter(
+        (i) => i.feedback_type === "non_customer" && i.reason === metric.reason
+      ).length;
+      return {
+        ...metric,
+        count,
+        pct: nonCustomerCount > 0 ? Math.round((count / nonCustomerCount) * 100) : 0,
+      };
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Header checkbox indeterminate state
+  // ---------------------------------------------------------------------------
+
+  const allOnPageSelected = paginated.length > 0 && paginated.every((i) => selectedIds.has(i.id));
+  const someOnPageSelected = paginated.some((i) => selectedIds.has(i.id));
+
+  useEffect(() => {
+    if (headerCheckboxRef.current) {
+      headerCheckboxRef.current.indeterminate = someOnPageSelected && !allOnPageSelected;
+    }
+  }, [someOnPageSelected, allOnPageSelected]);
+
+  function toggleSelectAll() {
+    if (allOnPageSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        paginated.forEach((i) => next.delete(i.id));
+        return next;
+      });
+    } else {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        paginated.forEach((i) => next.add(i.id));
+        return next;
+      });
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // API mutation helpers
+  // ---------------------------------------------------------------------------
+
+  async function getAuthHeader(): Promise<Record<string, string>> {
+    const token = await getAdminToken();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  async function handleStatusChange(id: string, status: string): Promise<void> {
+    const headers = await getAuthHeader();
+    const previousStatus = data?.items.find((i) => i.id === id)?.status;
+    // Optimistic update
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: prev.items.map((item) => (item.id === id ? { ...item, status } : item)),
+      };
+    });
+    try {
+      const res = await fetch(`${API_URL}/api/admin/feedback/${id}/status`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      showToast("Status updated", "success");
+    } catch {
+      if (previousStatus) {
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            items: prev.items.map((item) => (item.id === id ? { ...item, status: previousStatus } : item)),
+          };
+        });
+      }
+      showToast("Failed to update status", "error");
+    }
+  }
+
+  async function handleCommentSave(id: string, admin_comment: string | null): Promise<void> {
+    const headers = await getAuthHeader();
+    try {
+      const res = await fetch(`${API_URL}/api/admin/feedback/${id}/comment`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ admin_comment }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((item) => (item.id === id ? { ...item, admin_comment } : item)),
+        };
+      });
+      showToast("Note saved", "success");
+    } catch {
+      showToast("Failed to save note", "error");
+    }
+  }
+
+  async function handleDelete(id: string) {
+    const headers = await getAuthHeader();
+    try {
+      const res = await fetch(`${API_URL}/api/admin/feedback/${id}`, {
+        method: "DELETE",
+        headers,
+      });
+      if (!res.ok) throw new Error("Failed");
+      setData((prev) => {
+        if (!prev) return prev;
+        const deleted = prev.items.find((i) => i.id === id);
+        const nextItems = prev.items.filter((i) => i.id !== id);
+        return {
+          ...prev,
+          items: nextItems,
+          total: prev.total - 1,
+          customer_count: deleted?.feedback_type === "customer" ? prev.customer_count - 1 : prev.customer_count,
+          non_customer_count: deleted?.feedback_type === "non_customer" ? prev.non_customer_count - 1 : prev.non_customer_count,
+          general_contact_count: deleted?.feedback_type === "general_contact" ? prev.general_contact_count - 1 : prev.general_contact_count,
+          metrics: recomputeMetrics(nextItems, prev.metrics),
+        };
+      });
+      setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+      if (expandedId === id) setExpandedId(null);
+      setDeleteTarget(null);
+      showToast("Entry deleted", "success");
+    } catch {
+      showToast("Failed to delete entry", "error");
+    }
+  }
+
+  async function handleBulkDelete() {
+    const ids = Array.from(selectedIds);
+    const headers = await getAuthHeader();
+    try {
+      const res = await fetch(`${API_URL}/api/admin/feedback/bulk-delete`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const idSet = new Set(ids);
+      setData((prev) => {
+        if (!prev) return prev;
+        const deleted = prev.items.filter((i) => idSet.has(i.id));
+        const nextItems = prev.items.filter((i) => !idSet.has(i.id));
+        return {
+          ...prev,
+          items: nextItems,
+          total: prev.total - deleted.length,
+          customer_count: prev.customer_count - deleted.filter((d) => d.feedback_type === "customer").length,
+          non_customer_count: prev.non_customer_count - deleted.filter((d) => d.feedback_type === "non_customer").length,
+          general_contact_count: prev.general_contact_count - deleted.filter((d) => d.feedback_type === "general_contact").length,
+          metrics: recomputeMetrics(nextItems, prev.metrics),
+        };
+      });
+      setSelectedIds(new Set());
+      if (expandedId && idSet.has(expandedId)) setExpandedId(null);
+      setShowBulkDeleteModal(false);
+      showToast(`${ids.length} entr${ids.length === 1 ? "y" : "ies"} deleted`, "success");
+    } catch {
+      showToast("Failed to delete entries", "error");
+    }
+  }
+
+  async function handleBulkStatus() {
+    const ids = Array.from(selectedIds);
+    const headers = await getAuthHeader();
+    try {
+      const res = await fetch(`${API_URL}/api/admin/feedback/bulk-status`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, status: bulkStatusTarget }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const idSet = new Set(ids);
+      setData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          items: prev.items.map((item) =>
+            idSet.has(item.id) ? { ...item, status: bulkStatusTarget } : item
+          ),
+        };
+      });
+      setShowBulkStatusModal(false);
+      showToast(`${ids.length} entr${ids.length === 1 ? "y" : "ies"} updated`, "success");
+    } catch {
+      showToast("Failed to update status", "error");
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Button styles
+  // ---------------------------------------------------------------------------
+
+  const btnBase: React.CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    padding: "8px 14px",
+    borderRadius: 10,
+    fontSize: 13,
+    fontWeight: 500,
+    cursor: "pointer",
+    border: "1px solid var(--color-border)",
+    background: "white",
+    color: "var(--color-text)",
+  };
+
+  const btnDanger: React.CSSProperties = {
+    ...btnBase,
+    border: "1px solid #fecaca",
+    background: "#fef2f2",
+    color: "#c53030",
+  };
+
+  const btnPrimary: React.CSSProperties = {
+    ...btnBase,
+    border: "none",
+    background: "var(--color-forest)",
+    color: "white",
+  };
+
+  // ---------------------------------------------------------------------------
+  // Render
+  // ---------------------------------------------------------------------------
 
   return (
-    <div style={{ padding: "32px 32px 64px", maxWidth: 1100, margin: "0 auto" }}>
+    <div style={{ padding: "32px 32px 64px", maxWidth: 1200, margin: "0 auto" }}>
 
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
@@ -482,16 +948,7 @@ export default function AdminFeedbackPage() {
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          style={{
-            padding: "9px 12px",
-            borderRadius: 12,
-            border: "1px solid var(--color-border)",
-            fontSize: 13,
-            color: "var(--color-text)",
-            background: "white",
-            cursor: "pointer",
-            outline: "none",
-          }}
+          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
         >
           <option value="all">All types</option>
           <option value="customer">Customer</option>
@@ -502,16 +959,7 @@ export default function AdminFeedbackPage() {
         <select
           value={reasonFilter}
           onChange={(e) => setReasonFilter(e.target.value)}
-          style={{
-            padding: "9px 12px",
-            borderRadius: 12,
-            border: "1px solid var(--color-border)",
-            fontSize: 13,
-            color: "var(--color-text)",
-            background: "white",
-            cursor: "pointer",
-            outline: "none",
-          }}
+          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
         >
           <option value="all">All reasons</option>
           <option value="price_too_high">Price too high</option>
@@ -528,9 +976,20 @@ export default function AdminFeedbackPage() {
           <option value="other">Other</option>
         </select>
 
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
+        >
+          <option value="all">All statuses</option>
+          <option value="new">New</option>
+          <option value="in_progress">In Progress</option>
+          <option value="resolved">Resolved</option>
+        </select>
+
         {hasFilters && (
           <button
-            onClick={() => { setTypeFilter("all"); setReasonFilter("all"); setSearchQuery(""); }}
+            onClick={() => { setTypeFilter("all"); setReasonFilter("all"); setStatusFilter("all"); setSearchQuery(""); }}
             style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "8px 12px", borderRadius: 12,
@@ -551,6 +1010,55 @@ export default function AdminFeedbackPage() {
           </span>
         )}
       </div>
+
+      {/* Bulk action bar */}
+      {selectedIds.size > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "10px 16px",
+            background: "#f0f7eb",
+            border: "1px solid #c8ddb4",
+            borderRadius: 12,
+            marginBottom: 12,
+            flexWrap: "wrap",
+          }}
+        >
+          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-forest)" }}>
+            {selectedIds.size} selected
+          </span>
+          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <select
+              value={bulkStatusTarget}
+              onChange={(e) => setBulkStatusTarget(e.target.value)}
+              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #c8ddb4", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
+            >
+              <option value="new">New</option>
+              <option value="in_progress">In Progress</option>
+              <option value="resolved">Resolved</option>
+            </select>
+            <button onClick={() => setShowBulkStatusModal(true)} style={btnBase}>
+              Mark all as
+            </button>
+          </div>
+          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
+          <button onClick={() => setShowBulkDeleteModal(true)} style={btnDanger}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
+            </svg>
+            Delete selected
+          </button>
+          <button
+            onClick={() => setSelectedIds(new Set())}
+            style={{ ...btnBase, marginLeft: "auto" }}
+          >
+            Clear
+          </button>
+        </div>
+      )}
 
       {/* Table */}
       <div
@@ -580,7 +1088,17 @@ export default function AdminFeedbackPage() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
               <thead>
                 <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-cream)" }}>
-                  {["Date", "Type", "Name", "Contact", "Reason", "Message / Details"].map((col) => (
+                  {/* Checkbox */}
+                  <th style={{ padding: "11px 12px 11px 16px", width: 36 }}>
+                    <input
+                      ref={headerCheckboxRef}
+                      type="checkbox"
+                      checked={allOnPageSelected}
+                      onChange={toggleSelectAll}
+                      style={{ cursor: "pointer" }}
+                    />
+                  </th>
+                  {["Date", "Type", "Name", "Contact", "Reason", "Status", "Message / Details", ""].map((col) => (
                     <th
                       key={col}
                       style={{
@@ -600,64 +1118,133 @@ export default function AdminFeedbackPage() {
                 </tr>
               </thead>
               <tbody>
-                {paginated.map((item, idx) => (
-                  <tr
-                    key={item.id}
-                    style={{
-                      borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none",
-                      background: "white",
-                    }}
-                  >
-                    {/* Date */}
-                    <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                      <div style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatDate(item.created_at)}</div>
-                      <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 2 }}>{formatTime(item.created_at)}</div>
-                    </td>
+                {paginated.map((item, idx) => {
+                  const isExpanded = expandedId === item.id;
+                  const isLast = idx === paginated.length - 1;
+                  return (
+                    <Fragment key={item.id}>
+                      <tr
+                        onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                        style={{
+                          borderBottom: (!isExpanded && !isLast) ? "1px solid var(--color-border)" : isExpanded ? "none" : "none",
+                          background: isExpanded ? "#fafaf9" : "white",
+                          cursor: "pointer",
+                          transition: "background 0.1s",
+                        }}
+                      >
+                        {/* Checkbox */}
+                        <td
+                          style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(item.id)}
+                            onChange={() => toggleSelect(item.id)}
+                            style={{ cursor: "pointer" }}
+                          />
+                        </td>
 
-                    {/* Type */}
-                    <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                      <TypeBadge type={item.feedback_type} />
-                    </td>
+                        {/* Date */}
+                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
+                          <div style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatDate(item.created_at)}</div>
+                          <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 2 }}>{formatTime(item.created_at)}</div>
+                        </td>
 
-                    {/* Name */}
-                    <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                      {item.name ? (
-                        <span style={{ fontWeight: 500, color: "var(--color-text)" }}>{item.name}</span>
-                      ) : (
-                        <span style={{ color: "var(--color-muted)", fontStyle: "italic" }}>Anonymous</span>
+                        {/* Type */}
+                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
+                          <TypeBadge type={item.feedback_type} />
+                        </td>
+
+                        {/* Name */}
+                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
+                          {item.name ? (
+                            <span style={{ fontWeight: 500, color: "var(--color-text)" }}>{item.name}</span>
+                          ) : (
+                            <span style={{ color: "var(--color-muted)", fontStyle: "italic" }}>Anonymous</span>
+                          )}
+                        </td>
+
+                        {/* Contact */}
+                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
+                          {item.contact ? (
+                            <span style={{ fontSize: 13, color: "var(--color-text)" }}>{item.contact}</span>
+                          ) : (
+                            <span style={{ color: "var(--color-border)" }}>-</span>
+                          )}
+                        </td>
+
+                        {/* Reason */}
+                        <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
+                          {item.reason && item.reason_label ? (
+                            <ReasonBadge reason={item.reason} label={item.reason_label} />
+                          ) : (
+                            <span style={{ color: "var(--color-border)" }}>-</span>
+                          )}
+                        </td>
+
+                        {/* Status */}
+                        <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}>
+                          <StatusBadge status={item.status} />
+                        </td>
+
+                        {/* Message / Details */}
+                        <td style={{ padding: "13px 16px", color: "var(--color-text)", maxWidth: 280, verticalAlign: "top" }}>
+                          {item.message ? (
+                            <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.message}</span>
+                          ) : item.other_details ? (
+                            <span style={{ color: "var(--color-muted)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.other_details}</span>
+                          ) : (
+                            <span style={{ color: "var(--color-border)" }}>-</span>
+                          )}
+                        </td>
+
+                        {/* Actions */}
+                        <td
+                          style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            onClick={() => setDeleteTarget(item.id)}
+                            title="Delete"
+                            style={{
+                              padding: "5px 8px",
+                              borderRadius: 8,
+                              border: "1px solid var(--color-border)",
+                              background: "white",
+                              cursor: "pointer",
+                              color: "var(--color-muted)",
+                              display: "inline-flex",
+                              alignItems: "center",
+                            }}
+                          >
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+
+                      {/* Expanded detail row */}
+                      {isExpanded && (
+                        <ExpandedRow
+                          key={`expanded-${item.id}`}
+                          item={item}
+                          colSpan={COL_COUNT}
+                          onStatusChange={handleStatusChange}
+                          onCommentSave={handleCommentSave}
+                        />
                       )}
-                    </td>
 
-                    {/* Contact */}
-                    <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                      {item.contact ? (
-                        <span style={{ fontSize: 13, color: "var(--color-text)" }}>{item.contact}</span>
-                      ) : (
-                        <span style={{ color: "var(--color-border)" }}>-</span>
+                      {/* Row separator after expanded content */}
+                      {(isExpanded && !isLast) && (
+                        <tr key={`sep-${item.id}`}>
+                          <td colSpan={COL_COUNT} style={{ padding: 0, borderBottom: "1px solid var(--color-border)" }} />
+                        </tr>
                       )}
-                    </td>
-
-                    {/* Reason */}
-                    <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
-                      {item.reason && item.reason_label ? (
-                        <ReasonBadge reason={item.reason} label={item.reason_label} />
-                      ) : (
-                        <span style={{ color: "var(--color-border)" }}>-</span>
-                      )}
-                    </td>
-
-                    {/* Message / Details */}
-                    <td style={{ padding: "13px 16px", color: "var(--color-text)", maxWidth: 300, verticalAlign: "top" }}>
-                      {item.message ? (
-                        <span>{item.message}</span>
-                      ) : item.other_details ? (
-                        <span style={{ color: "var(--color-muted)" }}>{item.other_details}</span>
-                      ) : (
-                        <span style={{ color: "var(--color-border)" }}>-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -692,6 +1279,76 @@ export default function AdminFeedbackPage() {
           >
             Next
           </button>
+        </div>
+      )}
+
+      {/* Single delete modal */}
+      <Modal
+        isOpen={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        title="Delete feedback entry"
+        variant="danger"
+        actions={
+          <>
+            <button onClick={() => setDeleteTarget(null)} style={btnBase}>Cancel</button>
+            <button onClick={() => deleteTarget && handleDelete(deleteTarget)} style={btnDanger}>Delete</button>
+          </>
+        }
+      >
+        This feedback entry will be permanently deleted. This action cannot be undone.
+      </Modal>
+
+      {/* Bulk delete modal */}
+      <Modal
+        isOpen={showBulkDeleteModal}
+        onClose={() => setShowBulkDeleteModal(false)}
+        title={`Delete ${selectedIds.size} entr${selectedIds.size === 1 ? "y" : "ies"}`}
+        variant="danger"
+        actions={
+          <>
+            <button onClick={() => setShowBulkDeleteModal(false)} style={btnBase}>Cancel</button>
+            <button onClick={handleBulkDelete} style={btnDanger}>Delete all</button>
+          </>
+        }
+      >
+        {selectedIds.size} feedback {selectedIds.size === 1 ? "entry" : "entries"} will be permanently deleted. This action cannot be undone.
+      </Modal>
+
+      {/* Bulk status modal */}
+      <Modal
+        isOpen={showBulkStatusModal}
+        onClose={() => setShowBulkStatusModal(false)}
+        title={`Update ${selectedIds.size} entr${selectedIds.size === 1 ? "y" : "ies"}`}
+        actions={
+          <>
+            <button onClick={() => setShowBulkStatusModal(false)} style={btnBase}>Cancel</button>
+            <button onClick={handleBulkStatus} style={btnPrimary}>Apply</button>
+          </>
+        }
+      >
+        Mark {selectedIds.size} selected {selectedIds.size === 1 ? "entry" : "entries"} as{" "}
+        <strong>{bulkStatusTarget === "in_progress" ? "In Progress" : bulkStatusTarget === "resolved" ? "Resolved" : "New"}</strong>?
+      </Modal>
+
+      {/* Toast */}
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            bottom: 24,
+            right: 24,
+            zIndex: 200,
+            padding: "12px 20px",
+            borderRadius: 12,
+            fontSize: 14,
+            fontWeight: 500,
+            color: "white",
+            background: toast.type === "success" ? "var(--color-forest)" : "#c53030",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+            transition: "opacity 0.2s",
+          }}
+        >
+          {toast.message}
         </div>
       )}
     </div>

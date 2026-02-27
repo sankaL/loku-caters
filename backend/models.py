@@ -74,6 +74,9 @@ class Order(Base):
     total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     status: Mapped[str] = mapped_column(String, default=OrderStatus.PENDING)
     reminded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payment_method: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    payment_method_other: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
@@ -93,3 +96,5 @@ class Feedback(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    status: Mapped[str] = mapped_column(String, nullable=False, default="new")
+    admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

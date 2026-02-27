@@ -21,7 +21,10 @@ from event_config import (
 )
 from event_images import get_event_image_catalog, validate_event_image_key
 from models import Event, Feedback, Item, Location, Order
-from schemas import EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate
+from schemas import (
+    EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
+    FEEDBACK_STATUSES, FeedbackStatusUpdate, FeedbackCommentUpdate,
+)
 from services.email import send_confirmation, send_reminder
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -112,6 +115,60 @@ def dev_login():
 
 class StatusUpdate(BaseModel):
     status: str
+
+
+ALLOWED_PAYMENT_METHODS = {"cash", "etransfer", "other"}
+
+
+class PaymentUpdate(BaseModel):
+    paid: bool
+    payment_method: Optional[str] = None
+    payment_method_other: Optional[str] = None
+
+    @field_validator("payment_method", mode="before")
+    @classmethod
+    def normalize_payment_method(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip().lower()
+        return stripped or None
+
+    @field_validator("payment_method_other", mode="before")
+    @classmethod
+    def normalize_payment_method_other(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def validate_payment_fields(self) -> "PaymentUpdate":
+        if not self.paid:
+            self.payment_method = None
+            self.payment_method_other = None
+            return self
+
+        if not self.payment_method:
+            raise ValueError("payment_method is required when paid is true")
+        if self.payment_method not in ALLOWED_PAYMENT_METHODS:
+            raise ValueError("Invalid payment_method")
+
+        if self.payment_method == "other":
+            if not self.payment_method_other:
+                raise ValueError("payment_method_other is required when payment_method is other")
+            return self
+
+        self.payment_method_other = None
+        return self
+
+
+ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    OrderStatus.PENDING: {OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.CANCELLED},
+    OrderStatus.CONFIRMED: {OrderStatus.CONFIRMED, OrderStatus.PICKED_UP, OrderStatus.NO_SHOW, OrderStatus.CANCELLED},
+    OrderStatus.PICKED_UP: {OrderStatus.PICKED_UP, OrderStatus.NO_SHOW, OrderStatus.CANCELLED},
+    OrderStatus.NO_SHOW: {OrderStatus.NO_SHOW, OrderStatus.PICKED_UP, OrderStatus.CANCELLED},
+    OrderStatus.CANCELLED: {OrderStatus.CANCELLED, OrderStatus.PICKED_UP, OrderStatus.NO_SHOW},
+}
 
 
 class AdminOrderCreate(BaseModel):
@@ -237,6 +294,15 @@ class AdminOrderUpdate(BaseModel):
 
 class BulkRemindRequest(BaseModel):
     order_ids: list[str]
+
+
+class FeedbackBulkDeleteRequest(BaseModel):
+    ids: list[str]
+
+
+class FeedbackBulkStatusRequest(BaseModel):
+    ids: list[str]
+    status: str
 
 
 # ---------------------------------------------------------------------------
@@ -590,6 +656,9 @@ def _order_dict(order: Order) -> dict:
         "total_price": float(order.total_price),
         "status": order.status,
         "reminded": bool(order.reminded),
+        "paid": bool(order.paid),
+        "payment_method": order.payment_method,
+        "payment_method_other": order.payment_method_other,
         "notes": order.notes,
         "exclude_email": bool(order.exclude_email),
         "created_at": order.created_at.isoformat() if order.created_at else None,
@@ -674,6 +743,7 @@ def admin_create_order(
 def admin_list_orders(
     status: Optional[str] = Query(None),
     event_id: Optional[int] = Query(None),
+    paid: Optional[bool] = Query(None),
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
@@ -682,6 +752,8 @@ def admin_list_orders(
         query = query.filter(Order.status == status)
     if event_id is not None:
         query = query.filter(Order.event_id == event_id)
+    if paid is not None:
+        query = query.filter(Order.paid == paid)
     orders = query.order_by(Order.created_at.desc()).all()
     return [_order_dict(o) for o in orders]
 
@@ -724,6 +796,8 @@ def admin_bulk_remind(
         if order is None:
             continue
         if order.status != OrderStatus.CONFIRMED:
+            continue
+        if order.paid:
             continue
         if order.reminded:
             skipped_already_reminded += 1
@@ -871,6 +945,8 @@ def admin_confirm_order(
         raise HTTPException(status_code=404, detail="Order not found")
     if order.status == OrderStatus.CONFIRMED:
         raise HTTPException(status_code=409, detail="Order already confirmed")
+    if order.status != OrderStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Only pending orders can be confirmed")
 
     email_sent = False
     email_suppressed = bool(order.exclude_email)
@@ -947,9 +1023,41 @@ def update_order_status(
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
+
+    allowed = ALLOWED_STATUS_TRANSITIONS.get(order.status)
+    if allowed is None:
+        raise HTTPException(status_code=409, detail="Invalid current status")
+    if body.status not in allowed:
+        raise HTTPException(status_code=409, detail="Invalid status transition")
+
     order.status = body.status
     db.commit()
     return {"success": True, "status": order.status}
+
+
+@router.patch("/orders/{order_id}/payment")
+def update_order_payment(
+    order_id: str,
+    body: PaymentUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+    if body.paid and order.status == OrderStatus.PENDING:
+        raise HTTPException(status_code=409, detail="Cannot mark as paid while status is pending")
+
+    order.paid = body.paid
+    order.payment_method = body.payment_method
+    order.payment_method_other = body.payment_method_other
+    db.commit()
+    return {
+        "success": True,
+        "paid": bool(order.paid),
+        "payment_method": order.payment_method,
+        "payment_method_other": order.payment_method_other,
+    }
 
 
 @router.delete("/orders/{order_id}")
@@ -1013,6 +1121,8 @@ def admin_list_feedback(
             "other_details": row.other_details,
             "message": row.message,
             "created_at": row.created_at.isoformat() if row.created_at else None,
+            "status": row.status,
+            "admin_comment": row.admin_comment,
         }
         for row in rows
     ]
@@ -1049,3 +1159,76 @@ def admin_list_feedback(
         "metrics": metrics,
         "items": items,
     }
+
+
+@router.post("/feedback/bulk-delete")
+def bulk_delete_feedback(
+    body: FeedbackBulkDeleteRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    deleted = 0
+    if body.ids:
+        deleted = db.query(Feedback).filter(Feedback.id.in_(body.ids)).delete(synchronize_session=False)
+        db.commit()
+    return {"success": True, "deleted": deleted}
+
+
+@router.post("/feedback/bulk-status")
+def bulk_update_feedback_status(
+    body: FeedbackBulkStatusRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    if body.status not in FEEDBACK_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    if body.ids:
+        db.query(Feedback).filter(Feedback.id.in_(body.ids)).update(
+            {"status": body.status}, synchronize_session=False
+        )
+        db.commit()
+    return {"success": True}
+
+
+@router.delete("/feedback/{feedback_id}")
+def delete_feedback(
+    feedback_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    fb = db.query(Feedback).filter(Feedback.id == feedback_id).first()
+    if fb is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    db.delete(fb)
+    db.commit()
+    return {"success": True}
+
+
+@router.patch("/feedback/{feedback_id}/status")
+def update_feedback_status(
+    feedback_id: str,
+    body: FeedbackStatusUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    fb = db.query(Feedback).filter(Feedback.id == feedback_id).first()
+    if fb is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    fb.status = body.status
+    db.commit()
+    return {"success": True, "status": fb.status}
+
+
+@router.patch("/feedback/{feedback_id}/comment")
+def update_feedback_comment(
+    feedback_id: str,
+    body: FeedbackCommentUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    fb = db.query(Feedback).filter(Feedback.id == feedback_id).first()
+    if fb is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    fb.admin_comment = body.admin_comment
+    db.commit()
+    return {"success": True}

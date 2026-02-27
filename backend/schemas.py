@@ -196,3 +196,21 @@ class FeedbackCreate(BaseModel):
 class FeedbackResponse(BaseModel):
     success: bool
     feedback_id: str
+
+
+FEEDBACK_STATUSES = {"new", "in_progress", "resolved"}
+
+
+class FeedbackStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def status_must_be_valid(cls, v: str) -> str:
+        if v not in FEEDBACK_STATUSES:
+            raise ValueError("Invalid status")
+        return v
+
+
+class FeedbackCommentUpdate(BaseModel):
+    admin_comment: Optional[str] = None
