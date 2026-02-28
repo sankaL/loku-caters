@@ -399,28 +399,90 @@ export function computePaymentMethodBreakdown(orders: Order[]): PaymentMethodRow
     .sort((a, b) => b.count - a.count);
 }
 
+export interface LocationPaymentMethod {
+  method: string;
+  label: string;
+  revenue: number;
+  count: number;
+}
+
 export interface ItemsPerLocationRow {
   location: string;
   items: { itemName: string; quantity: number; revenue: number }[];
+  paidRevenue: number;
+  unpaidRevenue: number;
+  byMethod: LocationPaymentMethod[];
+}
+
+function paymentMethodLabel(method: string | null): string {
+  if (method === "etransfer") return "E-Transfer";
+  if (method === "cash") return "Cash";
+  if (method === "card") return "Card";
+  return "Other";
 }
 
 export function computeItemsPerLocation(orders: Order[]): ItemsPerLocationRow[] {
   const active = orders.filter(isActive);
-  const locationMap = new Map<string, Map<string, { quantity: number; revenue: number }>>();
+
+  // Per-location tracking
+  const locationItems = new Map<string, Map<string, { quantity: number; revenue: number }>>();
+  const locationPaid = new Map<string, number>();
+  const locationUnpaid = new Map<string, number>();
+  const locationMethods = new Map<string, Map<string, { revenue: number; count: number }>>();
+
   for (const o of active) {
     const loc = o.pickup_location;
+
+    // Items
     const itemName = (o.item_name || o.item_id || "Unknown").trim() || "Unknown";
-    if (!locationMap.has(loc)) locationMap.set(loc, new Map());
-    const itemMap = locationMap.get(loc)!;
+    if (!locationItems.has(loc)) locationItems.set(loc, new Map());
+    const itemMap = locationItems.get(loc)!;
     const existing = itemMap.get(itemName) ?? { quantity: 0, revenue: 0 };
     itemMap.set(itemName, { quantity: existing.quantity + o.quantity, revenue: existing.revenue + o.total_price });
+
+    // Paid vs unpaid
+    if (o.paid) {
+      locationPaid.set(loc, (locationPaid.get(loc) ?? 0) + o.total_price);
+    } else {
+      locationUnpaid.set(loc, (locationUnpaid.get(loc) ?? 0) + o.total_price);
+    }
+
+    // Payment method (only for paid orders)
+    if (o.paid) {
+      if (!locationMethods.has(loc)) locationMethods.set(loc, new Map());
+      const methodMap = locationMethods.get(loc)!;
+      const label = paymentMethodLabel(o.payment_method);
+      const cur = methodMap.get(label) ?? { revenue: 0, count: 0 };
+      methodMap.set(label, { revenue: cur.revenue + o.total_price, count: cur.count + 1 });
+    }
   }
-  return Array.from(locationMap.entries()).map(([location, itemMap]) => ({
-    location,
-    items: Array.from(itemMap.entries())
-      .map(([itemName, { quantity, revenue }]) => ({ itemName, quantity, revenue }))
-      .sort((a, b) => b.quantity - a.quantity),
-  }));
+
+  // All locations seen across all three maps
+  const allLocs = new Set([...locationItems.keys(), ...locationPaid.keys(), ...locationUnpaid.keys()]);
+
+  return Array.from(allLocs).map((location) => {
+    const itemMap = locationItems.get(location) ?? new Map();
+    const methodMap = locationMethods.get(location) ?? new Map();
+
+    const METHOD_ORDER = ["E-Transfer", "Cash", "Card", "Other"];
+    const byMethod: LocationPaymentMethod[] = METHOD_ORDER
+      .filter((label) => methodMap.has(label))
+      .map((label) => {
+        const { revenue, count } = methodMap.get(label)!;
+        const method = label === "E-Transfer" ? "etransfer" : label === "Cash" ? "cash" : label === "Card" ? "card" : "other";
+        return { method, label, revenue, count };
+      });
+
+    return {
+      location,
+      items: Array.from(itemMap.entries())
+        .map(([itemName, { quantity, revenue }]) => ({ itemName, quantity, revenue }))
+        .sort((a, b) => b.quantity - a.quantity),
+      paidRevenue: locationPaid.get(location) ?? 0,
+      unpaidRevenue: locationUnpaid.get(location) ?? 0,
+      byMethod,
+    };
+  });
 }
 
 export function computeKPIs(orders: Order[]): KPIData {
