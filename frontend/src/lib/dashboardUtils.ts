@@ -358,6 +358,71 @@ export interface KPIData {
   completionRateDelta: number | null;
 }
 
+export function computeStatusBreakdown(orders: Order[]): { status: string; count: number }[] {
+  const map = new Map<string, number>();
+  for (const o of orders) {
+    map.set(o.status, (map.get(o.status) ?? 0) + 1);
+  }
+  return Array.from(map.entries())
+    .map(([status, count]) => ({ status, count }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export interface PaymentMethodRow {
+  method: string;
+  label: string;
+  count: number;
+  revenue: number;
+}
+
+export function computePaymentMethodBreakdown(orders: Order[]): PaymentMethodRow[] {
+  const active = orders.filter(isActive);
+  const map = new Map<string, { count: number; revenue: number }>();
+  for (const o of active) {
+    const method = o.payment_method ?? "unpaid";
+    const existing = map.get(method) ?? { count: 0, revenue: 0 };
+    map.set(method, { count: existing.count + 1, revenue: existing.revenue + o.total_price });
+  }
+  const labelMap: Record<string, string> = {
+    cash: "Cash",
+    etransfer: "E-Transfer",
+    card: "Card",
+    unpaid: "Unpaid",
+  };
+  return Array.from(map.entries())
+    .map(([method, { count, revenue }]) => ({
+      method,
+      label: labelMap[method] ?? method,
+      count,
+      revenue,
+    }))
+    .sort((a, b) => b.count - a.count);
+}
+
+export interface ItemsPerLocationRow {
+  location: string;
+  items: { itemName: string; quantity: number; revenue: number }[];
+}
+
+export function computeItemsPerLocation(orders: Order[]): ItemsPerLocationRow[] {
+  const active = orders.filter(isActive);
+  const locationMap = new Map<string, Map<string, { quantity: number; revenue: number }>>();
+  for (const o of active) {
+    const loc = o.pickup_location;
+    const itemName = (o.item_name || o.item_id || "Unknown").trim() || "Unknown";
+    if (!locationMap.has(loc)) locationMap.set(loc, new Map());
+    const itemMap = locationMap.get(loc)!;
+    const existing = itemMap.get(itemName) ?? { quantity: 0, revenue: 0 };
+    itemMap.set(itemName, { quantity: existing.quantity + o.quantity, revenue: existing.revenue + o.total_price });
+  }
+  return Array.from(locationMap.entries()).map(([location, itemMap]) => ({
+    location,
+    items: Array.from(itemMap.entries())
+      .map(([itemName, { quantity, revenue }]) => ({ itemName, quantity, revenue }))
+      .sort((a, b) => b.quantity - a.quantity),
+  }));
+}
+
 export function computeKPIs(orders: Order[]): KPIData {
   const now = new Date();
   const thisKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;

@@ -8,7 +8,7 @@ from functools import lru_cache
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, case
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -305,7 +305,7 @@ class FeedbackBulkStatusRequest(BaseModel):
 # Events CRUD
 # ---------------------------------------------------------------------------
 
-def _event_dict(event: Event) -> dict:
+def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 0) -> dict:
     return {
         "id": event.id,
         "name": event.name,
@@ -325,6 +325,8 @@ def _event_dict(event: Event) -> dict:
         "item_ids": event.item_ids or [],
         "location_ids": event.location_ids or [],
         "updated_at": event.updated_at.isoformat() if event.updated_at else None,
+        "total_revenue": total_revenue,
+        "order_count": order_count,
     }
 
 
@@ -347,8 +349,50 @@ def admin_list_events(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    events = db.query(Event).order_by(Event.id.desc()).all()
-    return [_event_dict(e) for e in events]
+    active_order = Order.status.notin_(["cancelled", "no_show"])
+    rows = (
+        db.query(
+            Event,
+            func.coalesce(
+                func.sum(
+                    case(
+                        (active_order, Order.total_price),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("total_revenue"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (active_order, 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("order_count"),
+        )
+        .outerjoin(Order, Order.event_id == Event.id)
+        .group_by(Event.id)
+        .order_by(Event.id.desc())
+        .all()
+    )
+    return [
+        _event_dict(event, total_revenue=float(rev), order_count=int(cnt))
+        for event, rev, cnt in rows
+    ]
+
+
+@router.get("/events/{event_id}")
+def admin_get_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return _event_dict(event)
 
 
 @router.get("/events/{event_id}/config")
@@ -661,6 +705,142 @@ def _order_dict(order: Order) -> dict:
     }
 
 
+def _get_reminder_context(db: Session, orders: list[Order]) -> tuple[dict[int, Event], str, dict]:
+    event_ids = sorted({int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None})
+    events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
+    events_by_id: dict[int, Event] = {int(event.id): event for event in events}
+
+    active_event = db.query(Event).filter(Event.is_active == True).first()
+    active_event_date = active_event.event_date if active_event else ""
+    active_etransfer = {
+        "enabled": bool(active_event.etransfer_enabled) if active_event else False,
+        "email": active_event.etransfer_email if active_event else None,
+    }
+
+    return events_by_id, active_event_date, active_etransfer
+
+
+def _reminder_result(order: Order, *, status: str, message: str) -> dict:
+    email = None
+    if order.email and str(order.email).strip():
+        email = str(order.email).strip()
+
+    return {
+        "success": True,
+        "order_id": order.id,
+        "status": status,
+        "message": message,
+        "email": email,
+        "name": order.name,
+        "reminded": bool(order.reminded),
+    }
+
+
+def _prepare_reminder_order_data(
+    order: Order,
+    db: Session,
+    *,
+    events_by_id: dict[int, Event],
+    active_event_date: str,
+    active_etransfer: dict,
+) -> tuple[Optional[dict], Optional[dict]]:
+    if order.status != OrderStatus.CONFIRMED:
+        return _reminder_result(
+            order,
+            status="skipped_not_confirmed",
+            message="Only confirmed orders can be reminded",
+        ), None
+
+    if order.reminded:
+        return _reminder_result(
+            order,
+            status="skipped_already_reminded",
+            message="Already reminded",
+        ), None
+
+    if order.exclude_email:
+        return _reminder_result(
+            order,
+            status="skipped_excluded",
+            message="Excluded from email",
+        ), None
+
+    if not order.email or not str(order.email).strip():
+        return _reminder_result(
+            order,
+            status="skipped_missing_email",
+            message="Missing email",
+        ), None
+
+    location = db.query(Location).filter(
+        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
+    ).first()
+    address = location.address if location else ""
+
+    effective_price = float(order.total_price) / order.quantity if order.quantity else 0.0
+
+    event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
+    event_date = event.event_date if event else active_event_date
+    etransfer = {
+        "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
+        "email": event.etransfer_email if event else active_etransfer["email"],
+    }
+
+    order_data = {
+        "name": order.name,
+        "item_name": order.item_name,
+        "quantity": order.quantity,
+        "pickup_location": order.pickup_location,
+        "pickup_time_slot": order.pickup_time_slot,
+        "email": order.email,
+        "total_price": float(order.total_price),
+        "price_per_item": effective_price,
+        "currency": CURRENCY,
+        "address": address,
+        "event_date": event_date,
+        "etransfer_enabled": etransfer["enabled"],
+        "etransfer_email": etransfer["email"],
+    }
+
+    return None, order_data
+
+
+def _send_order_reminder(
+    order: Order,
+    db: Session,
+    *,
+    events_by_id: dict[int, Event],
+    active_event_date: str,
+    active_etransfer: dict,
+) -> dict:
+    skipped_result, order_data = _prepare_reminder_order_data(
+        order,
+        db,
+        events_by_id=events_by_id,
+        active_event_date=active_event_date,
+        active_etransfer=active_etransfer,
+    )
+    if skipped_result is not None:
+        return skipped_result
+
+    try:
+        send_reminder(order_data)
+    except Exception as exc:
+        print(f"[email] Failed to send reminder to {order.email}: {exc}")
+        return _reminder_result(
+            order,
+            status="failed",
+            message="Failed to send reminder",
+        )
+
+    order.reminded = True
+    return _reminder_result(
+        order,
+        status="sent",
+        message="Reminder sent",
+    )
+
+
 def _effective_item_price(item: Item) -> float:
     if item.discounted_price is not None:
         return float(item.discounted_price)
@@ -772,17 +952,7 @@ def admin_bulk_remind(
         else []
     )
     orders_by_id: dict[str, Order] = {o.id: o for o in orders}
-
-    event_ids = sorted({int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None})
-    events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
-    events_by_id: dict[int, Event] = {int(e.id): e for e in events}
-
-    active_event = db.query(Event).filter(Event.is_active == True).first()
-    active_event_date = active_event.event_date if active_event else ""
-    active_etransfer = {
-        "enabled": bool(active_event.etransfer_enabled) if active_event else False,
-        "email": active_event.etransfer_email if active_event else None,
-    }
+    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, orders)
 
     reminded_count = 0
     failed_emails = 0
@@ -794,60 +964,26 @@ def admin_bulk_remind(
         order = orders_by_id.get(order_id)
         if order is None:
             continue
-        if order.status != OrderStatus.CONFIRMED:
-            continue
-        if order.reminded:
-            skipped_already_reminded += 1
-            continue
-
-        if order.exclude_email:
-            skipped_excluded += 1
-            continue
-        if not order.email or not str(order.email).strip():
-            skipped_missing_email += 1
-            continue
-
-        location = db.query(Location).filter(
-            or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-        ).first()
-        address = location.address if location else ""
-
-        effective_price = float(order.total_price) / order.quantity if order.quantity else 0.0
-
-        event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
-        event_date = event.event_date if event else active_event_date
-        etransfer = {
-            "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
-            "email": event.etransfer_email if event else active_etransfer["email"],
-        }
-
-        order_data = {
-            "name": order.name,
-            "item_name": order.item_name,
-            "quantity": order.quantity,
-            "pickup_location": order.pickup_location,
-            "pickup_time_slot": order.pickup_time_slot,
-            "email": order.email,
-            "total_price": float(order.total_price),
-            "price_per_item": effective_price,
-            "currency": CURRENCY,
-            "address": address,
-            "event_date": event_date,
-            "etransfer_enabled": etransfer["enabled"],
-            "etransfer_email": etransfer["email"],
-        }
-
-        try:
-            send_reminder(order_data)
-        except Exception as exc:
+        result = _send_order_reminder(
+            order,
+            db,
+            events_by_id=events_by_id,
+            active_event_date=active_event_date,
+            active_etransfer=active_etransfer,
+        )
+        if result["status"] == "sent":
+            reminded_count += 1
+        elif result["status"] == "failed":
             failed_emails += 1
-            print(f"[email] Failed to send reminder to {order.email}: {exc}")
-            continue
+        elif result["status"] == "skipped_already_reminded":
+            skipped_already_reminded += 1
+        elif result["status"] == "skipped_excluded":
+            skipped_excluded += 1
+        elif result["status"] == "skipped_missing_email":
+            skipped_missing_email += 1
 
-        order.reminded = True
-        reminded_count += 1
-
-    db.commit()
+    if reminded_count > 0:
+        db.commit()
     return {
         "success": True,
         "reminded": reminded_count,
@@ -856,6 +992,29 @@ def admin_bulk_remind(
         "skipped_excluded": skipped_excluded,
         "skipped_missing_email": skipped_missing_email,
     }
+
+
+@router.post("/orders/{order_id}/remind")
+def admin_send_single_reminder(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, [order])
+    result = _send_order_reminder(
+        order,
+        db,
+        events_by_id=events_by_id,
+        active_event_date=active_event_date,
+        active_etransfer=active_etransfer,
+    )
+    if result["status"] == "sent":
+        db.commit()
+    return result
 
 
 @router.get("/orders/{order_id}")

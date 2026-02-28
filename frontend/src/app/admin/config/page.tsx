@@ -1,7 +1,8 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
@@ -27,6 +28,8 @@ interface EventItem {
   item_ids: string[];
   location_ids: string[];
   updated_at: string | null;
+  total_revenue?: number;
+  order_count?: number;
 }
 
 interface AdminItem {
@@ -280,7 +283,10 @@ function SelectorSection({
   );
 }
 
-export default function AdminEventsPage() {
+function AdminEventsPageInner() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [events, setEvents] = useState<EventItem[]>([]);
   const [allItems, setAllItems] = useState<AdminItem[]>([]);
   const [allLocations, setAllLocations] = useState<AdminLocation[]>([]);
@@ -292,6 +298,10 @@ export default function AdminEventsPage() {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [pendingToggle, setPendingToggle] = useState<{ eventId: number; eventName: string; willActivate: boolean } | null>(null);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [currentPage, setCurrentPage] = useState(1);
+  const PAGE_SIZE = 10;
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
@@ -325,22 +335,21 @@ export default function AdminEventsPage() {
     [heroSideImageOptions, form.hero_side_image_key]
   );
 
-  const imageLabelForKey = useCallback(
-    (key: string | null, type: EventImageType) => {
-      if (!key) return "None";
-      const image = imageCatalog.images.find((entry) => entry.key === key && entry.type === type);
-      return image ? image.label : key;
-    },
-    [imageCatalog.images]
-  );
+  const filteredEvents = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return q ? events.filter((e) => e.name.toLowerCase().includes(q)) : events;
+  }, [events, searchQuery]);
 
-  const resetSelectorState = () => {
+  const totalPages = Math.ceil(filteredEvents.length / PAGE_SIZE);
+  const pagedEvents = filteredEvents.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const resetSelectorState = useCallback(() => {
     setItemsOpen(false);
     setLocationsOpen(false);
     setItemsSearch("");
     setLocationsSearch("");
     setTooltipOpen(false);
-  };
+  }, []);
 
   const loadData = useCallback(async () => {
     const token = await getAdminToken();
@@ -376,35 +385,60 @@ export default function AdminEventsPage() {
       .finally(() => setLoading(false));
   }, [loadData]);
 
-  function openAdd() {
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery]);
+
+  useEffect(() => {
+    if (totalPages === 0) {
+      setCurrentPage(1);
+      return;
+    }
+    setCurrentPage((p) => (p > totalPages ? totalPages : p));
+  }, [totalPages]);
+
+  const openAdd = useCallback(() => {
     setEditingEvent(null);
     setForm({ ...EMPTY_FORM });
     resetSelectorState();
     setModalOpen(true);
-  }
+  }, [resetSelectorState]);
 
-  function openEdit(event: EventItem) {
-    setEditingEvent(event);
-    setForm({
-      name: event.name,
-      event_date: event.event_date,
-      hero_header: event.hero_header,
-      hero_header_sage: event.hero_header_sage ?? "",
-      hero_subheader: event.hero_subheader,
-      promo_details: event.promo_details ?? "",
-      tooltip_enabled: event.tooltip_enabled,
-      tooltip_header: event.tooltip_header ?? "",
-      tooltip_body: event.tooltip_body ?? "",
-      tooltip_image_key: event.tooltip_image_key,
-      hero_side_image_key: event.hero_side_image_key,
-      etransfer_enabled: event.etransfer_enabled,
-      etransfer_email: event.etransfer_email ?? "",
-      item_ids: [...event.item_ids],
-      location_ids: [...event.location_ids],
-    });
-    resetSelectorState();
-    setModalOpen(true);
-  }
+  const openEdit = useCallback(
+    (event: EventItem) => {
+      setEditingEvent(event);
+      setForm({
+        name: event.name,
+        event_date: event.event_date,
+        hero_header: event.hero_header,
+        hero_header_sage: event.hero_header_sage ?? "",
+        hero_subheader: event.hero_subheader,
+        promo_details: event.promo_details ?? "",
+        tooltip_enabled: event.tooltip_enabled,
+        tooltip_header: event.tooltip_header ?? "",
+        tooltip_body: event.tooltip_body ?? "",
+        tooltip_image_key: event.tooltip_image_key,
+        hero_side_image_key: event.hero_side_image_key,
+        etransfer_enabled: event.etransfer_enabled,
+        etransfer_email: event.etransfer_email ?? "",
+        item_ids: [...event.item_ids],
+        location_ids: [...event.location_ids],
+      });
+      resetSelectorState();
+      setModalOpen(true);
+    },
+    [resetSelectorState]
+  );
+
+  useEffect(() => {
+    if (events.length === 0) return;
+    const editId = searchParams.get("edit");
+    if (!editId) return;
+    const match = events.find((e) => String(e.id) === editId);
+    if (!match) return;
+    openEdit(match);
+    router.replace("/admin/config");
+  }, [events, searchParams, router, openEdit]);
 
   function toggleCheckbox(field: "item_ids" | "location_ids", id: string) {
     setForm((prev) => {
@@ -579,30 +613,43 @@ export default function AdminEventsPage() {
         </button>
       </div>
 
-      {events.length === 0 ? (
+      {/* Search */}
+      <div className="mb-4">
+        <input
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          placeholder="Search events by name..."
+          className="w-full sm:w-80 px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
+          style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
+        />
+      </div>
+
+      {filteredEvents.length === 0 ? (
         <div
           className="rounded-2xl p-12 text-center"
           style={{ background: "white", border: "1px solid var(--color-border)" }}
         >
           <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            No events yet. Create one to get started.
+            {events.length === 0 ? "No events yet. Create one to get started." : "No events match your search."}
           </p>
         </div>
       ) : (
-        <div className="space-y-4">
-          {events.map((event) => {
-            const eventItems = allItems.filter((i) => event.item_ids.includes(i.id));
-            const eventLocations = allLocations.filter((l) => event.location_ids.includes(l.id));
+        <div className="space-y-2">
+          {pagedEvents.map((event) => {
+            const rev = new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(event.total_revenue ?? 0);
             return (
               <div
                 key={event.id}
-                className="rounded-2xl p-6"
+                className="rounded-2xl cursor-pointer transition-all hover:shadow-sm"
                 style={{ background: "white", border: "1px solid var(--color-border)" }}
+                onClick={() => router.push(`/admin/events/${event.id}`)}
               >
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-1">
-                      <h2 className="text-base font-semibold truncate" style={{ color: "var(--color-forest)" }}>
+                <div className="px-5 py-4 flex items-center gap-4">
+                  {/* Name + badge + date stacked */}
+                  <div className="flex flex-col gap-0.5 flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <h2 className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>
                         {event.name}
                       </h2>
                       <span
@@ -616,75 +663,62 @@ export default function AdminEventsPage() {
                         {event.is_active ? "ACTIVE" : "INACTIVE"}
                       </span>
                     </div>
-                    <p className="text-sm mb-3" style={{ color: "var(--color-muted)" }}>{event.event_date}</p>
-                    <p className="text-xs mb-1" style={{ color: "var(--color-muted)" }}>
-                      Hero: {event.hero_header}
-                      {event.hero_header_sage ? ` / ${event.hero_header_sage}` : ""}
-                    </p>
-                    <p className="text-xs mb-2" style={{ color: "var(--color-muted)" }}>
-                      Tooltip: {event.tooltip_enabled ? "Enabled" : "Disabled"} | Tooltip image: {imageLabelForKey(event.tooltip_image_key, "tooltip")} | Side image: {imageLabelForKey(event.hero_side_image_key, "hero_side")} | E-transfer: {event.etransfer_enabled ? event.etransfer_email || "Enabled" : "Disabled"}
-                    </p>
-
-                    {eventItems.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5 mb-2">
-                        {eventItems.map((item) => (
-                          <span
-                            key={item.id}
-                            className="px-2.5 py-1 rounded-lg text-xs font-medium"
-                            style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-                          >
-                            {item.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                    {eventLocations.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {eventLocations.map((location) => (
-                          <span
-                            key={location.id}
-                            className="px-2.5 py-1 rounded-lg text-xs font-medium"
-                            style={{ background: "#f0fdf4", color: "#166534", border: "1px solid #bbf7d0" }}
-                          >
-                            {location.name}
-                          </span>
-                        ))}
-                      </div>
-                    )}
+                    <span className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      {event.event_date}
+                    </span>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0">
+                  {/* Revenue + Orders */}
+                  <div className="flex items-center gap-5 shrink-0">
+                    <div className="hidden md:flex items-center gap-2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="2" y="6" width="20" height="12" rx="2" />
+                        <circle cx="12" cy="12" r="2" />
+                        <path d="M6 12h.01M18 12h.01" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{rev}</p>
+                        <p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>revenue</p>
+                      </div>
+                    </div>
+                    <div className="hidden md:flex items-center gap-2">
+                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
+                        <line x1="3" y1="6" x2="21" y2="6" />
+                        <path d="M16 10a4 4 0 01-8 0" />
+                      </svg>
+                      <div>
+                        <p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{event.order_count ?? 0}</p>
+                        <p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>orders</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
-                      onClick={() => openEdit(event)}
+                      onClick={(e) => { e.stopPropagation(); openEdit(event); }}
                       className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
                       style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
-                      onMouseEnter={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "var(--color-cream)";
-                      }}
-                      onMouseLeave={(e) => {
-                        (e.currentTarget as HTMLButtonElement).style.background = "white";
-                      }}
+                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--color-cream)"; }}
+                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "white"; }}
                     >
                       Edit
                     </button>
                     {!event.is_active && (
                       <button
-                        onClick={() => handleDelete(event)}
+                        onClick={(e) => { e.stopPropagation(); handleDelete(event); }}
                         disabled={deleting === event.id}
                         className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all disabled:opacity-60"
                         style={{ background: "#fee2e2", color: "#991b1b" }}
-                        onMouseEnter={(e) => {
-                          if (deleting !== event.id) (e.currentTarget as HTMLButtonElement).style.background = "#fecaca";
-                        }}
-                        onMouseLeave={(e) => {
-                          (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2";
-                        }}
+                        onMouseEnter={(e) => { if (deleting !== event.id) (e.currentTarget as HTMLButtonElement).style.background = "#fecaca"; }}
+                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2"; }}
                       >
                         {deleting === event.id ? "..." : "Delete"}
                       </button>
                     )}
                     {/* Active toggle */}
-                    <div className="flex flex-col items-center gap-1">
+                    <div className="flex flex-col items-center gap-1" onClick={(e) => e.stopPropagation()}>
                       <button
                         role="switch"
                         aria-checked={event.is_active}
@@ -728,6 +762,31 @@ export default function AdminEventsPage() {
               </div>
             );
           })}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <button
+            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            disabled={currentPage === 1}
+            className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-40"
+            style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+          >
+            Prev
+          </button>
+          <span className="text-sm" style={{ color: "var(--color-muted)" }}>
+            Page {currentPage} of {totalPages}
+          </span>
+          <button
+            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            disabled={currentPage === totalPages}
+            className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-40"
+            style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+          >
+            Next
+          </button>
         </div>
       )}
 
@@ -1148,5 +1207,13 @@ export default function AdminEventsPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function AdminEventsPage() {
+  return (
+    <Suspense>
+      <AdminEventsPageInner />
+    </Suspense>
   );
 }
