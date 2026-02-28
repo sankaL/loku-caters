@@ -205,7 +205,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Nav */}
         <nav className="flex-1 px-2 py-4 space-y-1 overflow-hidden">
           {navItems.map((item) => {
-            const active = pathname.startsWith(item.href);
+            const active = pathname.startsWith(item.href) ||
+              (item.href === "/admin/config" && pathname.startsWith("/admin/events"));
             return (
               <Link
                 key={item.href}

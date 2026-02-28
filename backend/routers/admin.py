@@ -8,7 +8,7 @@ from functools import lru_cache
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, case
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -305,7 +305,7 @@ class FeedbackBulkStatusRequest(BaseModel):
 # Events CRUD
 # ---------------------------------------------------------------------------
 
-def _event_dict(event: Event) -> dict:
+def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 0) -> dict:
     return {
         "id": event.id,
         "name": event.name,
@@ -325,6 +325,8 @@ def _event_dict(event: Event) -> dict:
         "item_ids": event.item_ids or [],
         "location_ids": event.location_ids or [],
         "updated_at": event.updated_at.isoformat() if event.updated_at else None,
+        "total_revenue": total_revenue,
+        "order_count": order_count,
     }
 
 
@@ -347,8 +349,50 @@ def admin_list_events(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    events = db.query(Event).order_by(Event.id.desc()).all()
-    return [_event_dict(e) for e in events]
+    active_order = Order.status.notin_(["cancelled", "no_show"])
+    rows = (
+        db.query(
+            Event,
+            func.coalesce(
+                func.sum(
+                    case(
+                        (active_order, Order.total_price),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("total_revenue"),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (active_order, 1),
+                        else_=0,
+                    )
+                ),
+                0,
+            ).label("order_count"),
+        )
+        .outerjoin(Order, Order.event_id == Event.id)
+        .group_by(Event.id)
+        .order_by(Event.id.desc())
+        .all()
+    )
+    return [
+        _event_dict(event, total_revenue=float(rev), order_count=int(cnt))
+        for event, rev, cnt in rows
+    ]
+
+
+@router.get("/events/{event_id}")
+def admin_get_event(
+    event_id: int,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    event = db.query(Event).filter(Event.id == event_id).first()
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return _event_dict(event)
 
 
 @router.get("/events/{event_id}/config")
