@@ -14,6 +14,7 @@ import {
   computePaymentMethodBreakdown,
   computeItemsPerLocation,
   STATUS_STYLES,
+  type ItemsPerLocationRow,
 } from "@/lib/dashboardUtils";
 import RevenueRadialChart from "@/components/admin/dashboard/RevenueRadialChart";
 import LocationDonutChart from "@/components/admin/dashboard/LocationDonutChart";
@@ -139,6 +140,86 @@ function PaymentMethodCard({ orders }: { orders: Order[] }) {
   );
 }
 
+function LocationSection({ row, fmt }: { row: ItemsPerLocationRow; fmt: (n: number) => string }) {
+  const { location, items, paidRevenue, unpaidRevenue, byMethod } = row;
+  const totalRevenue = paidRevenue + unpaidRevenue;
+  const paidPct = totalRevenue > 0 ? Math.round((paidRevenue / totalRevenue) * 100) : 0;
+
+  return (
+    <div style={{ borderTop: "1px solid var(--color-border)", paddingTop: 16 }}>
+      <p style={{ fontSize: 13, fontWeight: 700, color: "var(--color-forest)", marginBottom: 12 }}>{location}</p>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+        {/* Left: items table */}
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Items</p>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead>
+              <tr>
+                <th style={{ textAlign: "left", fontSize: 11, color: "var(--color-muted)", fontWeight: 500, paddingBottom: 4 }}>Item</th>
+                <th style={{ textAlign: "right", fontSize: 11, color: "var(--color-muted)", fontWeight: 500, paddingBottom: 4 }}>Qty</th>
+                <th style={{ textAlign: "right", fontSize: 11, color: "var(--color-muted)", fontWeight: 500, paddingBottom: 4 }}>Revenue</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.map(({ itemName, quantity, revenue }) => (
+                <tr key={itemName} style={{ borderTop: "1px solid var(--color-border)" }}>
+                  <td style={{ fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{itemName}</td>
+                  <td style={{ textAlign: "right", fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{quantity}</td>
+                  <td style={{ textAlign: "right", fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{fmt(revenue)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Right: payment breakdown */}
+        <div>
+          <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: 6 }}>Payments</p>
+
+          {/* Paid vs unpaid bar */}
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+              <div style={{ display: "flex", gap: 12 }}>
+                <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--color-forest)", display: "inline-block" }} />
+                  <span style={{ color: "var(--color-text)", fontWeight: 600 }}>Paid</span>
+                  <span style={{ color: "var(--color-muted)" }}>{fmt(paidRevenue)}</span>
+                </span>
+                <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--color-border)", display: "inline-block" }} />
+                  <span style={{ color: "var(--color-text)", fontWeight: 600 }}>Unpaid</span>
+                  <span style={{ color: "var(--color-muted)" }}>{fmt(unpaidRevenue)}</span>
+                </span>
+              </div>
+              <span style={{ fontSize: 11, color: "var(--color-muted)" }}>{paidPct}%</span>
+            </div>
+            <div style={{ height: 8, background: "var(--color-cream)", borderRadius: 4, overflow: "hidden" }}>
+              <div style={{ height: "100%", width: `${paidPct}%`, background: "var(--color-forest)", borderRadius: 4, transition: "width 0.4s" }} />
+            </div>
+          </div>
+
+          {/* Per-method breakdown */}
+          {byMethod.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <p style={{ fontSize: 11, color: "var(--color-muted)", marginBottom: 2 }}>Paid by method</p>
+              {byMethod.map(({ label, revenue, count }) => (
+                <div key={label} style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: 12, color: "var(--color-text)" }}>
+                    {label}
+                    <span style={{ color: "var(--color-muted)", marginLeft: 4 }}>({count})</span>
+                  </span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-forest)" }}>{fmt(revenue)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function ItemsPerLocationCard({ orders }: { orders: Order[] }) {
   const data = useMemo(() => computeItemsPerLocation(orders), [orders]);
   const fmt = (n: number) => new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(n);
@@ -147,29 +228,9 @@ function ItemsPerLocationCard({ orders }: { orders: Order[] }) {
       {data.length === 0 ? (
         <p style={{ color: "var(--color-muted)", fontSize: 13 }}>No orders yet.</p>
       ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {data.map(({ location, items }) => (
-            <div key={location}>
-              <p style={{ fontSize: 12, fontWeight: 700, color: "var(--color-forest)", marginBottom: 6 }}>{location}</p>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "left", fontSize: 11, color: "var(--color-muted)", fontWeight: 500, paddingBottom: 4 }}>Item</th>
-                    <th style={{ textAlign: "right", fontSize: 11, color: "var(--color-muted)", fontWeight: 500, paddingBottom: 4 }}>Qty</th>
-                    <th style={{ textAlign: "right", fontSize: 11, color: "var(--color-muted)", fontWeight: 500, paddingBottom: 4 }}>Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {items.map(({ itemName, quantity, revenue }) => (
-                    <tr key={itemName} style={{ borderTop: "1px solid var(--color-border)" }}>
-                      <td style={{ fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{itemName}</td>
-                      <td style={{ textAlign: "right", fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{quantity}</td>
-                      <td style={{ textAlign: "right", fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{fmt(revenue)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+          {data.map((row) => (
+            <LocationSection key={row.location} row={row} fmt={fmt} />
           ))}
         </div>
       )}
