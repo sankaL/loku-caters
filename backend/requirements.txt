@@ -6,6 +6,7 @@ pg8000==1.31.2
 pydantic[email]==2.10.3
 pydantic-settings==2.7.0
 resend==2.4.0
+svix==1.86.0
 python-dotenv==1.0.1
 python-multipart==0.0.20
 python-jose[cryptography]==3.3.0

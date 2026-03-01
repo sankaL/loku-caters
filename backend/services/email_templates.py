@@ -1,13 +1,34 @@
-import resend
-from config import settings
+from __future__ import annotations
+
+from typing import TypedDict, NotRequired
+
 from event_config import CURRENCY
 
-resend.api_key = settings.resend_api_key
+
+class RenderedEmail(TypedDict):
+    subject: str
+    html: str
 
 
-def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -> str:
-    etransfer_enabled = bool(order_data.get("etransfer_enabled"))
-    etransfer_email = str(order_data.get("etransfer_email") or "").strip()
+class OrderEmailContext(TypedDict):
+    name: str
+    item_name: str
+    quantity: int
+    pickup_location: str
+    pickup_time_slot: str
+    total_price: float
+    price_per_item: float
+    currency: NotRequired[str]
+    email: str
+    address: NotRequired[str]
+    event_date: NotRequired[str]
+    etransfer_enabled: NotRequired[bool]
+    etransfer_email: NotRequired[str | None]
+
+
+def _build_etransfer_section_html(context: OrderEmailContext, *, reminder: bool = False) -> str:
+    etransfer_enabled = bool(context.get("etransfer_enabled"))
+    etransfer_email = str(context.get("etransfer_email") or "").strip()
     if not etransfer_enabled or not etransfer_email:
         return ""
 
@@ -38,23 +59,18 @@ def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -
 """
 
 
-def send_confirmation(order_data: dict) -> None:
-    if not settings.email_enabled:
-        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
-        return
-
-    name = order_data["name"]
-    item_name = order_data["item_name"]
-    quantity = order_data["quantity"]
-    pickup_location = order_data["pickup_location"]
-    pickup_time_slot = order_data["pickup_time_slot"]
-    total_price = order_data["total_price"]
-    price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency") or CURRENCY
-    email = order_data["email"]
-    address = order_data.get("address", "")
-    event_date = order_data.get("event_date", "")
-    etransfer_section_html = _build_etransfer_section_html(order_data)
+def render_order_confirmation_email(context: OrderEmailContext) -> RenderedEmail:
+    name = context["name"]
+    item_name = context["item_name"]
+    quantity = context["quantity"]
+    pickup_location = context["pickup_location"]
+    pickup_time_slot = context["pickup_time_slot"]
+    total_price = context["total_price"]
+    price_per_item = context["price_per_item"]
+    currency = context.get("currency") or CURRENCY
+    address = context.get("address", "") or ""
+    event_date = context.get("event_date", "") or ""
+    etransfer_section_html = _build_etransfer_section_html(context)
 
     location_display = pickup_location
     if address:
@@ -74,7 +90,6 @@ def send_confirmation(order_data: dict) -> None:
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(18,39,15,0.08);">
 
-          <!-- Header -->
           <tr>
             <td style="background:#12270F;padding:36px 40px;text-align:center;">
               <p style="margin:0;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#729152;font-weight:600;">Loku Caters</p>
@@ -82,7 +97,6 @@ def send_confirmation(order_data: dict) -> None:
             </td>
           </tr>
 
-          <!-- Body -->
           <tr>
             <td style="padding:40px;">
               <p style="margin:0 0 8px;font-size:16px;color:#1C1C1A;">Hi <strong>{name}</strong>,</p>
@@ -91,7 +105,6 @@ def send_confirmation(order_data: dict) -> None:
                 Please see your order details and pickup information below.
               </p>
 
-              <!-- Order Summary -->
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-radius:12px;overflow:hidden;margin-bottom:28px;">
                 <tr>
                   <td style="padding:20px 24px;border-bottom:1px solid #e8e4dc;">
@@ -141,7 +154,6 @@ def send_confirmation(order_data: dict) -> None:
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
             <td style="background:#12270F;padding:24px 40px;text-align:center;">
               <p style="margin:0;font-size:13px;color:#729152;">2026 Loku Caters - Authentic Sri Lankan Cuisine</p>
@@ -156,36 +168,24 @@ def send_confirmation(order_data: dict) -> None:
 </html>
 """
 
-    message_payload = {
-        "from": f"Loku Caters <{settings.from_email}>",
-        "to": [email],
+    return {
         "subject": f"Your {item_name} Pre-Order is Confirmed",
         "html": html_body,
     }
 
-    if settings.reply_to_email:
-        message_payload["reply_to"] = settings.reply_to_email
 
-    resend.Emails.send(message_payload)
-
-
-def send_reminder(order_data: dict) -> None:
-    if not settings.email_enabled:
-        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
-        return
-
-    name = order_data["name"]
-    item_name = order_data["item_name"]
-    quantity = order_data["quantity"]
-    pickup_location = order_data["pickup_location"]
-    pickup_time_slot = order_data["pickup_time_slot"]
-    total_price = order_data["total_price"]
-    price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency") or CURRENCY
-    email = order_data["email"]
-    address = order_data.get("address", "")
-    event_date = order_data.get("event_date", "")
-    etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
+def render_pickup_reminder_email(context: OrderEmailContext) -> RenderedEmail:
+    name = context["name"]
+    item_name = context["item_name"]
+    quantity = context["quantity"]
+    pickup_location = context["pickup_location"]
+    pickup_time_slot = context["pickup_time_slot"]
+    total_price = context["total_price"]
+    price_per_item = context["price_per_item"]
+    currency = context.get("currency") or CURRENCY
+    address = context.get("address", "") or ""
+    event_date = context.get("event_date", "") or ""
+    etransfer_section_html = _build_etransfer_section_html(context, reminder=True)
 
     location_display = pickup_location
     if address:
@@ -205,7 +205,6 @@ def send_reminder(order_data: dict) -> None:
       <td align="center">
         <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(18,39,15,0.08);">
 
-          <!-- Header -->
           <tr>
             <td style="background:#12270F;padding:36px 40px;text-align:center;">
               <p style="margin:0;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#729152;font-weight:600;">Loku Caters</p>
@@ -213,7 +212,6 @@ def send_reminder(order_data: dict) -> None:
             </td>
           </tr>
 
-          <!-- Body -->
           <tr>
             <td style="padding:40px;">
               <p style="margin:0 0 8px;font-size:16px;color:#1C1C1A;">Hi <strong>{name}</strong>,</p>
@@ -222,7 +220,6 @@ def send_reminder(order_data: dict) -> None:
                 at <strong>{location_display}</strong> during your selected time slot. We look forward to seeing you soon!
               </p>
 
-              <!-- Order Summary -->
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-radius:12px;overflow:hidden;margin-bottom:28px;">
                 <tr>
                   <td style="padding:20px 24px;border-bottom:1px solid #e8e4dc;">
@@ -272,7 +269,6 @@ def send_reminder(order_data: dict) -> None:
             </td>
           </tr>
 
-          <!-- Footer -->
           <tr>
             <td style="background:#12270F;padding:24px 40px;text-align:center;">
               <p style="margin:0;font-size:13px;color:#729152;">2026 Loku Caters - Authentic Sri Lankan Cuisine</p>
@@ -287,14 +283,8 @@ def send_reminder(order_data: dict) -> None:
 </html>
 """
 
-    message_payload = {
-        "from": f"Loku Caters <{settings.from_email}>",
-        "to": [email],
+    return {
         "subject": f"Pickup Reminder - Your {item_name} Order",
         "html": html_body,
     }
 
-    if settings.reply_to_email:
-        message_payload["reply_to"] = settings.reply_to_email
-
-    resend.Emails.send(message_payload)
