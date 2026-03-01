@@ -247,7 +247,7 @@ export default function OrdersAreaChart({
             {topItems.map((item, i) => (
               <Area
                 key={item.itemId}
-                type="natural"
+                type="monotone"
                 dataKey={item.itemId}
                 stackId="a"
                 stroke={AREA_COLORS[i]}
@@ -258,7 +258,7 @@ export default function OrdersAreaChart({
 
             {hasOther && (
               <Area
-                type="natural"
+                type="monotone"
                 dataKey="__other__"
                 stackId="a"
                 stroke={AREA_COLORS[5]}
