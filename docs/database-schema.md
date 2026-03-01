@@ -26,7 +26,7 @@ App tables live in the `public` schema but are not intended to be accessed via S
 | `exclude_email` | `BOOLEAN` | NOT NULL, default `false` | When true, admin actions will not send confirmation/reminder emails |
 | `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from items table price |
 | `status` | `TEXT` | default `'pending'` | See valid values below |
-| `reminded` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether a pickup reminder email has been sent; independent of order status |
+| `reminded` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether a pickup reminder email has been queued; independent of order status |
 | `paid` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether payment has been recorded; independent of order status |
 | `payment_method` | `TEXT` | NULLABLE | Required when `paid = true`; one of `cash`, `etransfer`, `other` |
 | `payment_method_other` | `TEXT` | NULLABLE | Required when `payment_method = 'other'`; cleared when `paid = false` |
@@ -160,6 +160,77 @@ Stores visitor feedback from users who cannot participate in the current batch. 
 
 ---
 
+## Email queue tables
+
+All outbound email is sent asynchronously via a DB-backed queue. The API enqueues jobs; a separate worker process sends via Resend at a global rate limit.
+
+### Table: `email_batches`
+
+Groups a bulk enqueue action so the admin UI can poll progress.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `kind` | `TEXT` | NOT NULL | e.g. `pickup_reminder_bulk` |
+| `created_by` | `TEXT` | nullable | Optional admin identifier |
+| `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+| `meta` | `JSONB` | NOT NULL, default `'{}'` | Optional debugging metadata |
+
+### Table: `email_jobs`
+
+Outbox queue for all email types.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `batch_id` | `TEXT` | nullable | Groups jobs under `email_batches.id` |
+| `type` | `TEXT` | NOT NULL | e.g. `order_confirmation`, `pickup_reminder` |
+| `status` | `TEXT` | NOT NULL | `queued`, `sending`, `sent`, `failed`, `suppressed`, `cancelled` |
+| `dedupe_key` | `TEXT` | UNIQUE | Idempotency key, e.g. `pickup_reminder:ORDER_ID` |
+| `order_id` | `TEXT` | nullable | References `orders.id` (no FK) |
+| `to_email` | `TEXT` | nullable | Destination email; may be null when suppressed |
+| `from_email` | `TEXT` | NOT NULL | Resend sender |
+| `reply_to_email` | `TEXT` | nullable | Optional reply-to |
+| `subject` | `TEXT` | nullable | Filled at send time for reporting |
+| `payload` | `JSONB` | NOT NULL, default `'{}'` | Template context snapshot |
+| `resend_message_id` | `TEXT` | nullable | Resend email id |
+| `attempt_count` | `INTEGER` | NOT NULL, default `0` | Incremented per send attempt |
+| `max_attempts` | `INTEGER` | NOT NULL, default `8` | Per-job cap |
+| `next_attempt_at` | `TIMESTAMPTZ` | default `NOW()` | When the worker may attempt again |
+| `locked_until` | `TIMESTAMPTZ` | nullable | Lease for crash-safe processing |
+| `locked_by` | `TEXT` | nullable | Worker identifier holding the lease |
+| `last_error` | `TEXT` | nullable | Last error string |
+| `sent_at` | `TIMESTAMPTZ` | nullable | UTC |
+| `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+| `updated_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+
+### Table: `email_events`
+
+Stores Resend webhook events and an audit trail of delivery state.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `job_id` | `TEXT` | nullable | References `email_jobs.id` (no FK) |
+| `resend_message_id` | `TEXT` | nullable | Used to map webhook events to jobs |
+| `event_type` | `TEXT` | NOT NULL | e.g. `delivered`, `bounced`, `complained` |
+| `payload` | `JSONB` | NOT NULL, default `'{}'` | Raw webhook payload |
+| `received_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+
+### Table: `email_suppressions`
+
+Prevent future sends to addresses that bounced or complained.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `email` | `TEXT` | Primary key | Lowercased at write time |
+| `reason` | `TEXT` | NOT NULL | `bounce`, `complaint`, or `manual` |
+| `source` | `TEXT` | NOT NULL | e.g. `resend_webhook` |
+| `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+| `meta` | `JSONB` | NOT NULL, default `'{}'` | Optional context |
+
+---
+
 ## Applying migrations
 
 Migrations live in `backend/alembic/versions/`. To apply all pending migrations:
@@ -188,11 +259,17 @@ alembic upgrade head
 | `0015_feedback_status_comment` | adds `status` (VARCHAR, default `'new'`) and `admin_comment` (TEXT, nullable) to `feedback` |
 | `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true, payment_method='etransfer', payment_method_other=NULL` |
 | `0017_phone_optional` | updates `ck_orders_contact_required_unless_excluded` constraint to only require `email` (not `phone_number`) when `exclude_email` is false |
+| `0018_email_queue` | adds `email_batches`, `email_jobs`, `email_events`, and `email_suppressions` for queued email delivery |
 
 ---
 
 ## Relationships
 
-**Four-table design** with no foreign keys between them.
+Core ordering tables (`orders`, `items`, `locations`, `events`) intentionally avoid foreign keys between them.
+
+Email queue tables do use foreign keys:
+
+- `email_jobs.batch_id` -> `email_batches.id`
+- `email_events.job_id` -> `email_jobs.id`
 
 `orders` captures item and location data as denormalised strings at order time so records remain accurate even if the config changes later. Each order is also tied to an `event_id` so admin views and emails can reference the correct event even after the active event changes. `items` and `locations` are the live source of truth for the full catalog. `events` holds one or more events, each referencing a subset of items and locations by ID; only the `is_active = true` event is shown on the public order page.

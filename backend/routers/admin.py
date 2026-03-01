@@ -15,17 +15,29 @@ from config import settings
 from constants import OrderStatus
 from database import get_db
 from event_config import (
-    CURRENCY,
     EventNotFoundError,
     get_config_for_event_id_from_db,
 )
 from event_images import get_event_image_catalog, validate_event_image_key
-from models import Event, Feedback, Item, Location, Order
+from models import Event, Feedback, Item, Location, Order, EmailBatch
 from schemas import (
     EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
     FEEDBACK_STATUSES, FeedbackStatusUpdate, FeedbackCommentUpdate,
 )
-from services.email import send_confirmation, send_reminder
+from models import EmailJob
+from services.email_queue import (
+    create_email_batch,
+    enqueue_order_confirmation_result,
+    enqueue_pickup_reminder_result,
+    EMAIL_STATUS_CANCELLED,
+    EMAIL_STATUS_FAILED,
+    EMAIL_STATUS_QUEUED,
+    EMAIL_STATUS_SENT,
+    EMAIL_STATUS_SENDING,
+    EMAIL_STATUS_SUPPRESSED,
+    EMAIL_TYPE_ORDER_CONFIRMATION,
+    EMAIL_TYPE_PICKUP_REMINDER,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -705,142 +717,6 @@ def _order_dict(order: Order) -> dict:
     }
 
 
-def _get_reminder_context(db: Session, orders: list[Order]) -> tuple[dict[int, Event], str, dict]:
-    event_ids = sorted({int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None})
-    events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
-    events_by_id: dict[int, Event] = {int(event.id): event for event in events}
-
-    active_event = db.query(Event).filter(Event.is_active == True).first()
-    active_event_date = active_event.event_date if active_event else ""
-    active_etransfer = {
-        "enabled": bool(active_event.etransfer_enabled) if active_event else False,
-        "email": active_event.etransfer_email if active_event else None,
-    }
-
-    return events_by_id, active_event_date, active_etransfer
-
-
-def _reminder_result(order: Order, *, status: str, message: str) -> dict:
-    email = None
-    if order.email and str(order.email).strip():
-        email = str(order.email).strip()
-
-    return {
-        "success": True,
-        "order_id": order.id,
-        "status": status,
-        "message": message,
-        "email": email,
-        "name": order.name,
-        "reminded": bool(order.reminded),
-    }
-
-
-def _prepare_reminder_order_data(
-    order: Order,
-    db: Session,
-    *,
-    events_by_id: dict[int, Event],
-    active_event_date: str,
-    active_etransfer: dict,
-) -> tuple[Optional[dict], Optional[dict]]:
-    if order.status != OrderStatus.CONFIRMED:
-        return _reminder_result(
-            order,
-            status="skipped_not_confirmed",
-            message="Only confirmed orders can be reminded",
-        ), None
-
-    if order.reminded:
-        return _reminder_result(
-            order,
-            status="skipped_already_reminded",
-            message="Already reminded",
-        ), None
-
-    if order.exclude_email:
-        return _reminder_result(
-            order,
-            status="skipped_excluded",
-            message="Excluded from email",
-        ), None
-
-    if not order.email or not str(order.email).strip():
-        return _reminder_result(
-            order,
-            status="skipped_missing_email",
-            message="Missing email",
-        ), None
-
-    location = db.query(Location).filter(
-        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-    ).first()
-    address = location.address if location else ""
-
-    effective_price = float(order.total_price) / order.quantity if order.quantity else 0.0
-
-    event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
-    event_date = event.event_date if event else active_event_date
-    etransfer = {
-        "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
-        "email": event.etransfer_email if event else active_etransfer["email"],
-    }
-
-    order_data = {
-        "name": order.name,
-        "item_name": order.item_name,
-        "quantity": order.quantity,
-        "pickup_location": order.pickup_location,
-        "pickup_time_slot": order.pickup_time_slot,
-        "email": order.email,
-        "total_price": float(order.total_price),
-        "price_per_item": effective_price,
-        "currency": CURRENCY,
-        "address": address,
-        "event_date": event_date,
-        "etransfer_enabled": etransfer["enabled"],
-        "etransfer_email": etransfer["email"],
-    }
-
-    return None, order_data
-
-
-def _send_order_reminder(
-    order: Order,
-    db: Session,
-    *,
-    events_by_id: dict[int, Event],
-    active_event_date: str,
-    active_etransfer: dict,
-) -> dict:
-    skipped_result, order_data = _prepare_reminder_order_data(
-        order,
-        db,
-        events_by_id=events_by_id,
-        active_event_date=active_event_date,
-        active_etransfer=active_etransfer,
-    )
-    if skipped_result is not None:
-        return skipped_result
-
-    try:
-        send_reminder(order_data)
-    except Exception as exc:
-        print(f"[email] Failed to send reminder to {order.email}: {exc}")
-        return _reminder_result(
-            order,
-            status="failed",
-            message="Failed to send reminder",
-        )
-
-    order.reminded = True
-    return _reminder_result(
-        order,
-        status="sent",
-        message="Reminder sent",
-    )
-
-
 def _effective_item_price(item: Item) -> float:
     if item.discounted_price is not None:
         return float(item.discounted_price)
@@ -937,60 +813,117 @@ def admin_list_orders(
     return [_order_dict(o) for o in orders]
 
 
+@router.get("/orders/email-status-summary")
+def admin_order_email_status_summary(
+    order_ids: list[str] = Query(default=[]),
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    if not order_ids:
+        return {"statuses": {}}
+
+    unique_ids = list(dict.fromkeys(order_ids))[:100]
+
+    jobs = (
+        db.query(EmailJob)
+        .filter(EmailJob.order_id.in_(unique_ids))
+        .order_by(EmailJob.order_id, EmailJob.email_type, EmailJob.created_at.desc())
+        .all()
+    )
+
+    # Keep only the latest job per (order_id, type)
+    by_order: dict[str, dict] = {}
+    seen: set[tuple] = set()
+
+    for job in jobs:
+        key = (job.order_id, job.email_type)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        if job.order_id not in by_order:
+            by_order[job.order_id] = {"confirmation": None, "reminder": None}
+
+        job_info: dict = {"job_id": job.id, "status": job.status}
+        if job.sent_at:
+            job_info["sent_at"] = job.sent_at.isoformat()
+
+        if job.email_type == EMAIL_TYPE_ORDER_CONFIRMATION:
+            by_order[job.order_id]["confirmation"] = job_info
+        elif job.email_type == EMAIL_TYPE_PICKUP_REMINDER:
+            by_order[job.order_id]["reminder"] = job_info
+
+    statuses = {
+        oid: by_order.get(oid, {"confirmation": None, "reminder": None})
+        for oid in unique_ids
+    }
+    return {"statuses": statuses}
+
+
 @router.post("/orders/remind")
 def admin_bulk_remind(
     body: BulkRemindRequest,
     db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
+    claims: dict = Depends(verify_admin_token),
 ):
     requested_ids = body.order_ids or []
     unique_ids = list(dict.fromkeys(requested_ids))
 
-    orders = (
-        db.query(Order).filter(Order.id.in_(unique_ids)).all()
-        if unique_ids
-        else []
+    batch = create_email_batch(
+        db,
+        kind="pickup_reminder_bulk",
+        created_by=str(claims.get("email") or claims.get("sub") or ""),
+        meta={"requested_order_ids": unique_ids},
     )
-    orders_by_id: dict[str, Order] = {o.id: o for o in orders}
-    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, orders)
 
-    reminded_count = 0
-    failed_emails = 0
-    skipped_already_reminded = 0
-    skipped_excluded = 0
-    skipped_missing_email = 0
+    queued = 0
+    failed_to_queue = 0
+    skipped = {
+        "already_reminded": 0,
+        "excluded": 0,
+        "missing_email": 0,
+        "not_confirmed": 0,
+        "suppressed": 0,
+        "already_queued": 0,
+    }
+    items: list[dict] = []
 
     for order_id in unique_ids:
-        order = orders_by_id.get(order_id)
-        if order is None:
-            continue
-        result = _send_order_reminder(
-            order,
-            db,
-            events_by_id=events_by_id,
-            active_event_date=active_event_date,
-            active_etransfer=active_etransfer,
+        result = enqueue_pickup_reminder_result(db, order_id, batch_id=batch.id)
+        job_id = result.job.id if result.job is not None else None
+        items.append(
+            {
+                "order_id": order_id,
+                "job_id": job_id,
+                "status": result.status,
+                "message": result.message,
+            }
         )
-        if result["status"] == "sent":
-            reminded_count += 1
-        elif result["status"] == "failed":
-            failed_emails += 1
-        elif result["status"] == "skipped_already_reminded":
-            skipped_already_reminded += 1
-        elif result["status"] == "skipped_excluded":
-            skipped_excluded += 1
-        elif result["status"] == "skipped_missing_email":
-            skipped_missing_email += 1
 
-    if reminded_count > 0:
-        db.commit()
+        if result.status == "queued":
+            queued += 1
+        elif result.status == "already_queued":
+            skipped["already_queued"] += 1
+        elif result.status == "suppressed":
+            skipped["suppressed"] += 1
+        elif result.status == "skipped_already_reminded":
+            skipped["already_reminded"] += 1
+        elif result.status == "skipped_excluded":
+            skipped["excluded"] += 1
+        elif result.status == "skipped_missing_email":
+            skipped["missing_email"] += 1
+        elif result.status == "skipped_not_confirmed":
+            skipped["not_confirmed"] += 1
+        else:
+            failed_to_queue += 1
+
     return {
         "success": True,
-        "reminded": reminded_count,
-        "failed_emails": failed_emails,
-        "skipped_already_reminded": skipped_already_reminded,
-        "skipped_excluded": skipped_excluded,
-        "skipped_missing_email": skipped_missing_email,
+        "batch_id": batch.id,
+        "queued": queued,
+        "skipped": skipped,
+        "failed_to_queue": failed_to_queue,
+        "items": items,
     }
 
 
@@ -1000,21 +933,138 @@ def admin_send_single_reminder(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    order = db.query(Order).filter(Order.id == order_id).first()
-    if order is None:
-        raise HTTPException(status_code=404, detail="Order not found")
+    result = enqueue_pickup_reminder_result(db, order_id)
+    job_id = result.job.id if result.job is not None else None
 
-    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, [order])
-    result = _send_order_reminder(
-        order,
-        db,
-        events_by_id=events_by_id,
-        active_event_date=active_event_date,
-        active_etransfer=active_etransfer,
-    )
-    if result["status"] == "sent":
-        db.commit()
-    return result
+    status = result.status
+    if status == "already_queued":
+        status = "queued"
+
+    return {
+        "order_id": order_id,
+        "status": status,
+        "job_id": job_id,
+        "message": result.message,
+    }
+
+
+def _email_job_dict(job: EmailJob) -> dict:
+    payload = job.payload or {}
+    pickup_location = str(payload.get("pickup_location") or "").strip()
+    pickup_time_slot = str(payload.get("pickup_time_slot") or "").strip()
+    pickup_label = ""
+    if pickup_location and pickup_time_slot:
+        pickup_label = f"{pickup_location} - {pickup_time_slot}"
+
+    return {
+        "id": job.id,
+        "batch_id": job.batch_id,
+        "order_id": job.order_id,
+        "type": job.email_type,
+        "status": job.status,
+        "to_email": job.to_email,
+        "subject": job.subject,
+        "attempt_count": job.attempt_count,
+        "max_attempts": job.max_attempts,
+        "next_attempt_at": job.next_attempt_at.isoformat() if job.next_attempt_at else None,
+        "locked_until": job.locked_until.isoformat() if job.locked_until else None,
+        "locked_by": job.locked_by,
+        "last_error": job.last_error,
+        "resend_message_id": job.resend_message_id,
+        "sent_at": job.sent_at.isoformat() if job.sent_at else None,
+        "updated_at": job.updated_at.isoformat() if job.updated_at else None,
+        "name": payload.get("name"),
+        "pickup_label": pickup_label,
+    }
+
+
+@router.get("/email-batches/{batch_id}")
+def admin_get_email_batch(
+    batch_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    batch = db.query(EmailBatch).filter(EmailBatch.id == batch_id).first()
+    if batch is None:
+        raise HTTPException(status_code=404, detail="Batch not found")
+
+    jobs = db.query(EmailJob).filter(EmailJob.batch_id == batch_id).order_by(EmailJob.created_at.asc()).all()
+
+    counts = {
+        EMAIL_STATUS_QUEUED: 0,
+        EMAIL_STATUS_SENDING: 0,
+        EMAIL_STATUS_SENT: 0,
+        EMAIL_STATUS_FAILED: 0,
+        EMAIL_STATUS_SUPPRESSED: 0,
+        EMAIL_STATUS_CANCELLED: 0,
+    }
+    for job in jobs:
+        if job.status in counts:
+            counts[job.status] += 1
+
+    terminal = {EMAIL_STATUS_SENT, EMAIL_STATUS_FAILED, EMAIL_STATUS_SUPPRESSED, EMAIL_STATUS_CANCELLED}
+    all_terminal = all(job.status in terminal for job in jobs)
+    if not jobs:
+        all_terminal = True
+
+    return {
+        "success": True,
+        "batch_id": batch_id,
+        "counts": counts,
+        "is_complete": all_terminal,
+        "jobs": [_email_job_dict(j) for j in jobs],
+    }
+
+
+@router.post("/email-jobs/{job_id}/retry")
+def admin_retry_email_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    job = db.query(EmailJob).filter(EmailJob.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Email job not found")
+    if job.status != EMAIL_STATUS_FAILED:
+        raise HTTPException(status_code=409, detail="Only failed jobs can be retried")
+
+    now = datetime.now(timezone.utc)
+    job.status = EMAIL_STATUS_QUEUED
+    job.next_attempt_at = now
+    job.locked_by = None
+    job.locked_until = None
+    job.updated_at = now
+    db.commit()
+    db.refresh(job)
+    return {"success": True, "job": _email_job_dict(job)}
+
+
+@router.post("/email-jobs/{job_id}/cancel")
+def admin_cancel_email_job(
+    job_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    job = db.query(EmailJob).filter(EmailJob.id == job_id).first()
+    if job is None:
+        raise HTTPException(status_code=404, detail="Email job not found")
+    if job.status != EMAIL_STATUS_QUEUED:
+        raise HTTPException(status_code=409, detail="Only queued jobs can be cancelled")
+
+    now = datetime.now(timezone.utc)
+    job.status = EMAIL_STATUS_CANCELLED
+    job.locked_by = None
+    job.locked_until = None
+    job.updated_at = now
+
+    if job.email_type == EMAIL_TYPE_PICKUP_REMINDER and job.order_id:
+        order = db.query(Order).filter(Order.id == job.order_id).first()
+        if order is not None:
+            order.reminded = False
+
+    db.commit()
+    db.refresh(job)
+    return {"success": True, "job": _email_job_dict(job)}
 
 
 @router.get("/orders/{order_id}")
@@ -1104,7 +1154,6 @@ def admin_confirm_order(
     if order.status != OrderStatus.PENDING:
         raise HTTPException(status_code=409, detail="Only pending orders can be confirmed")
 
-    email_sent = False
     email_suppressed = bool(order.exclude_email)
 
     if not email_suppressed:
@@ -1114,56 +1163,32 @@ def admin_confirm_order(
                 detail="Order email is missing. Set exclude_email=true to confirm without email.",
             )
 
-        event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
-        if event is None:
-            event = db.query(Event).filter(Event.is_active == True).first()
-        event_date = event.event_date if event else ""
-        etransfer = {
-            "enabled": bool(event.etransfer_enabled) if event else False,
-            "email": event.etransfer_email if event else None,
-        }
-
-        location = db.query(Location).filter(
-            or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-        ).first()
-        address = location.address if location else ""
-
-        effective_price = float(order.total_price) / order.quantity
-
-        order_data = {
-            "name": order.name,
-            "item_id": order.item_id,
-            "item_name": order.item_name,
-            "quantity": order.quantity,
-            "pickup_location": order.pickup_location,
-            "pickup_time_slot": order.pickup_time_slot,
-            "phone_number": order.phone_number,
-            "email": order.email,
-            "total_price": float(order.total_price),
-            "price_per_item": effective_price,
-            "currency": CURRENCY,
-            "address": address,
-            "event_date": event_date,
-            "etransfer_enabled": etransfer["enabled"],
-            "etransfer_email": etransfer["email"],
-        }
-
-        email_sent = True
-        try:
-            send_confirmation(order_data)
-        except Exception as exc:
-            email_sent = False
-            print(f"[email] Failed to send confirmation to {order.email}: {exc}")
-
     order.status = OrderStatus.CONFIRMED
     db.commit()
+
+    email_job_id: Optional[str] = None
+    email_queued = False
+    email_status = "failed_to_queue"
+
+    result = enqueue_order_confirmation_result(db, order_id)
+    if result.job is not None:
+        email_job_id = result.job.id
+
+    if result.status in {"queued", "already_queued", "already_sent"}:
+        email_queued = True
+        email_status = "queued"
+    elif result.status == "suppressed":
+        email_status = "suppressed"
 
     return {
         "success": True,
         "order_id": order_id,
         "status": order.status,
-        "email_sent": email_sent,
+        "email_sent": False,
         "email_suppressed": email_suppressed,
+        "email_queued": email_queued,
+        "email_job_id": email_job_id,
+        "email_status": email_status,
     }
 
 

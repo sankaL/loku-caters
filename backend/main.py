@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from routers import admin, config, feedback, orders
+from routers import admin, config, feedback, orders, webhooks_resend
 
 app = FastAPI(title="Loku Caters API", version="2.0.0")
 
@@ -20,6 +20,7 @@ app.include_router(orders.router)
 app.include_router(config.router)
 app.include_router(admin.router)
 app.include_router(feedback.router)
+app.include_router(webhooks_resend.router)
 
 
 @app.get("/api/health")

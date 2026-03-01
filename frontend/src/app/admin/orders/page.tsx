@@ -182,40 +182,24 @@ interface BulkRow {
   _error?: string;
 }
 
-type ReminderApiStatus =
-  | "sent"
-  | "failed"
-  | "skipped_not_confirmed"
-  | "skipped_already_reminded"
-  | "skipped_excluded"
-  | "skipped_missing_email";
-
-interface ReminderSendResponse {
-  success: boolean;
-  order_id: string;
-  status: ReminderApiStatus;
-  message: string;
-  email: string | null;
-  name: string;
-  reminded: boolean;
-}
-
-type ReminderQueueStatus = "queued" | "sending" | "retrying" | "sent" | "failed" | "skipped";
+type ReminderQueueStatus = "queued" | "sending" | "sent" | "failed" | "skipped";
 
 interface ReminderQueueItem {
   orderId: string;
+  jobId: string | null;
   name: string;
   email: string;
   pickupLabel: string;
   status: ReminderQueueStatus;
   attempts: number;
+  maxAttempts: number | null;
   message: string;
-  lastResultCode: string | null;
 }
 
 interface ReminderRunState {
   isRunning: boolean;
   isComplete: boolean;
+  batchId: string | null;
   total: number;
   completed: number;
   sent: number;
@@ -228,6 +212,7 @@ interface ReminderRunState {
 const EMPTY_REMINDER_RUN: ReminderRunState = {
   isRunning: false,
   isComplete: false,
+  batchId: null,
   total: 0,
   completed: 0,
   sent: 0,
@@ -237,18 +222,53 @@ const EMPTY_REMINDER_RUN: ReminderRunState = {
   items: [],
 };
 
-const REMINDER_SEND_INTERVAL_MS = 1000;
-const REMINDER_RETRY_BACKOFF_MS = [1000, 2000] as const;
+type EmailJobStatus = "queued" | "sending" | "sent" | "failed" | "suppressed" | "cancelled";
 
-function wait(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    setTimeout(resolve, ms);
-  });
+interface EmailJobStatusInfo {
+  job_id: string;
+  status: string;
+  sent_at?: string | null;
+}
+
+interface OrderEmailStatuses {
+  confirmation: EmailJobStatusInfo | null;
+  reminder: EmailJobStatusInfo | null;
+}
+
+interface BulkReminderEnqueueItem {
+  order_id: string;
+  job_id: string | null;
+  status: string;
+  message: string;
+}
+
+interface BulkReminderEnqueueResponse {
+  success: boolean;
+  batch_id: string;
+  queued: number;
+  failed_to_queue: number;
+  items: BulkReminderEnqueueItem[];
+}
+
+interface EmailBatchJob {
+  id: string;
+  order_id: string | null;
+  status: EmailJobStatus;
+  attempt_count: number;
+  max_attempts: number;
+  last_error: string | null;
+}
+
+interface EmailBatchStatusResponse {
+  success: boolean;
+  batch_id: string;
+  is_complete: boolean;
+  jobs: EmailBatchJob[];
 }
 
 function buildReminderRunState(
   items: ReminderQueueItem[],
-  options: { isRunning: boolean; isComplete: boolean; activeOrderId: string | null }
+  options: { isRunning: boolean; isComplete: boolean; activeOrderId: string | null; batchId: string | null }
 ): ReminderRunState {
   const sent = items.filter((item) => item.status === "sent").length;
   const failed = items.filter((item) => item.status === "failed").length;
@@ -258,6 +278,7 @@ function buildReminderRunState(
   return {
     isRunning: options.isRunning,
     isComplete: options.isComplete,
+    batchId: options.batchId,
     total: items.length,
     completed,
     sent,
@@ -277,15 +298,6 @@ function getReminderStatusBadge(item: ReminderQueueItem): { label: string; bg: s
         color: "var(--color-info-text)",
         border: "var(--color-info-border)",
       };
-    case "retrying": {
-      const retryNumber = Math.max(1, Math.min(2, item.attempts));
-      return {
-        label: `Retry ${retryNumber} of 2`,
-        bg: "var(--color-warning-bg)",
-        color: "var(--color-warning-text)",
-        border: "var(--color-warning-border)",
-      };
-    }
     case "sent":
       return {
         label: "Sent",
@@ -315,6 +327,23 @@ function getReminderStatusBadge(item: ReminderQueueItem): { label: string; bg: s
         color: "var(--color-muted)",
         border: "var(--color-border)",
       };
+  }
+}
+
+function getConfirmationEmailBadge(info: EmailJobStatusInfo | null | undefined): { label: string; bg: string; color: string } | null {
+  if (!info) return null;
+  switch (info.status) {
+    case "queued":
+    case "sending":
+      return { label: "Email queued", bg: "var(--color-cream)", color: "var(--color-muted)" };
+    case "sent":
+      return { label: "Email sent", bg: "var(--color-success-bg)", color: "var(--color-success-text)" };
+    case "failed":
+      return { label: "Email failed", bg: "var(--color-error-bg)", color: "var(--color-error-text)" };
+    case "suppressed":
+      return { label: "No email", bg: "var(--color-cream)", color: "var(--color-muted)" };
+    default:
+      return null;
   }
 }
 
@@ -395,12 +424,22 @@ export default function AdminOrdersPage() {
   const [bulkImportRows, setBulkImportRows] = useState<BulkRow[]>([]);
   const [bulkImporting, setBulkImporting] = useState(false);
 
+  // Email status per order (confirmation / reminder job)
+  const [emailStatuses, setEmailStatuses] = useState<Record<string, OrderEmailStatuses>>({});
+
   // Remind modal
   const [showRemindModal, setShowRemindModal] = useState(false);
   const [remindSelections, setRemindSelections] = useState<Set<string>>(new Set());
   const [reminderRun, setReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
   const [remindSearch, setRemindSearch] = useState("");
   const remindLoading = reminderRun.isRunning;
+  const reminderRunRef = useRef<ReminderRunState>(EMPTY_REMINDER_RUN);
+  const reminderPollInFlightRef = useRef(false);
+  const reminderCompletedBatchesRef = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    reminderRunRef.current = reminderRun;
+  }, [reminderRun]);
 
   // Reset selection when filter/orders change
   useEffect(() => { setSelectedIds(new Set()); }, [filter, paymentFilter, eventFilter, locationFilter, orders]);
@@ -512,6 +551,27 @@ export default function AdminOrdersPage() {
     return () => { cancelled = true; };
   }, [addModalEventId, showAddOrderModal]);
 
+  const fetchEmailStatuses = useCallback(async (orderIds: string[]) => {
+    if (orderIds.length === 0) {
+      setEmailStatuses({});
+      return;
+    }
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const params = new URLSearchParams();
+      for (const id of orderIds) params.append("order_ids", id);
+      const res = await fetch(`${API_URL}/api/admin/orders/email-status-summary?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setEmailStatuses(data.statuses ?? {});
+    } catch {
+      // Non-blocking
+    }
+  }, []);
+
   const fetchOrders = useCallback(async (options?: { suppressErrorToast?: boolean }) => {
     setLoading(true);
     try {
@@ -527,8 +587,10 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to fetch orders");
-      setOrders(await res.json());
+      const data = await res.json() as Order[];
+      setOrders(data);
       setPage(1);
+      void fetchEmailStatuses(data.map((o) => o.id));
       return true;
     } catch {
       if (!options?.suppressErrorToast) {
@@ -538,10 +600,107 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter, paymentFilter, eventFilter]);
+  }, [filter, paymentFilter, eventFilter, fetchEmailStatuses]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search]);
+
+  useEffect(() => {
+    const current = reminderRunRef.current;
+    if (!current.isRunning || !current.batchId) return;
+
+    let cancelled = false;
+
+    function mapJobStatus(status: EmailJobStatus): ReminderQueueStatus {
+      if (status === "queued") return "queued";
+      if (status === "sending") return "sending";
+      if (status === "sent") return "sent";
+      if (status === "failed") return "failed";
+      return "skipped";
+    }
+
+    async function pollOnce() {
+      const runState = reminderRunRef.current;
+      if (!runState.isRunning || !runState.batchId) return;
+      if (cancelled) return;
+      if (reminderPollInFlightRef.current) return;
+
+      reminderPollInFlightRef.current = true;
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+
+        const res = await fetch(`${API_URL}/api/admin/email-batches/${runState.batchId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!res.ok) {
+          return;
+        }
+
+        const data = await res.json() as EmailBatchStatusResponse;
+        const jobsById = new Map(data.jobs.map((job) => [job.id, job]));
+        const jobsByOrderId = new Map(data.jobs
+          .filter((job) => job.order_id)
+          .map((job) => [job.order_id as string, job]));
+
+        const nextItems: ReminderQueueItem[] = runState.items.map((item) => {
+          const job = (item.jobId ? jobsById.get(item.jobId) : undefined) || jobsByOrderId.get(item.orderId);
+          if (!job) return item;
+
+          const nextStatus = mapJobStatus(job.status);
+          const nextMessage = job.status === "failed"
+            ? (job.last_error || item.message || "Send failed")
+            : item.message;
+
+          return {
+            ...item,
+            jobId: item.jobId || job.id,
+            status: nextStatus,
+            attempts: job.attempt_count,
+            maxAttempts: job.max_attempts,
+            message: nextMessage,
+          };
+        });
+
+        const active = nextItems.find((item) => item.status === "sending");
+        const nextState = buildReminderRunState(nextItems, {
+          isRunning: !data.is_complete,
+          isComplete: data.is_complete,
+          activeOrderId: active ? active.orderId : null,
+          batchId: runState.batchId,
+        });
+        setReminderRun(nextState);
+
+        if (data.is_complete && !reminderCompletedBatchesRef.current.has(data.batch_id)) {
+          reminderCompletedBatchesRef.current.add(data.batch_id);
+          const refreshed = await fetchOrders({ suppressErrorToast: true });
+          const summary = buildReminderSummary(nextState);
+          if (!refreshed) {
+            showToast("Reminders finished, but orders could not be refreshed", "error");
+            setTimeout(() => {
+              showToast(summary.message, summary.type);
+            }, 900);
+          } else {
+            showToast(summary.message, summary.type);
+          }
+        }
+      } catch {
+        // Non-blocking
+      } finally {
+        reminderPollInFlightRef.current = false;
+      }
+    }
+
+    pollOnce();
+    const intervalId = setInterval(() => {
+      pollOnce();
+    }, 1000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [reminderRun.isRunning, reminderRun.batchId, fetchOrders]);
 
   const eventLabelById = useMemo(() => {
     const map = new Map<number, string>();
@@ -671,14 +830,16 @@ export default function AdminOrdersPage() {
       const data = await res.json();
       if (data.email_suppressed) {
         showToast("Order confirmed (email excluded)", "success");
-      } else if (data.email_sent) {
-        showToast("Confirmation email sent!", "success");
+      } else if (data.email_status === "queued") {
+        showToast("Confirmation email queued", "success");
+      } else if (data.email_status === "suppressed") {
+        showToast("Order confirmed (email suppressed)", "success");
       } else {
-        showToast("Order confirmed, but email failed to send", "error");
+        showToast("Order confirmed, but email could not be queued", "error");
       }
       await fetchOrders();
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to send email", "error");
+      showToast(err instanceof Error ? err.message : "Failed to confirm order", "error");
     } finally {
       setConfirming(null);
     }
@@ -850,18 +1011,25 @@ export default function AdminOrdersPage() {
   }
 
   function closeRemindModal() {
-    if (remindLoading) return;
     setShowRemindModal(false);
     setRemindSearch("");
     setRemindSelections(new Set());
-    setReminderRun(EMPTY_REMINDER_RUN);
+    // reminderRun state is intentionally kept alive so background batch continues polling
   }
 
   function openRemindModal() {
+    // Only pre-select orders when no batch is active (total === 0)
+    if (reminderRun.total === 0) {
+      setRemindSelections(new Set(eligibleReminderOrders.map((o) => o.id)));
+    }
+    setRemindSearch("");
+    setShowRemindModal(true);
+  }
+
+  function resetReminderRun() {
+    setReminderRun(EMPTY_REMINDER_RUN);
     setRemindSelections(new Set(eligibleReminderOrders.map((o) => o.id)));
     setRemindSearch("");
-    setReminderRun(EMPTY_REMINDER_RUN);
-    setShowRemindModal(true);
   }
 
   function buildReminderItems(orderIds: string[]): ReminderQueueItem[] {
@@ -873,72 +1041,16 @@ export default function AdminOrdersPage() {
 
       return [{
         orderId: order.id,
+        jobId: null,
         name: order.name,
         email: (order.email ?? "").trim(),
         pickupLabel: `${order.pickup_location} - ${order.pickup_time_slot}`,
         status: "queued",
         attempts: 0,
+        maxAttempts: null,
         message: "",
-        lastResultCode: null,
       }];
     });
-  }
-
-  async function sendReminderAttempt(
-    orderId: string,
-    token: string
-  ): Promise<{ outcome: "sent" | "skipped" | "retryable_failed" | "failed"; message: string; resultCode: string | null }> {
-    try {
-      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/remind`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (res.status === 404) {
-        return {
-          outcome: "failed",
-          message: await getApiErrorMessage(res, "Order not found"),
-          resultCode: null,
-        };
-      }
-
-      if (!res.ok) {
-        const message = await getApiErrorMessage(res, "Failed to send reminder");
-        const retryable = res.status >= 500 || res.status === 429;
-        return {
-          outcome: retryable ? "retryable_failed" : "failed",
-          message,
-          resultCode: null,
-        };
-      }
-
-      const data = await res.json() as ReminderSendResponse;
-      if (data.status === "sent") {
-        return {
-          outcome: "sent",
-          message: data.message || "Reminder sent",
-          resultCode: data.status,
-        };
-      }
-      if (data.status === "failed") {
-        return {
-          outcome: "retryable_failed",
-          message: data.message || "Failed to send reminder",
-          resultCode: data.status,
-        };
-      }
-      return {
-        outcome: "skipped",
-        message: data.message || "Reminder skipped",
-        resultCode: data.status,
-      };
-    } catch (err) {
-      return {
-        outcome: "retryable_failed",
-        message: err instanceof Error ? err.message : "Failed to send reminder",
-        resultCode: null,
-      };
-    }
   }
 
   function buildReminderSummary(runState: ReminderRunState): { message: string; type: "success" | "error" } {
@@ -955,175 +1067,132 @@ export default function AdminOrdersPage() {
     };
   }
 
-	  async function executeReminderQueue(itemsToTrack: ReminderQueueItem[], orderIdsToProcess: string[]) {
-	    if (orderIdsToProcess.length === 0) return;
-
-	    const token = await getAdminToken();
-	    if (!token) return;
-
-	    let items = itemsToTrack.map((item) => ({ ...item }));
-	    setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-
-	    for (let orderIdx = 0; orderIdx < orderIdsToProcess.length; orderIdx += 1) {
-	      const orderId = orderIdsToProcess[orderIdx];
-	      const itemIndex = items.findIndex((item) => item.orderId === orderId);
-	      if (itemIndex < 0) continue;
-
-	      let itemCompleted = false;
-
-	      for (let attempt = 1; attempt <= 3; attempt += 1) {
-	        items = items.map((item, idx) => (idx === itemIndex
-	          ? {
-	            ...item,
-	            status: "sending",
-	            attempts: attempt,
-	            message: "",
-	          }
-	          : item
-	        ));
-	        setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: orderId }));
-
-	        const result = await sendReminderAttempt(orderId, token);
-
-	        if (result.outcome === "sent") {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "sent",
-	              message: result.message,
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	          itemCompleted = true;
-	          break;
-	        }
-
-	        if (result.outcome === "skipped") {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "skipped",
-	              message: result.message,
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	          itemCompleted = true;
-	          break;
-	        }
-
-	        if (result.outcome === "failed") {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "failed",
-	              message: result.message,
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	          itemCompleted = true;
-	          break;
-	        }
-
-	        if (attempt < 3) {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "retrying",
-	              message: "Retrying after send failure",
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: orderId }));
-	          await wait(REMINDER_RETRY_BACKOFF_MS[attempt - 1]);
-	          continue;
-	        }
-
-	        items = items.map((item, idx) => (idx === itemIndex
-	          ? {
-	            ...item,
-	            status: "failed",
-	            message: "Send failed after 3 attempts",
-	            lastResultCode: result.resultCode,
-	          }
-	          : item
-	        ));
-	        setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	        itemCompleted = true;
-	      }
-
-	      if (!itemCompleted) {
-	        items = items.map((item, idx) => (idx === itemIndex
-	          ? {
-	            ...item,
-	            status: "failed",
-	            message: "Send failed after 3 attempts",
-	          }
-	          : item
-	        ));
-	        setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	      }
-
-      if (orderIdx < orderIdsToProcess.length - 1) {
-        await wait(REMINDER_SEND_INTERVAL_MS);
-      }
-    }
-
-    const completedRun = buildReminderRunState(items, { isRunning: false, isComplete: true, activeOrderId: null });
-    setReminderRun(completedRun);
-
-    const refreshed = await fetchOrders({ suppressErrorToast: true });
-    const summary = buildReminderSummary(completedRun);
-    if (!refreshed) {
-      showToast("Reminders finished, but orders could not be refreshed", "error");
-      setTimeout(() => {
-        showToast(summary.message, summary.type);
-      }, 900);
-      return;
-    }
-    showToast(summary.message, summary.type);
+  function mapEnqueueStatus(status: string): ReminderQueueStatus {
+    if (status === "queued" || status === "already_queued") return "queued";
+    if (status === "suppressed" || status.startsWith("skipped_")) return "skipped";
+    if (status === "failed_to_queue") return "failed";
+    return "failed";
   }
 
   async function handleSendReminders() {
     const ids = Array.from(remindSelections);
     if (ids.length === 0) return;
 
-    const items = buildReminderItems(ids);
-    if (items.length === 0) {
-      showToast("No reminder recipients available", "error");
-      return;
-    }
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
 
-    await executeReminderQueue(items, items.map((item) => item.orderId));
+      setReminderRun(buildReminderRunState(buildReminderItems(ids), {
+        isRunning: true,
+        isComplete: false,
+        activeOrderId: null,
+        batchId: null,
+      }));
+
+      const res = await fetch(`${API_URL}/api/admin/orders/remind`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ order_ids: ids }),
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to queue reminders"));
+      }
+
+      const data = await res.json() as BulkReminderEnqueueResponse;
+      const byOrderId = new Map(data.items.map((item) => [item.order_id, item]));
+
+      const nextItems: ReminderQueueItem[] = buildReminderItems(ids).map((item) => {
+        const serverItem = byOrderId.get(item.orderId);
+        if (!serverItem) return item;
+        return {
+          ...item,
+          jobId: serverItem.job_id,
+          status: mapEnqueueStatus(serverItem.status),
+          message: serverItem.message || "",
+        };
+      });
+
+      setReminderRun(buildReminderRunState(nextItems, {
+        isRunning: true,
+        isComplete: false,
+        activeOrderId: null,
+        batchId: data.batch_id,
+      }));
+    } catch (err) {
+      setReminderRun(EMPTY_REMINDER_RUN);
+      showToast(err instanceof Error ? err.message : "Failed to queue reminders", "error");
+    }
   }
 
   async function handleRetryFailedReminders() {
     if (remindLoading) return;
 
-    const retryOrderIds = reminderRun.items
-      .filter((item) => item.status === "failed")
-      .map((item) => item.orderId);
-    if (retryOrderIds.length === 0) return;
+    const failedJobs = reminderRun.items.filter(
+      (item): item is ReminderQueueItem & { jobId: string } => item.status === "failed" && !!item.jobId
+    );
+    if (failedJobs.length === 0) return;
 
-    const nextItems: ReminderQueueItem[] = reminderRun.items.map((item): ReminderQueueItem => (
-      item.status === "failed"
-        ? {
-          ...item,
-          status: "queued",
-          attempts: 0,
-          message: "",
-          lastResultCode: null,
-        }
-        : { ...item }
-    ));
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
 
-    await executeReminderQueue(nextItems, retryOrderIds);
+      if (reminderRun.batchId) {
+        reminderCompletedBatchesRef.current.delete(reminderRun.batchId);
+      }
+
+      const results = await Promise.all(
+        failedJobs.map(async (item) => {
+          try {
+            const res = await fetch(`${API_URL}/api/admin/email-jobs/${item.jobId}/retry`, {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) {
+              return { jobId: item.jobId, ok: false, error: await getApiErrorMessage(res, "Failed to retry job") };
+            }
+            return { jobId: item.jobId, ok: true, error: "" };
+          } catch (err) {
+            return {
+              jobId: item.jobId,
+              ok: false,
+              error: err instanceof Error ? err.message : "Failed to retry job",
+            };
+          }
+        })
+      );
+
+      const succeeded = results.filter((r) => r.ok);
+      const failed = results.filter((r) => !r.ok);
+
+      if (succeeded.length === 0) {
+        const firstError = failed[0]?.error || "Failed to retry jobs";
+        showToast(firstError, "error");
+        return;
+      }
+
+      if (failed.length > 0) {
+        showToast(`Retried ${succeeded.length}, failed ${failed.length}`, "error");
+      }
+
+      const succeededIds = new Set(succeeded.map((r) => r.jobId));
+      const errorByJobId = new Map(failed.map((r) => [r.jobId, r.error] as const));
+
+      const nextItems: ReminderQueueItem[] = reminderRun.items.map((item) => (
+        item.status !== "failed" ? item : (
+          item.jobId && succeededIds.has(item.jobId)
+            ? { ...item, status: "queued", message: "" }
+            : { ...item, message: (item.jobId ? errorByJobId.get(item.jobId) : undefined) || item.message || "Retry failed" }
+        )
+      ));
+      setReminderRun(buildReminderRunState(nextItems, {
+        isRunning: true,
+        isComplete: false,
+        activeOrderId: null,
+        batchId: reminderRun.batchId,
+      }));
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to retry jobs", "error");
+    }
   }
 
   async function handleAddOrder(e: React.FormEvent) {
@@ -1467,6 +1536,39 @@ export default function AdminOrdersPage() {
             </svg>
             Remind
           </button>
+          {reminderRun.total > 0 && (
+            <button
+              onClick={openRemindModal}
+              className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all"
+              style={{
+                background: reminderRun.isRunning
+                  ? "var(--color-cream)"
+                  : reminderRun.failed > 0
+                    ? "var(--color-error-bg)"
+                    : "var(--color-success-bg)",
+                color: reminderRun.isRunning
+                  ? "var(--color-text)"
+                  : reminderRun.failed > 0
+                    ? "var(--color-error-text)"
+                    : "var(--color-success-text)",
+                border: "1px solid var(--color-border)",
+              }}
+            >
+              {reminderRun.isRunning ? (
+                <>
+                  <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                    <circle cx="12" cy="12" r="10" opacity="0.3" />
+                    <path d="M12 2a10 10 0 0 1 10 10" />
+                  </svg>
+                  Sending: {reminderRun.completed} / {reminderRun.total}
+                </>
+              ) : (
+                <>
+                  {reminderRun.sent} sent{reminderRun.failed > 0 ? `, ${reminderRun.failed} failed` : ""} - View
+                </>
+              )}
+            </button>
+          )}
           <button
             onClick={() => {
               setShowAddOrderModal(true);
@@ -1836,27 +1938,41 @@ export default function AdminOrdersPage() {
                         ${order.total_price.toFixed(2)}
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="relative inline-block">
-                          <select
-                            value={order.status}
-                            disabled={isUpdatingStatus}
-                            onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                            className="appearance-none pl-2.5 pr-6 py-1 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-sage)] disabled:opacity-60 transition-opacity"
-                            style={{ background: statusStyle.bg, color: statusStyle.color }}
-                          >
-                            {(ALLOWED_STATUS_TRANSITIONS[order.status] ?? Object.keys(STATUS_STYLES))
-                              .filter((val) => STATUS_STYLES[val])
-                              .map((val) => (
-                                <option key={val} value={val}>
-                                  {STATUS_STYLES[val].label}
-                                </option>
-                              ))}
-                          </select>
-                          <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center" style={{ color: statusStyle.color }}>
-                            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
-                              <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          </span>
+                        <div className="flex flex-col items-start gap-1">
+                          <div className="relative inline-block">
+                            <select
+                              value={order.status}
+                              disabled={isUpdatingStatus}
+                              onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                              className="appearance-none pl-2.5 pr-6 py-1 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-sage)] disabled:opacity-60 transition-opacity"
+                              style={{ background: statusStyle.bg, color: statusStyle.color }}
+                            >
+                              {(ALLOWED_STATUS_TRANSITIONS[order.status] ?? Object.keys(STATUS_STYLES))
+                                .filter((val) => STATUS_STYLES[val])
+                                .map((val) => (
+                                  <option key={val} value={val}>
+                                    {STATUS_STYLES[val].label}
+                                  </option>
+                                ))}
+                            </select>
+                            <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center" style={{ color: statusStyle.color }}>
+                              <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
+                              </svg>
+                            </span>
+                          </div>
+                          {(() => {
+                            const badge = getConfirmationEmailBadge(emailStatuses[order.id]?.confirmation);
+                            if (!badge) return null;
+                            return (
+                              <span
+                                className="text-[10px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap"
+                                style={{ background: badge.bg, color: badge.color, border: "1px solid var(--color-border)" }}
+                              >
+                                {badge.label}
+                              </span>
+                            );
+                          })()}
                         </div>
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
@@ -2644,7 +2760,7 @@ export default function AdminOrdersPage() {
           <div
             style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
             onMouseDown={(e) => {
-              if (!remindLoading && e.target === e.currentTarget) {
+              if (e.target === e.currentTarget) {
                 closeRemindModal();
               }
             }}
@@ -2658,7 +2774,9 @@ export default function AdminOrdersPage() {
               </h2>
               <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
                 {isReminderProgressMode
-                  ? "Progress updates appear here while reminder emails are sent one at a time."
+                  ? reminderRun.isRunning
+                    ? "You can close this modal -- sending continues in the background."
+                    : "Reminder batch complete."
                   : "Reminder emails will be sent to all selected customers. Only confirmed orders that have not yet been reminded are shown."}
               </p>
 
@@ -2832,10 +2950,6 @@ export default function AdminOrdersPage() {
                     </div>
                   </div>
 
-                  <p className="text-xs mb-3" style={{ color: "var(--color-muted)" }}>
-                    Please keep this window open until sending finishes.
-                  </p>
-
                   <div
                     style={{
                       overflowY: "auto",
@@ -2868,7 +2982,7 @@ export default function AdminOrdersPage() {
                               )}
                               {item.attempts > 0 && (
                                 <p className="text-[11px]" style={{ color: "var(--color-muted)", margin: "0.3rem 0 0" }}>
-                                  Attempt {item.attempts} of 3
+                                  {item.maxAttempts ? `Attempt ${item.attempts} of ${item.maxAttempts}` : `Attempt ${item.attempts}`}
                                 </p>
                               )}
                             </div>
@@ -2889,6 +3003,15 @@ export default function AdminOrdersPage() {
               <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
                 {isReminderProgressMode ? (
                   <>
+                    {reminderRun.isComplete && (
+                      <button
+                        onClick={resetReminderRun}
+                        className="px-4 py-2 rounded-xl text-sm font-medium"
+                        style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                      >
+                        Start new batch
+                      </button>
+                    )}
                     {failedReminderItems.length > 0 && (
                       <button
                         onClick={handleRetryFailedReminders}
@@ -2901,11 +3024,10 @@ export default function AdminOrdersPage() {
                     )}
                     <button
                       onClick={closeRemindModal}
-                      disabled={remindLoading}
-                      className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                      className="px-4 py-2 rounded-xl text-sm font-semibold"
                       style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
                     >
-                      {remindLoading ? "Sending..." : "Done"}
+                      {remindLoading ? "Close" : "Done"}
                     </button>
                   </>
                 ) : (

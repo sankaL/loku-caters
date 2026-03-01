@@ -3,9 +3,9 @@
 # ============================================================================
 
 .PHONY: sync-config restart-backend sync-and-restart dev \
-        dev-local dev-backend dev-frontend \
+        dev-local dev-local-all dev-backend dev-frontend dev-email-worker \
         db-up db-down db-migrate db-seed db-reset \
-        stop logs-backend help
+        stop logs-backend logs-email-worker help
 
 # ----------------------------------------------------------------------------
 # Local dev database (Docker, port 5433 to avoid conflicts with system Postgres)
@@ -82,6 +82,7 @@ dev-local: sync-config db-up db-migrate
 	@echo ""
 	@echo "  Starting backend (local DB, DEV_MODE=true)..."
 	@echo "  Backend logs: /tmp/loku-backend.log"
+	@echo "  Email worker logs: /tmp/loku-email-worker.log (not started by dev-local)"
 	@echo "  Admin dev login: POST http://localhost:8000/api/admin/dev-login"
 	@echo ""
 	@(cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
@@ -91,13 +92,37 @@ dev-local: sync-config db-up db-migrate
 	@echo "  Starting frontend on http://localhost:3000 ..."
 	cd frontend && npm run dev
 
+## Full local stack + email worker: local Postgres + backend (bg) + worker (bg) + frontend
+##   Backend logs: /tmp/loku-backend.log
+##   Worker logs: /tmp/loku-email-worker.log
+dev-local-all: sync-config db-up db-migrate
+	@echo ""
+	@echo "  Starting backend (local DB, DEV_MODE=true)..."
+	@echo "  Backend logs: /tmp/loku-backend.log"
+	@(cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
+	    --reload --port 8000 > /tmp/loku-backend.log 2>&1 \
+	    & echo $$! > /tmp/loku-backend.pid)
+	@sleep 1
+	@echo "  Starting email worker (local DB, DEV_MODE=true)..."
+	@echo "  Worker logs: /tmp/loku-email-worker.log"
+	@(cd backend && $(BACKEND_DEV_ENV) python3 -m workers.email_worker \
+	    > /tmp/loku-email-worker.log 2>&1 \
+	    & echo $$! > /tmp/loku-email-worker.pid)
+	@sleep 1
+	@echo "  Starting frontend on http://localhost:3000 ..."
+	cd frontend && npm run dev
+
 ## Start just the backend with local DB settings (foreground, with reload)
 dev-backend: sync-config
-	cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --port 8000
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --port 8000
 
 ## Start just the frontend
 dev-frontend:
 	cd frontend && npm run dev
+
+## Start the email worker (local DB settings, foreground)
+dev-email-worker: sync-config
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m workers.email_worker
 
 # ============================================================================
 # Database (local Docker Postgres)
@@ -120,11 +145,11 @@ db-down:
 
 ## Run Alembic migrations against the local DB
 db-migrate: sync-config
-	cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
 
 ## Seed the local DB with test orders (removes existing orders first)
 db-seed:
-	cd backend && $(BACKEND_DEV_ENV) python3 seed.py
+	@cd backend && $(BACKEND_DEV_ENV) python3 seed.py
 
 ## Drop all tables, re-run migrations, and seed fresh test data
 db-reset: db-up
@@ -146,12 +171,20 @@ stop:
 	    kill $$(cat /tmp/loku-backend.pid) 2>/dev/null && echo "Backend stopped." || true; \
 	    rm -f /tmp/loku-backend.pid; \
 	fi
+	@if [ -f /tmp/loku-email-worker.pid ]; then \
+	    kill $$(cat /tmp/loku-email-worker.pid) 2>/dev/null && echo "Email worker stopped." || true; \
+	    rm -f /tmp/loku-email-worker.pid; \
+	fi
 	@-lsof -ti :8000 | xargs kill -9 2>/dev/null || true
 	@echo "Done."
 
 ## Tail live backend logs (when started via dev-local)
 logs-backend:
 	tail -f /tmp/loku-backend.log
+
+## Tail live email worker logs (when started via dev-local-all)
+logs-email-worker:
+	tail -f /tmp/loku-email-worker.log
 
 # ============================================================================
 # Help
