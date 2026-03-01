@@ -1,15 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
-import resend
-from resend.exceptions import ResendError
+import httpx
 
 from config import settings
-
-
-resend.api_key = settings.resend_api_key
 
 
 @dataclass(frozen=True)
@@ -44,27 +39,48 @@ def send_email_via_resend(
     html: str,
     reply_to_email: str | None,
     tags: list[dict[str, str]] | None = None,
+    idempotency_key: str | None = None,
 ) -> SendEmailResult:
+    headers: dict[str, str] = {
+        "Authorization": f"Bearer {settings.resend_api_key}",
+        "Content-Type": "application/json",
+    }
+    if idempotency_key:
+        headers["Idempotency-Key"] = idempotency_key
+
+    payload: dict = {
+        "from": f"Loku Caters <{from_email}>",
+        "to": [to_email],
+        "subject": subject,
+        "html": html,
+    }
+    if reply_to_email:
+        payload["reply_to"] = reply_to_email
+    if tags:
+        payload["tags"] = tags
+
     try:
-        message_payload: dict[str, Any] = {
-            "from": f"Loku Caters <{from_email}>",
-            "to": [to_email],
-            "subject": subject,
-            "html": html,
-        }
-        if reply_to_email:
-            message_payload["reply_to"] = reply_to_email
-        if tags:
-            message_payload["tags"] = tags
-        resp = resend.Emails.send(message_payload)
-        resend_message_id = getattr(resp, "id", None)
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post("https://api.resend.com/emails", headers=headers, json=payload)
+
+        if resp.status_code >= 400:
+            try:
+                body = resp.json()
+                message = body.get("message", resp.text)
+            except Exception:
+                message = resp.text
+            retryable = _is_retryable_status(resp.status_code)
+            raise SendEmailFailure(message=message, code=resp.status_code, retryable=retryable)
+
+        data = resp.json()
+        resend_message_id = data.get("id")
         if not resend_message_id:
-            raise SendEmailFailure(message="Resend send succeeded but returned no id", retryable=True)
+            # Email was accepted by Resend but returned no ID -- treat as non-retryable to avoid
+            # sending a duplicate. Log a placeholder so the job can be marked SENT.
+            return SendEmailResult(resend_message_id="unknown")
         return SendEmailResult(resend_message_id=str(resend_message_id))
-    except ResendError as exc:
-        code = getattr(exc, "code", None)
-        retryable = _is_retryable_status(code)
-        raise SendEmailFailure(message=str(exc), code=code, retryable=retryable) from exc
+
+    except SendEmailFailure:
+        raise
     except Exception as exc:
         raise SendEmailFailure(message=str(exc), code=None, retryable=True) from exc
-

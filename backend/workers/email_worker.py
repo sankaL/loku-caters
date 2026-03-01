@@ -167,6 +167,12 @@ def _process_job(db: Session, job: EmailJob, *, last_send_at: datetime | None) -
         return last_send_at
 
     last_send_at = _enforce_rate_limit(last_send_at)
+
+    # Freshness check -- re-read from DB to confirm we still own this job before sending
+    fresh = db.query(EmailJob).filter(EmailJob.id == job.id).first()
+    if fresh is None or fresh.status != EMAIL_STATUS_SENDING or fresh.locked_by != WORKER_ID:
+        return last_send_at  # Another worker handled it or status changed
+
     try:
         result = send_email_via_resend(
             from_email=job.from_email,
@@ -178,6 +184,7 @@ def _process_job(db: Session, job: EmailJob, *, last_send_at: datetime | None) -
                 {"name": "job_id", "value": job.id},
                 {"name": "type", "value": job.email_type},
             ],
+            idempotency_key=job.id,
         )
         now = _utcnow()
         job.status = EMAIL_STATUS_SENT
