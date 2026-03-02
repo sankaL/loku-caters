@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import type { EventConfig } from "@/config/event";
 
 interface MenuClientProps {
@@ -13,11 +14,6 @@ interface MenuItem {
     description: string;
     diet?: string[];
     hasTooltip?: boolean;
-}
-
-interface MenuCategory {
-    name: string;
-    items: MenuItem[];
 }
 
 export default function MenuClient({ eventConfig }: MenuClientProps) {
@@ -303,11 +299,13 @@ export default function MenuClient({ eventConfig }: MenuClientProps) {
                         </button>
 
                         <div className="relative w-full">
-                            {/* We use an img tag without next/image since Next.js complains if the domain isn't registered, and this is highly dense local asset */}
-                            <img
+                            <Image
                                 src="/assets/img/lumprais-how-its-made-compressed.png"
                                 alt="How Lamprais is made"
+                                width={800}
+                                height={600}
                                 className="w-full h-auto rounded-t-3xl"
+                                unoptimized={true}
                             />
                         </div>
 
