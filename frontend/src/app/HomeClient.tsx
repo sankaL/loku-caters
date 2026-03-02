@@ -24,10 +24,10 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
 
         <div className="relative z-10 max-w-4xl mx-auto px-6 text-center animate-fade-up">
           <h1 className="text-5xl md:text-7xl font-bold leading-tight mb-6 text-white drop-shadow-lg" style={{ fontFamily: "var(--font-serif)" }}>
-            A Taste of Excellence
+            Authentic Sri Lankan Catering
           </h1>
-          <p className="text-lg md:text-2xl text-[color:var(--color-cream)] mb-10 max-w-2xl mx-auto font-medium opacity-90 drop-shadow-md">
-            Authentic Sri Lankan food for special events, corporate gatherings, and intimate celebrations.
+          <p className="text-lg md:text-2xl text-[color:var(--color-cream)] mb-10 max-w-2xl mx-auto font-light opacity-80 drop-shadow-md tracking-wide">
+            Bold flavors and traditional recipes for events of any scale.
           </p>
 
           {/* Dynamic CTA Block */}
@@ -81,7 +81,7 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
             Crafted with Passion
           </h2>
           <p className="text-lg md:text-xl text-[color:var(--color-muted)] leading-relaxed max-w-3xl mx-auto mb-10">
-            At Loku Caters, we believe that food is the heart of every gathering. We combine locally sourced ingredients with authentic family recipes to deliver a culinary experience that your guests will remember long after the last bite.
+            At Loku Caters, we believe that food is the heart of every gathering. We combine quality ingredients with authentic family recipes to deliver a culinary experience that your guests will remember long after the last bite.
           </p>
           <Link
             href="/about"
