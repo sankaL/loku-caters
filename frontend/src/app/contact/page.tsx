@@ -2,13 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
+
+const subjects = [
+    "General Question",
+    "Feedback",
+    "Collaboration",
+    "Other"
+];
 
 export default function ContactPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
     const [errorDetails, setErrorDetails] = useState<string | null>(null);
+    const [selectedSubject, setSelectedSubject] = useState(subjects[0]);
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -176,8 +185,37 @@ export default function ContactPage() {
                                     </div>
 
                                     <div className="flex flex-col gap-2">
-                                        <label htmlFor="subject" className="text-sm font-semibold text-[color:var(--color-text)]">Subject *</label>
-                                        <input required type="text" id="subject" name="subject" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white transition-colors" />
+                                        <label id="listbox-label" className="text-sm font-semibold text-[color:var(--color-text)]">Subject *</label>
+                                        <Listbox value={selectedSubject} onChange={setSelectedSubject} name="subject">
+                                            <div className="relative">
+                                                <ListboxButton aria-labelledby="listbox-label" className="relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white transition-colors">
+                                                    <span className="block truncate">{selectedSubject}</span>
+                                                    <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                                        <svg className="h-5 w-5 text-[color:var(--color-muted)]" viewBox="0 0 20 20" fill="currentColor">
+                                                            <path fillRule="evenodd" d="M10 3a.75.75 0 01.55.24l3.25 3.5a.75.75 0 11-1.1 1.02L10 4.852 7.3 7.76a.75.75 0 01-1.1-1.02l3.25-3.5A.75.75 0 0110 3zm-3.76 9.2a.75.75 0 011.06.04l2.7 2.908 2.7-2.908a.75.75 0 111.1 1.02l-3.25 3.5a.75.75 0 01-1.1 0l-3.25-3.5a.75.75 0 01.04-1.06z" clipRule="evenodd" />
+                                                        </svg>
+                                                    </span>
+                                                </ListboxButton>
+                                                <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
+                                                    {subjects.map((subject, subjectIdx) => (
+                                                        <ListboxOption
+                                                            key={subjectIdx}
+                                                            className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
+                                                            value={subject}
+                                                        >
+                                                            <span className="block truncate font-medium group-data-[selected]:font-bold group-data-[selected]:text-[color:var(--color-forest)]">
+                                                                {subject}
+                                                            </span>
+                                                            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-[color:var(--color-sage)] group-data-[selected]:opacity-100 opacity-0 transition-opacity">
+                                                                <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                    <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                                                </svg>
+                                                            </span>
+                                                        </ListboxOption>
+                                                    ))}
+                                                </ListboxOptions>
+                                            </div>
+                                        </Listbox>
                                     </div>
 
                                     <div className="flex flex-col gap-2">

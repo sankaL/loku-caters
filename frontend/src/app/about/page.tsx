@@ -10,8 +10,8 @@ export default function AboutPage() {
         <main className="flex-1 bg-[color:var(--color-cream)] pb-24">
             {/* Our Story Section */}
             <section className="pt-32 pb-24 px-6 mt-10">
-                <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-16 lg:gap-24 items-center">
-                    <div className="lg:w-1/2 animate-fade-up">
+                <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-16 lg:gap-24 items-center overflow-hidden py-4">
+                    <div className="lg:w-1/2 animate-slide-in-left">
                         <h1 className="text-5xl md:text-7xl font-bold text-[color:var(--color-forest)] mb-10" style={{ fontFamily: "var(--font-serif)" }}>
                             Our Story
                         </h1>
@@ -28,7 +28,7 @@ export default function AboutPage() {
                         </div>
                     </div>
 
-                    <div className="lg:w-1/2 w-full animate-fade-up delay-200 lg:pl-4">
+                    <div className="lg:w-1/2 w-full animate-slide-in-right delay-200 lg:pl-4">
                         <div className="relative aspect-[4/3] w-full rounded-2xl overflow-hidden shadow-2xl lg:scale-95 origin-right">
                             <Image
                                 src="/assets/chef/chef-pic.jpg"

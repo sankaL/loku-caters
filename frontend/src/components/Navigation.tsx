@@ -3,29 +3,10 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useState, useEffect } from "react";
-import type { EventConfig } from "@/config/event";
-
-// Hardcoded for the skeleton, but ideally fetched or passed down. We can try to fetch it here or accept it as a prop.
-// For layout, we will likely fetch it in layout.tsx and pass it down via context or just fetch it here.
-import { fetchEventConfig } from "@/config/event";
-
+import { useState } from "react";
 export default function Navigation() {
     const pathname = usePathname();
-    const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
     const [isMenuOpen, setIsMenuOpen] = useState(false);
-
-    useEffect(() => {
-        async function loadConfig() {
-            try {
-                const config = await fetchEventConfig();
-                setEventConfig(config);
-            } catch (err) {
-                console.error("Failed to load event config:", err);
-            }
-        }
-        loadConfig();
-    }, []);
 
     const isActive = (path: string) => pathname === path;
 
@@ -62,15 +43,12 @@ export default function Navigation() {
                     <Link href="/about" className={linkStyle("/about")}>About Us</Link>
                     <Link href="/contact" className={linkStyle("/contact")}>Contact Us</Link>
                     <Link href="/catering-request" className={linkStyle("/catering-request")}>Catering Request</Link>
-
-                    {eventConfig && eventConfig.is_active && (
-                        <Link
-                            href="/orders"
-                            className="bg-[color:var(--color-forest)] text-[color:var(--color-cream)] px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-[color:var(--color-sage)] transition-colors duration-200 shadow-md transform hover:-translate-y-0.5"
-                        >
-                            Order Now
-                        </Link>
-                    )}
+                    <Link
+                        href="/orders"
+                        className="bg-[#F2AF29] text-white px-5 py-2.5 rounded-full text-sm font-bold hover:bg-[color:var(--color-forest)] transition-colors duration-200 shadow-md transform hover:-translate-y-0.5"
+                    >
+                        Order Now
+                    </Link>
                 </nav>
 
                 {/* Mobile Nav Toggle */}
@@ -104,16 +82,13 @@ export default function Navigation() {
                         <Link href="/about" className={linkStyle("/about")} onClick={() => setIsMenuOpen(false)}>About Us</Link>
                         <Link href="/contact" className={linkStyle("/contact")} onClick={() => setIsMenuOpen(false)}>Contact Us</Link>
                         <Link href="/catering-request" className={linkStyle("/catering-request")} onClick={() => setIsMenuOpen(false)}>Catering Request</Link>
-
-                        {eventConfig && eventConfig.is_active && (
-                            <Link
-                                href="/orders"
-                                className="bg-[color:var(--color-forest)] text-[color:var(--color-cream)] px-5 py-3 rounded-xl text-center font-semibold mt-2"
-                                onClick={() => setIsMenuOpen(false)}
-                            >
-                                Order Now
-                            </Link>
-                        )}
+                        <Link
+                            href="/orders"
+                            className="bg-[#F2AF29] text-white px-5 py-3 rounded-xl text-center font-bold mt-2"
+                            onClick={() => setIsMenuOpen(false)}
+                        >
+                            Order Now
+                        </Link>
                     </nav>
                 </div>
             )}

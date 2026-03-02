@@ -2,13 +2,32 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
+
+const eventTypes = [
+    { id: "corporate", name: "Corporate Event" },
+    { id: "wedding", name: "Wedding" },
+    { id: "birthday", name: "Birthday Party" },
+    { id: "private-dinner", name: "Private Dinner" },
+    { id: "other", name: "Other" }
+];
+
+const budgetRanges = [
+    { id: "under-500", name: "Under CAD 500" },
+    { id: "500-1000", name: "CAD 500 - 1,000" },
+    { id: "1000-2500", name: "CAD 1,000 - 2,500" },
+    { id: "2500-5000", name: "CAD 2,500 - 5,000" },
+    { id: "5000-plus", name: "CAD 5,000+" }
+];
 
 export default function CateringRequestPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
     const [errorDetails, setErrorDetails] = useState<string | null>(null);
+    const [selectedEventType, setSelectedEventType] = useState(eventTypes[0]);
+    const [selectedBudgetRange, setSelectedBudgetRange] = useState(budgetRanges[0]);
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -23,8 +42,8 @@ export default function CateringRequestPage() {
             phone_number: (formData.get("phone_number") as string) || null,
             event_date: formData.get("event_date") as string,
             guest_count: parseInt(formData.get("guest_count") as string, 10),
-            event_type: formData.get("event_type") as string,
-            budget_range: (formData.get("budget_range") as string) || null,
+            event_type: selectedEventType.id,
+            budget_range: selectedBudgetRange.id,
             special_requests: (formData.get("special_requests") as string) || null,
         };
 
@@ -56,7 +75,7 @@ export default function CateringRequestPage() {
 
     if (isSuccess) {
         return (
-            <main className="flex-1 bg-[color:var(--color-cream)] flex items-center justify-center p-6">
+            <main className="flex-1 bg-[color:var(--color-cream)] flex items-center justify-center p-6 mt-10">
                 <div className="max-w-xl mx-auto text-center bg-white p-12 rounded-3xl border border-[color:var(--color-border)] shadow-xl animate-scale-in">
                     <div className="w-20 h-20 bg-[color:var(--color-success-bg)] text-[color:var(--color-success-text)] rounded-full flex items-center justify-center mx-auto mb-6">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
@@ -83,7 +102,7 @@ export default function CateringRequestPage() {
     return (
         <main className="flex-1 bg-[color:var(--color-cream)]">
             {/* Header */}
-            <section className="bg-[color:var(--color-forest)] text-white py-20 px-6 text-center">
+            <section className="bg-[color:var(--color-forest)] text-white py-20 px-6 text-center mt-10">
                 <div className="max-w-3xl mx-auto animate-fade-up">
                     <h1 className="text-4xl md:text-5xl font-bold mb-4" style={{ fontFamily: "var(--font-serif)" }}>
                         Request Catering
@@ -111,64 +130,109 @@ export default function CateringRequestPage() {
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="flex flex-col gap-2">
                                     <label htmlFor="first_name" className="text-sm font-semibold text-[color:var(--color-text)]">First Name *</label>
-                                    <input required type="text" id="first_name" name="first_name" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white" />
+                                    <input required type="text" id="first_name" name="first_name" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white transition-colors" />
                                 </div>
                                 <div className="flex flex-col gap-2">
                                     <label htmlFor="last_name" className="text-sm font-semibold text-[color:var(--color-text)]">Last Name *</label>
-                                    <input required type="text" id="last_name" name="last_name" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white" />
+                                    <input required type="text" id="last_name" name="last_name" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white transition-colors" />
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="flex flex-col gap-2">
                                     <label htmlFor="email" className="text-sm font-semibold text-[color:var(--color-text)]">Email Address *</label>
-                                    <input required type="email" id="email" name="email" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white" />
+                                    <input required type="email" id="email" name="email" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white transition-colors" />
                                 </div>
                                 <div className="flex flex-col gap-2">
                                     <label htmlFor="phone_number" className="text-sm font-semibold text-[color:var(--color-text)]">Phone Number</label>
-                                    <input type="tel" id="phone_number" name="phone_number" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white" />
+                                    <input type="tel" id="phone_number" name="phone_number" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white transition-colors" />
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="flex flex-col gap-2">
                                     <label htmlFor="event_date" className="text-sm font-semibold text-[color:var(--color-text)]">Event Date *</label>
-                                    <input required type="date" id="event_date" name="event_date" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white" />
+                                    <input required type="date" id="event_date" name="event_date" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white transition-colors" />
                                 </div>
                                 <div className="flex flex-col gap-2">
                                     <label htmlFor="guest_count" className="text-sm font-semibold text-[color:var(--color-text)]">Estimated Guest Count *</label>
-                                    <input required type="number" min="1" id="guest_count" name="guest_count" placeholder="e.g. 50" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white" />
+                                    <input required type="number" min="1" id="guest_count" name="guest_count" placeholder="e.g. 50" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white transition-colors" />
                                 </div>
                             </div>
 
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                 <div className="flex flex-col gap-2">
-                                    <label htmlFor="event_type" className="text-sm font-semibold text-[color:var(--color-text)]">Event Type *</label>
-                                    <select required id="event_type" name="event_type" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white">
-                                        <option value="">Select event type...</option>
-                                        <option value="corporate">Corporate Event</option>
-                                        <option value="wedding">Wedding</option>
-                                        <option value="birthday">Birthday Party</option>
-                                        <option value="private-dinner">Private Dinner</option>
-                                        <option value="other">Other</option>
-                                    </select>
+                                    <label id="event-type-label" className="text-sm font-semibold text-[color:var(--color-text)]">Event Type *</label>
+                                    <Listbox value={selectedEventType} onChange={setSelectedEventType} name="event_type">
+                                        <div className="relative">
+                                            <ListboxButton aria-labelledby="event-type-label" className="relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white transition-colors">
+                                                <span className="block truncate">{selectedEventType.name}</span>
+                                                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                                    <svg className="h-5 w-5 text-[color:var(--color-muted)]" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fillRule="evenodd" d="M10 3a.75.75 0 01.55.24l3.25 3.5a.75.75 0 11-1.1 1.02L10 4.852 7.3 7.76a.75.75 0 01-1.1-1.02l3.25-3.5A.75.75 0 0110 3zm-3.76 9.2a.75.75 0 011.06.04l2.7 2.908 2.7-2.908a.75.75 0 111.1 1.02l-3.25 3.5a.75.75 0 01-1.1 0l-3.25-3.5a.75.75 0 01.04-1.06z" clipRule="evenodd" />
+                                                    </svg>
+                                                </span>
+                                            </ListboxButton>
+                                            <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
+                                                {eventTypes.map((type, idx) => (
+                                                    <ListboxOption
+                                                        key={idx}
+                                                        className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
+                                                        value={type}
+                                                    >
+                                                        <span className="block truncate font-medium group-data-[selected]:font-bold group-data-[selected]:text-[color:var(--color-forest)]">
+                                                            {type.name}
+                                                        </span>
+                                                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-[color:var(--color-sage)] group-data-[selected]:opacity-100 opacity-0 transition-opacity">
+                                                            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                                            </svg>
+                                                        </span>
+                                                    </ListboxOption>
+                                                ))}
+                                            </ListboxOptions>
+                                        </div>
+                                    </Listbox>
                                 </div>
+
                                 <div className="flex flex-col gap-2">
-                                    <label htmlFor="budget_range" className="text-sm font-semibold text-[color:var(--color-text)]">Budget Range</label>
-                                    <select id="budget_range" name="budget_range" className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white">
-                                        <option value="">Select budget range...</option>
-                                        <option value="under-500">Under CAD 500</option>
-                                        <option value="500-1000">CAD 500 - 1,000</option>
-                                        <option value="1000-2500">CAD 1,000 - 2,500</option>
-                                        <option value="2500-5000">CAD 2,500 - 5,000</option>
-                                        <option value="5000-plus">CAD 5,000+</option>
-                                    </select>
+                                    <label id="budget-range-label" className="text-sm font-semibold text-[color:var(--color-text)]">Budget Range (Optional)</label>
+                                    <Listbox value={selectedBudgetRange} onChange={setSelectedBudgetRange} name="budget_range">
+                                        <div className="relative">
+                                            <ListboxButton aria-labelledby="budget-range-label" className="relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white transition-colors">
+                                                <span className="block truncate">{selectedBudgetRange.name}</span>
+                                                <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                                                    <svg className="h-5 w-5 text-[color:var(--color-muted)]" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fillRule="evenodd" d="M10 3a.75.75 0 01.55.24l3.25 3.5a.75.75 0 11-1.1 1.02L10 4.852 7.3 7.76a.75.75 0 01-1.1-1.02l3.25-3.5A.75.75 0 0110 3zm-3.76 9.2a.75.75 0 011.06.04l2.7 2.908 2.7-2.908a.75.75 0 111.1 1.02l-3.25 3.5a.75.75 0 01-1.1 0l-3.25-3.5a.75.75 0 01.04-1.06z" clipRule="evenodd" />
+                                                    </svg>
+                                                </span>
+                                            </ListboxButton>
+                                            <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
+                                                {budgetRanges.map((range, idx) => (
+                                                    <ListboxOption
+                                                        key={idx}
+                                                        className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
+                                                        value={range}
+                                                    >
+                                                        <span className="block truncate font-medium group-data-[selected]:font-bold group-data-[selected]:text-[color:var(--color-forest)]">
+                                                            {range.name}
+                                                        </span>
+                                                        <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-[color:var(--color-sage)] group-data-[selected]:opacity-100 opacity-0 transition-opacity">
+                                                            <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                                <path fillRule="evenodd" d="M16.704 4.153a.75.75 0 01.143 1.052l-8 10.5a.75.75 0 01-1.127.075l-4.5-4.5a.75.75 0 011.06-1.06l3.894 3.893 7.48-9.817a.75.75 0 011.05-.143z" clipRule="evenodd" />
+                                                            </svg>
+                                                        </span>
+                                                    </ListboxOption>
+                                                ))}
+                                            </ListboxOptions>
+                                        </div>
+                                    </Listbox>
                                 </div>
                             </div>
 
                             <div className="flex flex-col gap-2">
                                 <label htmlFor="special_requests" className="text-sm font-semibold text-[color:var(--color-text)]">Dietary Restrictions & Special Requests</label>
-                                <textarea id="special_requests" name="special_requests" rows={4} placeholder="Please list any allergies, dietary needs, or specific menu requests..." className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white resize-y"></textarea>
+                                <textarea id="special_requests" name="special_requests" rows={4} placeholder="Please list any allergies, dietary needs, or specific menu requests..." className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white resize-y transition-colors"></textarea>
                             </div>
 
                             <button
@@ -196,29 +260,29 @@ export default function CateringRequestPage() {
                         <div className="bg-[color:var(--color-cream-dark)] p-8 rounded-3xl border border-[color:var(--color-border)]">
                             <h3 className="text-2xl font-bold text-[color:var(--color-forest)] mb-4" style={{ fontFamily: "var(--font-serif)" }}>Catering Menus</h3>
                             <p className="text-[color:var(--color-muted)] text-sm leading-relaxed mb-6">
-                                From traditional lamprais to international buffet spreads, we offer customizable menus to fit your event perfectly.
+                                We offer customizable menus to fit your event perfectly.
                             </p>
 
                             <ul className="flex flex-col gap-4 mb-6">
                                 <li className="flex items-start gap-3">
                                     <div className="w-1.5 h-1.5 rounded-full bg-[color:var(--color-sage)] mt-1.5 shrink-0" />
                                     <div>
-                                        <strong className="text-sm text-[color:var(--color-forest)] block">Standard Buffet Sets</strong>
+                                        <strong className="text-sm text-[color:var(--color-forest)] block">Standard Menu</strong>
                                         <span className="text-xs text-[color:var(--color-muted)] block">Complete meal packages tailored for 30+ guests.</span>
                                     </div>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <div className="w-1.5 h-1.5 rounded-full bg-[color:var(--color-sage)] mt-1.5 shrink-0" />
                                     <div>
-                                        <strong className="text-sm text-[color:var(--color-forest)] block">Classic Curry Selection</strong>
+                                        <strong className="text-sm text-[color:var(--color-forest)] block">Classic Curry Menu</strong>
                                         <span className="text-xs text-[color:var(--color-muted)] block">Build your own authentic spread with individual dishes.</span>
                                     </div>
                                 </li>
                                 <li className="flex items-start gap-3">
                                     <div className="w-1.5 h-1.5 rounded-full bg-[color:var(--color-sage)] mt-1.5 shrink-0" />
                                     <div>
-                                        <strong className="text-sm text-[color:var(--color-forest)] block">Signature Lamprais</strong>
-                                        <span className="text-xs text-[color:var(--color-muted)] block">Our specialty, individually wrapped portions. Minimum order of 20.</span>
+                                        <strong className="text-sm text-[color:var(--color-forest)] block">International Buffet</strong>
+                                        <span className="text-xs text-[color:var(--color-muted)] block">A diverse selection of dishes for international palates.</span>
                                     </div>
                                 </li>
                             </ul>
