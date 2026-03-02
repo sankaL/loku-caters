@@ -1,7 +1,7 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import ReactDOM from "react-dom";
 
 interface HeroSectionProps {
@@ -27,11 +27,13 @@ interface TooltipModalProps {
 
 function TooltipModal({ title, body, imagePath, onClose }: TooltipModalProps) {
   useEffect(() => {
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") onClose();
     }
+
     document.addEventListener("keydown", handleKey);
     document.body.style.overflow = "hidden";
+
     return () => {
       document.removeEventListener("keydown", handleKey);
       document.body.style.overflow = "";
@@ -50,8 +52,8 @@ function TooltipModal({ title, body, imagePath, onClose }: TooltipModalProps) {
         justifyContent: "center",
         padding: "16px",
       }}
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
       }}
     >
       <div
@@ -64,7 +66,7 @@ function TooltipModal({ title, body, imagePath, onClose }: TooltipModalProps) {
           overflow: "hidden",
           boxShadow: "0 24px 64px rgba(18,39,15,0.25)",
         }}
-        onMouseDown={(e) => e.stopPropagation()}
+        onMouseDown={(event) => event.stopPropagation()}
       >
         <div
           style={{
@@ -118,7 +120,16 @@ function TooltipModal({ title, body, imagePath, onClose }: TooltipModalProps) {
             }}
             aria-label="Close"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--color-muted)"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
               <line x1="18" y1="6" x2="6" y2="18" />
               <line x1="6" y1="6" x2="18" y2="18" />
             </svg>
@@ -140,7 +151,14 @@ function TooltipModal({ title, body, imagePath, onClose }: TooltipModalProps) {
             borderTop: imagePath ? "1px solid var(--color-border)" : "none",
           }}
         >
-          <p style={{ margin: 0, fontSize: "13px", color: "var(--color-muted)", lineHeight: 1.6 }}>
+          <p
+            style={{
+              margin: 0,
+              fontSize: "13px",
+              color: "var(--color-muted)",
+              lineHeight: 1.6,
+            }}
+          >
             {body}
           </p>
         </div>
@@ -168,9 +186,9 @@ export default function HeroSection({
   const canShowTooltip = Boolean(tooltipEnabled && tooltipHeader && tooltipBody);
 
   return (
-    <section className="w-full max-w-5xl mx-auto px-6 pt-4 pb-12">
+    <section className="mx-auto w-full max-w-5xl px-6 pt-4 pb-12">
       <div
-        className="rounded-3xl overflow-hidden relative"
+        className="relative overflow-hidden rounded-3xl"
         style={{ background: "var(--color-forest)" }}
       >
         <div
@@ -186,10 +204,11 @@ export default function HeroSection({
             src={heroSideImagePath}
             alt=""
             aria-hidden="true"
-            className="hidden md:block absolute right-0 inset-y-0 h-full w-auto max-w-[50%] object-contain object-right-bottom pointer-events-none select-none opacity-80"
+            className="pointer-events-none absolute right-0 inset-y-0 hidden h-full w-auto max-w-[50%] select-none object-contain object-right-bottom opacity-80 md:block"
             style={{
               maskImage: "linear-gradient(to right, transparent 0%, black 45%)",
-              WebkitMaskImage: "linear-gradient(to right, transparent 0%, black 45%)",
+              WebkitMaskImage:
+                "linear-gradient(to right, transparent 0%, black 45%)",
             }}
           />
         )}
@@ -197,7 +216,7 @@ export default function HeroSection({
         <div className="relative px-8 py-10 md:px-14 md:py-16">
           {eventDate && (
             <p
-              className="text-xs font-semibold tracking-widest uppercase mb-4 animate-fade-up"
+              className="mb-4 animate-fade-up text-xs font-semibold uppercase tracking-widest"
               style={{ color: "var(--color-sage)" }}
             >
               {eventDate}
@@ -205,14 +224,19 @@ export default function HeroSection({
           )}
 
           <h1
-            className="text-4xl md:text-5xl font-bold leading-tight mb-4 animate-fade-up delay-100"
-            style={{ color: "var(--color-cream)", fontFamily: "var(--font-serif)" }}
+            className="mb-4 animate-fade-up delay-100 text-4xl font-bold leading-tight md:text-5xl"
+            style={{
+              color: "var(--color-cream)",
+              fontFamily: "var(--font-serif)",
+            }}
           >
             {heroHeader || "We're Making"}
             {heroHeaderSage && (
               <>
                 <br />
-                <span style={{ color: "var(--color-sage)" }}>{heroHeaderSage}</span>
+                <span style={{ color: "var(--color-sage)" }}>
+                  {heroHeaderSage}
+                </span>
               </>
             )}
           </h1>
@@ -237,16 +261,27 @@ export default function HeroSection({
                 marginBottom: "16px",
                 transition: "background 0.15s, border-color 0.15s",
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "rgba(114,145,82,0.22)";
-                e.currentTarget.style.borderColor = "rgba(114,145,82,0.75)";
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = "rgba(114,145,82,0.22)";
+                event.currentTarget.style.borderColor =
+                  "rgba(114,145,82,0.75)";
               }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "rgba(114,145,82,0.12)";
-                e.currentTarget.style.borderColor = "rgba(114,145,82,0.45)";
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = "rgba(114,145,82,0.12)";
+                event.currentTarget.style.borderColor =
+                  "rgba(114,145,82,0.45)";
               }}
             >
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <circle cx="12" cy="12" r="10" />
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
@@ -256,15 +291,16 @@ export default function HeroSection({
           )}
 
           <p
-            className="text-base md:text-lg leading-relaxed mb-2 max-w-xl animate-fade-up delay-200"
+            className="mb-2 max-w-xl animate-fade-up delay-200 text-base leading-relaxed md:text-lg"
             style={{ color: "rgba(247,245,240,0.85)" }}
           >
-            {heroSubheader || "We're making a fresh batch and we'd love for you to have some."}
+            {heroSubheader ||
+              "We're making a fresh batch and we'd love for you to have some."}
           </p>
 
           {promoDetails && (
             <p
-              className="text-sm mb-4 max-w-xl animate-fade-up delay-300"
+              className="mb-4 max-w-xl animate-fade-up delay-300 text-sm"
               style={{ color: "var(--color-sage)" }}
             >
               {promoDetails}
@@ -272,10 +308,11 @@ export default function HeroSection({
           )}
 
           <p
-            className="text-sm animate-fade-up delay-300"
+            className="animate-fade-up delay-300 text-sm"
             style={{ color: "rgba(247,245,240,0.65)" }}
           >
-            {"Scroll down to pre-order and we'll confirm via email before pickup."}
+            Scroll down to pre-order and we&apos;ll confirm via email before
+            pickup.
           </p>
 
           {onFeedbackClick && (
@@ -297,11 +334,11 @@ export default function HeroSection({
                 cursor: "pointer",
                 transition: "background 0.15s",
               }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "#7a5234";
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = "#7a5234";
               }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "var(--color-bark)";
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = "var(--color-bark)";
               }}
             >
               <svg
@@ -318,7 +355,7 @@ export default function HeroSection({
                 <line x1="12" y1="8" x2="12" y2="12" />
                 <line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
-              {"Can't join this batch?"}
+              Can&apos;t join this batch?
             </button>
           )}
         </div>

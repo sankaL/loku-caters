@@ -130,21 +130,39 @@ Registry helper paths define where new images should be placed:
 
 ## Table: `feedback`
 
-Stores visitor feedback from users who cannot participate in the current batch. Name is optional; all submissions may be anonymous.
+Stores all contact messages, pre-order event feedback, and post-order customer feedback in one table. Historical rows were backfilled from the legacy source-based `feedback_type` values into the canonical shape below.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
-| `feedback_type` | `TEXT` | NOT NULL, default `non_customer` | `non_customer` (pre-order badge) or `customer` (post-order confirmation page) |
-| `order_id` | `TEXT` | nullable | Links to `orders.id` for customer feedback |
-| `name` | `TEXT` | nullable | Auto-filled from order for customers; optional for non-customers |
-| `contact` | `TEXT` | nullable | Auto-filled from order email for customers; optional for non-customers |
-| `reason` | `TEXT` | nullable | Machine-readable key; only set for non-customer feedback (see allowed values below) |
+| `origin` | `TEXT` | NOT NULL | Source page key: `contact_us`, `events_page_non_customer`, or `events_page_customer` |
+| `feedback_type` | `TEXT` | NOT NULL | Message category key: `general_question`, `feedback`, `collaboration`, or `other` |
+| `order_id` | `TEXT` | nullable | Links to `orders.id` for post-order customer feedback |
+| `name` | `TEXT` | nullable | Optional on contact and pre-order feedback; auto-filled from order for post-order feedback |
+| `contact` | `TEXT` | nullable | Optional on contact and pre-order feedback; auto-filled from order email for post-order feedback |
+| `reason` | `TEXT` | nullable | Machine-readable pre-order reason key; only set when `origin = 'events_page_non_customer'` (see allowed values below) |
 | `other_details` | `TEXT` | nullable | Free text; populated only when `reason = 'other'` |
-| `message` | `TEXT` | nullable | Free-form feedback message; primarily used for customer feedback |
+| `message` | `TEXT` | nullable | Free-form message body for contact submissions and post-order feedback |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
 | `status` | `VARCHAR` | NOT NULL, default `'new'` | Admin triage state: `new`, `in_progress`, or `resolved` |
 | `admin_comment` | `TEXT` | nullable | Internal admin note; not visible to submitters |
+
+### Allowed `origin` values
+
+| Value | Display label |
+|---|---|
+| `contact_us` | Contact Us |
+| `events_page_non_customer` | Events Page (Non-customer) |
+| `events_page_customer` | Events Page (Customer) |
+
+### Allowed `feedback_type` values
+
+| Value | Display label |
+|---|---|
+| `general_question` | General Question |
+| `feedback` | Feedback |
+| `collaboration` | Collaboration |
+| `other` | Other |
 
 ### Allowed `reason` values
 
@@ -155,6 +173,7 @@ Stores visitor feedback from users who cannot participate in the current batch. 
 | `dietary_needs` | Food does not meet dietary needs |
 | `not_available` | Not available on the event date |
 | `different_menu` | Prefer a different menu item |
+| `prefer_delivery` | Prefer delivery over pickup |
 | `not_interested` | Not interested at this time |
 | `other` | Other |
 
@@ -188,6 +207,8 @@ alembic upgrade head
 | `0015_feedback_status_comment` | adds `status` (VARCHAR, default `'new'`) and `admin_comment` (TEXT, nullable) to `feedback` |
 | `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true, payment_method='etransfer', payment_method_other=NULL` |
 | `0017_phone_optional` | updates `ck_orders_contact_required_unless_excluded` constraint to only require `email` (not `phone_number`) when `exclude_email` is false |
+| `db2173ba0be0_create_catering_requests` | `catering_requests` table |
+| `4f7d2b6c9a10_feedback_origin_rework` | adds `origin` to `feedback`; backfills legacy rows into canonical `origin` and `feedback_type` values |
 
 ---
 

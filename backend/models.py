@@ -86,7 +86,8 @@ class Feedback(Base):
     __tablename__ = "feedback"
 
     id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    feedback_type: Mapped[str] = mapped_column(String, nullable=False, default="non_customer")
+    origin: Mapped[str] = mapped_column(String, nullable=False)
+    feedback_type: Mapped[str] = mapped_column(String, nullable=False)
     order_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     name: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     contact: Mapped[Optional[str]] = mapped_column(String, nullable=True)

@@ -23,7 +23,7 @@ export default function SuccessView({ results }: SuccessViewProps) {
   const [serverError, setServerError] = useState("");
 
   function handleOpen() {
-    captureEvent("feedback_modal_opened", { feedback_type: "customer" });
+    captureEvent("feedback_modal_opened", { origin: "events_page_customer", feedback_type: "feedback" });
     setModalOpen(true);
   }
 
@@ -43,7 +43,8 @@ export default function SuccessView({ results }: SuccessViewProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          feedback_type: "customer",
+          origin: "events_page_customer",
+          feedback_type: "feedback",
           order_id: first.order_id,
           name: order.name,
           contact: order.email,
@@ -54,7 +55,11 @@ export default function SuccessView({ results }: SuccessViewProps) {
         setServerError("Something went wrong. Please try again.");
         return;
       }
-      captureEvent("feedback_submitted", { feedback_type: "customer", order_id: first.order_id });
+      captureEvent("feedback_submitted", {
+        origin: "events_page_customer",
+        feedback_type: "feedback",
+        order_id: first.order_id,
+      });
       setSubmitted(true);
     } catch {
       setServerError("Unable to send. Please try again.");

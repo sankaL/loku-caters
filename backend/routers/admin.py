@@ -23,7 +23,8 @@ from event_images import get_event_image_catalog, validate_event_image_key
 from models import Event, Feedback, Item, Location, Order
 from schemas import (
     EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
-    FEEDBACK_STATUSES, FeedbackStatusUpdate, FeedbackCommentUpdate,
+    FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES, FEEDBACK_TYPE_LABELS,
+    FeedbackStatusUpdate, FeedbackCommentUpdate,
 )
 from services.email import send_confirmation, send_reminder
 
@@ -1234,25 +1235,10 @@ def delete_order(
 # Feedback endpoints
 # ---------------------------------------------------------------------------
 
-FEEDBACK_REASON_LABELS = {
-    "price_too_high": "Price too high",
-    "location_not_convenient": "Pickup location not convenient",
-    "dietary_needs": "Food does not meet dietary needs",
-    "not_available": "Not available on the event date",
-    "different_menu": "Prefer a different menu item",
-    "prefer_delivery": "Prefer delivery over pickup",
-    "not_interested": "Not interested at this time",
-    "catering_inquiry": "Catering inquiry",
-    "previous_order_inquiry": "Question about a past order",
-    "stay_updated": "Stay updated on future events",
-    "general_feedback": "General feedback or suggestions",
-    "other": "Other",
-}
-
-
 @router.get("/feedback")
 def admin_list_feedback(
     reason: Optional[str] = Query(None),
+    origin: Optional[str] = Query(None),
     feedback_type: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
@@ -1260,6 +1246,8 @@ def admin_list_feedback(
     query = db.query(Feedback).order_by(Feedback.created_at.desc())
     if reason:
         query = query.filter(Feedback.reason == reason)
+    if origin:
+        query = query.filter(Feedback.origin == origin)
     if feedback_type:
         query = query.filter(Feedback.feedback_type == feedback_type)
 
@@ -1268,7 +1256,10 @@ def admin_list_feedback(
     items = [
         {
             "id": row.id,
+            "origin": row.origin,
+            "origin_label": FEEDBACK_ORIGIN_LABELS.get(row.origin, row.origin),
             "feedback_type": row.feedback_type,
+            "feedback_type_label": FEEDBACK_TYPE_LABELS.get(row.feedback_type, row.feedback_type),
             "order_id": row.order_id,
             "name": row.name,
             "contact": row.contact,
@@ -1283,36 +1274,41 @@ def admin_list_feedback(
         for row in rows
     ]
 
-    # Metrics across all feedback (unfiltered)
     all_rows = db.query(Feedback).all()
     total = len(all_rows)
-    customer_count = sum(1 for r in all_rows if r.feedback_type == "customer")
-    non_customer_count = sum(1 for r in all_rows if r.feedback_type == "non_customer")
-    general_contact_count = sum(1 for r in all_rows if r.feedback_type == "general_contact")
+
+    origin_counts = {
+        origin_key: sum(1 for row in all_rows if row.origin == origin_key)
+        for origin_key in FEEDBACK_ORIGIN_LABELS
+    }
+    type_counts = {
+        feedback_key: sum(1 for row in all_rows if row.feedback_type == feedback_key)
+        for feedback_key in FEEDBACK_TYPE_LABELS
+    }
 
     reason_counts: dict[str, int] = {}
     for row in all_rows:
-        if row.feedback_type != "non_customer":
+        if row.origin != "events_page_non_customer":
             continue
         if row.reason:
             reason_counts[row.reason] = reason_counts.get(row.reason, 0) + 1
 
-    metrics = [
+    pre_order_count = origin_counts["events_page_non_customer"]
+    reason_metrics = [
         {
             "reason": r,
             "label": FEEDBACK_REASON_LABELS.get(r, r),
             "count": reason_counts.get(r, 0),
-            "pct": round(reason_counts.get(r, 0) / non_customer_count * 100) if non_customer_count else 0,
+            "pct": round(reason_counts.get(r, 0) / pre_order_count * 100) if pre_order_count else 0,
         }
         for r in FEEDBACK_REASON_LABELS
     ]
 
     return {
         "total": total,
-        "customer_count": customer_count,
-        "non_customer_count": non_customer_count,
-        "general_contact_count": general_contact_count,
-        "metrics": metrics,
+        "origin_counts": origin_counts,
+        "type_counts": type_counts,
+        "reason_metrics": reason_metrics,
         "items": items,
     }
 

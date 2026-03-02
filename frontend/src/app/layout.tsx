@@ -14,9 +14,6 @@ const playfair = Playfair_Display({
   display: "swap",
 });
 
-import Navigation from "@/components/Navigation";
-import Footer from "@/components/Footer";
-
 export const metadata: Metadata = {
   title: "Loku Caters | Authentic Sri Lankan Cuisine",
   description:
@@ -39,11 +36,7 @@ export default function RootLayout({
       data-scroll-behavior="smooth"
       className={`${inter.variable} ${playfair.variable}`}
     >
-      <body suppressHydrationWarning className="flex flex-col min-h-screen pt-20">
-        <Navigation />
-        {children}
-        <Footer />
-      </body>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

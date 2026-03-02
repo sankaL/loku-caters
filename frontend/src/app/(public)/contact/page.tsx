@@ -7,17 +7,18 @@ import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 
 const subjects = [
-    "General Question",
-    "Feedback",
-    "Collaboration",
-    "Other"
+    { value: "general_question", label: "General Question" },
+    { value: "feedback", label: "Feedback" },
+    { value: "collaboration", label: "Collaboration" },
+    { value: "other", label: "Other" },
 ];
 
 export default function ContactPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
     const [errorDetails, setErrorDetails] = useState<string | null>(null);
-    const [selectedSubject, setSelectedSubject] = useState(subjects[0]);
+    const [selectedSubject, setSelectedSubject] = useState(subjects[0].value);
+    const selectedSubjectOption = subjects.find((subject) => subject.value === selectedSubject) ?? subjects[0];
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -26,10 +27,11 @@ export default function ContactPage() {
 
         const formData = new FormData(e.currentTarget);
         const payload = {
-            feedback_type: "non_customer",
+            origin: "contact_us",
+            feedback_type: selectedSubject,
             name: formData.get("name") as string,
             contact: formData.get("email") as string, // Backend accepts contact string
-            message: `Subject: ${formData.get("subject")}\n\n${formData.get("message")}`,
+            message: formData.get("message") as string,
         };
 
         try {
@@ -46,7 +48,10 @@ export default function ContactPage() {
             const data = await resp.json();
             if (data.success) {
                 setIsSuccess(true);
-                captureEvent("contact_form_submitted");
+                captureEvent("contact_form_submitted", {
+                    origin: "contact_us",
+                    feedback_type: selectedSubject,
+                });
             } else {
                 throw new Error("Submission failed on server");
             }
@@ -121,7 +126,7 @@ export default function ContactPage() {
                                 <div>
                                     <strong className="block text-[color:var(--color-forest)] font-semibold mb-1">Kitchen Location</strong>
                                     <p className="text-[color:var(--color-muted)]">
-                                        Toronto, ON<br />
+                                        Welland, ON<br />
                                         (Pickup locations vary by pop-up event)
                                     </p>
                                 </div>
@@ -189,7 +194,7 @@ export default function ContactPage() {
                                         <Listbox value={selectedSubject} onChange={setSelectedSubject} name="subject">
                                             <div className="relative">
                                                 <ListboxButton aria-labelledby="listbox-label" className="relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white transition-colors">
-                                                    <span className="block truncate">{selectedSubject}</span>
+                                                    <span className="block truncate">{selectedSubjectOption.label}</span>
                                                     <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
                                                         <svg className="h-5 w-5 text-[color:var(--color-muted)]" viewBox="0 0 20 20" fill="currentColor">
                                                             <path fillRule="evenodd" d="M10 3a.75.75 0 01.55.24l3.25 3.5a.75.75 0 11-1.1 1.02L10 4.852 7.3 7.76a.75.75 0 01-1.1-1.02l3.25-3.5A.75.75 0 0110 3zm-3.76 9.2a.75.75 0 011.06.04l2.7 2.908 2.7-2.908a.75.75 0 111.1 1.02l-3.25 3.5a.75.75 0 01-1.1 0l-3.25-3.5a.75.75 0 01.04-1.06z" clipRule="evenodd" />
@@ -197,14 +202,14 @@ export default function ContactPage() {
                                                     </span>
                                                 </ListboxButton>
                                                 <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
-                                                    {subjects.map((subject, subjectIdx) => (
+                                                    {subjects.map((subject) => (
                                                         <ListboxOption
-                                                            key={subjectIdx}
+                                                            key={subject.value}
                                                             className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
-                                                            value={subject}
+                                                            value={subject.value}
                                                         >
                                                             <span className="block truncate font-medium group-data-[selected]:font-bold group-data-[selected]:text-[color:var(--color-forest)]">
-                                                                {subject}
+                                                                {subject.label}
                                                             </span>
                                                             <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-[color:var(--color-sage)] group-data-[selected]:opacity-100 opacity-0 transition-opacity">
                                                                 <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">

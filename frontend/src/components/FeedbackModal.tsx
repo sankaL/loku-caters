@@ -69,7 +69,8 @@ export default function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          feedback_type: "non_customer",
+          origin: "events_page_non_customer",
+          feedback_type: "feedback",
           name: name.trim() || null,
           contact: contact.trim() || null,
           reason,
@@ -80,7 +81,11 @@ export default function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
         setServerError("Something went wrong. Please try again.");
         return;
       }
-      captureEvent("feedback_submitted", { reason });
+      captureEvent("feedback_submitted", {
+        origin: "events_page_non_customer",
+        feedback_type: "feedback",
+        reason,
+      });
       setSubmitted(true);
     } catch {
       setServerError("Unable to connect. Please check your connection and try again.");

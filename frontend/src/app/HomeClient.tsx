@@ -4,7 +4,7 @@ import Link from "next/link";
 import type { EventConfig } from "@/config/event";
 
 export default function HomeClient({ eventConfig }: { eventConfig: EventConfig | null }) {
-  const isActive = eventConfig?.is_active;
+  const isActive = eventConfig !== null;
 
   return (
     <main className="flex-1 flex flex-col bg-[color:var(--color-cream)]">
@@ -31,7 +31,7 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
           </p>
 
           {/* Dynamic CTA Block */}
-          <div className="bg-white/10 backdrop-blur-md border border-white/20 p-8 rounded-3xl max-w-xl mx-auto shadow-2xl animate-fade-up delay-200">
+          <div className={`backdrop-blur-md border p-8 rounded-3xl max-w-xl mx-auto shadow-2xl animate-fade-up delay-200 ${isActive ? "bg-black/40 border-white/30" : "bg-white/10 border-white/20"}`}>
             {isActive ? (
               <>
                 <h2 className="text-xl font-semibold text-white mb-2">
@@ -42,7 +42,7 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
                 </p>
                 <Link
                   href="/orders"
-                  className="inline-block bg-[color:var(--color-accent)] text-[color:var(--color-forest)] px-8 py-3.5 rounded-full font-bold text-lg hover:bg-white hover:scale-105 transition-all duration-300 shadow-lg"
+                  className="inline-block bg-[color:var(--color-sage)] text-white px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-forest)] hover:scale-105 transition-all duration-300 shadow-lg"
                 >
                   Order Now
                 </Link>

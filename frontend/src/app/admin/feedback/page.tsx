@@ -17,9 +17,15 @@ interface FeedbackMetric {
   pct: number;
 }
 
+type FeedbackOrigin = "contact_us" | "events_page_non_customer" | "events_page_customer";
+type FeedbackType = "general_question" | "feedback" | "collaboration" | "other";
+
 interface FeedbackItem {
   id: string;
-  feedback_type: string;
+  origin: FeedbackOrigin;
+  origin_label: string;
+  feedback_type: FeedbackType;
+  feedback_type_label: string;
   order_id: string | null;
   name: string | null;
   contact: string | null;
@@ -34,10 +40,9 @@ interface FeedbackItem {
 
 interface FeedbackResponse {
   total: number;
-  customer_count: number;
-  non_customer_count: number;
-  general_contact_count: number;
-  metrics: FeedbackMetric[];
+  origin_counts: Record<FeedbackOrigin, number>;
+  type_counts: Record<FeedbackType, number>;
+  reason_metrics: FeedbackMetric[];
   items: FeedbackItem[];
 }
 
@@ -65,12 +70,73 @@ const REASON_COLORS: Record<string, { bg: string; text: string }> = {
   different_menu:          { bg: "#eff6ff", text: "#1d4ed8" },
   prefer_delivery:         { bg: "#f0f9ff", text: "#0369a1" },
   not_interested:          { bg: "#faf5ff", text: "#6b21a8" },
-  catering_inquiry:        { bg: "#ecfdf5", text: "#047857" },
-  previous_order_inquiry:  { bg: "#eff6ff", text: "#1d4ed8" },
-  stay_updated:            { bg: "#f0fdf4", text: "#166534" },
-  general_feedback:        { bg: "var(--color-cream)", text: "var(--color-forest)" },
   other:                   { bg: "var(--color-cream)", text: "var(--color-muted)" },
 };
+
+const ORIGIN_STYLES: Record<FeedbackOrigin, { bg: string; color: string; border: string; label: string }> = {
+  contact_us: {
+    bg: "#eff6ff",
+    color: "#1d4ed8",
+    border: "1px solid #bfdbfe",
+    label: "Contact Us",
+  },
+  events_page_non_customer: {
+    bg: "var(--color-cream)",
+    color: "var(--color-muted)",
+    border: "1px solid var(--color-border)",
+    label: "Events Page (Non-customer)",
+  },
+  events_page_customer: {
+    bg: "#f0f7eb",
+    color: "#2d6a2d",
+    border: "1px solid #c8ddb4",
+    label: "Events Page (Customer)",
+  },
+};
+
+const TYPE_STYLES: Record<FeedbackType, { bg: string; color: string; border: string; label: string }> = {
+  general_question: {
+    bg: "#eff6ff",
+    color: "#1d4ed8",
+    border: "1px solid #bfdbfe",
+    label: "General Question",
+  },
+  feedback: {
+    bg: "#f0f7eb",
+    color: "#2d6a2d",
+    border: "1px solid #c8ddb4",
+    label: "Feedback",
+  },
+  collaboration: {
+    bg: "#fdf2f8",
+    color: "#be185d",
+    border: "1px solid #fbcfe8",
+    label: "Collaboration",
+  },
+  other: {
+    bg: "var(--color-cream)",
+    color: "var(--color-muted)",
+    border: "1px solid var(--color-border)",
+    label: "Other",
+  },
+};
+
+function buildOriginCounts(items: FeedbackItem[]): Record<FeedbackOrigin, number> {
+  return {
+    contact_us: items.filter((item) => item.origin === "contact_us").length,
+    events_page_non_customer: items.filter((item) => item.origin === "events_page_non_customer").length,
+    events_page_customer: items.filter((item) => item.origin === "events_page_customer").length,
+  };
+}
+
+function buildTypeCounts(items: FeedbackItem[]): Record<FeedbackType, number> {
+  return {
+    general_question: items.filter((item) => item.feedback_type === "general_question").length,
+    feedback: items.filter((item) => item.feedback_type === "feedback").length,
+    collaboration: items.filter((item) => item.feedback_type === "collaboration").length,
+    other: items.filter((item) => item.feedback_type === "other").length,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Badges
@@ -96,29 +162,8 @@ function ReasonBadge({ reason, label }: { reason: string; label: string }) {
   );
 }
 
-function TypeBadge({ type }: { type: string }) {
-  const kind = type === "customer" ? "customer" : type === "general_contact" ? "general_contact" : "non_customer";
-  const styleByKind: Record<string, { bg: string; color: string; border: string; label: string }> = {
-    customer: {
-      bg: "#f0f7eb",
-      color: "#2d6a2d",
-      border: "1px solid #c8ddb4",
-      label: "Customer",
-    },
-    non_customer: {
-      bg: "var(--color-cream)",
-      color: "var(--color-muted)",
-      border: "1px solid var(--color-border)",
-      label: "Non-customer",
-    },
-    general_contact: {
-      bg: "#eff6ff",
-      color: "#1d4ed8",
-      border: "1px solid #bfdbfe",
-      label: "Contact",
-    },
-  };
-  const s = styleByKind[kind];
+function OriginBadge({ origin, label }: { origin: FeedbackOrigin; label?: string }) {
+  const style = ORIGIN_STYLES[origin];
   return (
     <span
       style={{
@@ -127,13 +172,35 @@ function TypeBadge({ type }: { type: string }) {
         borderRadius: "999px",
         fontSize: "12px",
         fontWeight: 600,
-        background: s.bg,
-        color: s.color,
+        background: style.bg,
+        color: style.color,
         whiteSpace: "nowrap",
-        border: s.border,
+        border: style.border,
       }}
     >
-      {s.label}
+      {label ?? style.label}
+    </span>
+  );
+}
+
+function TypeBadge({ type, label }: { type: string; label?: string }) {
+  const resolvedType = Object.prototype.hasOwnProperty.call(TYPE_STYLES, type) ? (type as FeedbackType) : "other";
+  const style = TYPE_STYLES[resolvedType];
+  return (
+    <span
+      style={{
+        display: "inline-block",
+        padding: "3px 10px",
+        borderRadius: "999px",
+        fontSize: "12px",
+        fontWeight: 600,
+        background: style.bg,
+        color: style.color,
+        whiteSpace: "nowrap",
+        border: style.border,
+      }}
+    >
+      {label ?? style.label}
     </span>
   );
 }
@@ -329,7 +396,7 @@ function ExpandedRow({
 // Page
 // ---------------------------------------------------------------------------
 
-const COL_COUNT = 9; // checkbox, date, type, name, contact, reason, status, message, actions
+const COL_COUNT = 10; // checkbox, date, origin, type, name, contact, reason, status, message, actions
 
 export default function AdminFeedbackPage() {
   const router = useRouter();
@@ -339,8 +406,9 @@ export default function AdminFeedbackPage() {
   const [error, setError] = useState("");
 
   // Filters
+  const [originFilter, setOriginFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
-  const [reasonFilter, setReasonFilter] = useState("all");
+  const [preOrderReasonFilter, setPreOrderReasonFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -418,13 +486,16 @@ export default function AdminFeedbackPage() {
   const filtered = useMemo(() => {
     if (!data) return [];
     let items = data.items;
+    if (originFilter !== "all") items = items.filter((i) => i.origin === originFilter);
     if (typeFilter !== "all") items = items.filter((i) => i.feedback_type === typeFilter);
-    if (reasonFilter !== "all") items = items.filter((i) => i.reason === reasonFilter);
+    if (preOrderReasonFilter !== "all") items = items.filter((i) => i.reason === preOrderReasonFilter);
     if (statusFilter !== "all") items = items.filter((i) => i.status === statusFilter);
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       items = items.filter(
         (i) =>
+          i.origin_label.toLowerCase().includes(q) ||
+          i.feedback_type_label.toLowerCase().includes(q) ||
           (i.name ?? "").toLowerCase().includes(q) ||
           (i.contact ?? "").toLowerCase().includes(q) ||
           (i.reason_label ?? "").toLowerCase().includes(q) ||
@@ -433,26 +504,30 @@ export default function AdminFeedbackPage() {
       );
     }
     return items;
-  }, [data, typeFilter, reasonFilter, statusFilter, searchQuery]);
+  }, [data, originFilter, typeFilter, preOrderReasonFilter, statusFilter, searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  useEffect(() => { setPage(1); }, [typeFilter, reasonFilter, statusFilter, searchQuery]);
+  useEffect(() => { setPage(1); }, [originFilter, typeFilter, preOrderReasonFilter, statusFilter, searchQuery]);
   useEffect(() => { setPage((prev) => Math.min(prev, totalPages)); }, [totalPages]);
 
   const sortedMetrics = useMemo(
-    () => (data ? [...data.metrics].sort((a, b) => b.count - a.count).filter((m) => m.count > 0) : []),
+    () => (data ? [...data.reason_metrics].sort((a, b) => b.count - a.count).filter((m) => m.count > 0) : []),
     [data]
   );
 
-  const hasFilters = typeFilter !== "all" || reasonFilter !== "all" || statusFilter !== "all" || !!searchQuery;
+  const hasFilters = originFilter !== "all"
+    || typeFilter !== "all"
+    || preOrderReasonFilter !== "all"
+    || statusFilter !== "all"
+    || !!searchQuery;
 
-  function recomputeMetrics(items: FeedbackItem[], template: FeedbackMetric[]): FeedbackMetric[] {
-    const nonCustomerCount = items.filter((i) => i.feedback_type === "non_customer").length;
+  function recomputeReasonMetrics(items: FeedbackItem[], template: FeedbackMetric[]): FeedbackMetric[] {
+    const nonCustomerCount = items.filter((i) => i.origin === "events_page_non_customer").length;
     return template.map((metric) => {
       const count = items.filter(
-        (i) => i.feedback_type === "non_customer" && i.reason === metric.reason
+        (i) => i.origin === "events_page_non_customer" && i.reason === metric.reason
       ).length;
       return {
         ...metric,
@@ -460,6 +535,17 @@ export default function AdminFeedbackPage() {
         pct: nonCustomerCount > 0 ? Math.round((count / nonCustomerCount) * 100) : 0,
       };
     });
+  }
+
+  function rebuildFeedbackData(previous: FeedbackResponse, items: FeedbackItem[]): FeedbackResponse {
+    return {
+      ...previous,
+      items,
+      total: items.length,
+      origin_counts: buildOriginCounts(items),
+      type_counts: buildTypeCounts(items),
+      reason_metrics: recomputeReasonMetrics(items, previous.reason_metrics),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -574,17 +660,8 @@ export default function AdminFeedbackPage() {
       if (!res.ok) throw new Error("Failed");
       setData((prev) => {
         if (!prev) return prev;
-        const deleted = prev.items.find((i) => i.id === id);
         const nextItems = prev.items.filter((i) => i.id !== id);
-        return {
-          ...prev,
-          items: nextItems,
-          total: prev.total - 1,
-          customer_count: deleted?.feedback_type === "customer" ? prev.customer_count - 1 : prev.customer_count,
-          non_customer_count: deleted?.feedback_type === "non_customer" ? prev.non_customer_count - 1 : prev.non_customer_count,
-          general_contact_count: deleted?.feedback_type === "general_contact" ? prev.general_contact_count - 1 : prev.general_contact_count,
-          metrics: recomputeMetrics(nextItems, prev.metrics),
-        };
+        return rebuildFeedbackData(prev, nextItems);
       });
       setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
       if (expandedId === id) setExpandedId(null);
@@ -608,17 +685,8 @@ export default function AdminFeedbackPage() {
       const idSet = new Set(ids);
       setData((prev) => {
         if (!prev) return prev;
-        const deleted = prev.items.filter((i) => idSet.has(i.id));
         const nextItems = prev.items.filter((i) => !idSet.has(i.id));
-        return {
-          ...prev,
-          items: nextItems,
-          total: prev.total - deleted.length,
-          customer_count: prev.customer_count - deleted.filter((d) => d.feedback_type === "customer").length,
-          non_customer_count: prev.non_customer_count - deleted.filter((d) => d.feedback_type === "non_customer").length,
-          general_contact_count: prev.general_contact_count - deleted.filter((d) => d.feedback_type === "general_contact").length,
-          metrics: recomputeMetrics(nextItems, prev.metrics),
-        };
+        return rebuildFeedbackData(prev, nextItems);
       });
       setSelectedIds(new Set());
       if (expandedId && idSet.has(expandedId)) setExpandedId(null);
@@ -751,17 +819,69 @@ export default function AdminFeedbackPage() {
             </p>
           </div>
 
-          {/* Customers */}
+          {/* Contact Us */}
           <div
             style={{
               background: "white",
-              border: `2px solid ${typeFilter === "customer" ? "var(--color-sage)" : "var(--color-border)"}`,
+              border: `2px solid ${originFilter === "contact_us" ? "var(--color-sage)" : "var(--color-border)"}`,
               borderRadius: 20,
               padding: 20,
               cursor: "pointer",
               transition: "border-color 0.15s",
             }}
-            onClick={() => setTypeFilter(typeFilter === "customer" ? "all" : "customer")}
+            onClick={() => setOriginFilter(originFilter === "contact_us" ? "all" : "contact_us")}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                Contact Us
+              </p>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+              </svg>
+            </div>
+            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+              {data.origin_counts.contact_us}
+            </p>
+            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Messages and inquiries</p>
+          </div>
+
+          {/* Events Page (Non-customer) */}
+          <div
+            style={{
+              background: "white",
+              border: `2px solid ${originFilter === "events_page_non_customer" ? "var(--color-sage)" : "var(--color-border)"}`,
+              borderRadius: 20,
+              padding: 20,
+              cursor: "pointer",
+              transition: "border-color 0.15s",
+            }}
+            onClick={() => setOriginFilter(originFilter === "events_page_non_customer" ? "all" : "events_page_non_customer")}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                Events Page
+              </p>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
+              </svg>
+            </div>
+            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+              {data.origin_counts.events_page_non_customer}
+            </p>
+            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Pre-order feedback</p>
+          </div>
+
+          {/* Events Page (Customer) */}
+          <div
+            style={{
+              background: "white",
+              border: `2px solid ${originFilter === "events_page_customer" ? "var(--color-sage)" : "var(--color-border)"}`,
+              borderRadius: 20,
+              padding: 20,
+              cursor: "pointer",
+              transition: "border-color 0.15s",
+            }}
+            onClick={() => setOriginFilter(originFilter === "events_page_customer" ? "all" : "events_page_customer")}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
               <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
@@ -772,61 +892,9 @@ export default function AdminFeedbackPage() {
               </svg>
             </div>
             <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
-              {data.customer_count}
+              {data.origin_counts.events_page_customer}
             </p>
             <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Post-order feedback</p>
-          </div>
-
-          {/* Non-customers */}
-          <div
-            style={{
-              background: "white",
-              border: `2px solid ${typeFilter === "non_customer" ? "var(--color-sage)" : "var(--color-border)"}`,
-              borderRadius: 20,
-              padding: 20,
-              cursor: "pointer",
-              transition: "border-color 0.15s",
-            }}
-            onClick={() => setTypeFilter(typeFilter === "non_customer" ? "all" : "non_customer")}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                Non-customers
-              </p>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-            </div>
-            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
-              {data.non_customer_count}
-            </p>
-            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Pre-order feedback</p>
-          </div>
-
-          {/* Contact */}
-          <div
-            style={{
-              background: "white",
-              border: `2px solid ${typeFilter === "general_contact" ? "var(--color-sage)" : "var(--color-border)"}`,
-              borderRadius: 20,
-              padding: 20,
-              cursor: "pointer",
-              transition: "border-color 0.15s",
-            }}
-            onClick={() => setTypeFilter(typeFilter === "general_contact" ? "all" : "general_contact")}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
-                Contact
-              </p>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            </div>
-            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
-              {data.general_contact_count}
-            </p>
-            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Messages and inquiries</p>
           </div>
 
           {/* Top non-customer reason */}
@@ -842,7 +910,7 @@ export default function AdminFeedbackPage() {
                   padding: 20,
                   cursor: "pointer",
                 }}
-                onClick={() => setReasonFilter(reasonFilter === m.reason ? "all" : m.reason)}
+                onClick={() => setPreOrderReasonFilter(preOrderReasonFilter === m.reason ? "all" : m.reason)}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                   <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
@@ -865,7 +933,7 @@ export default function AdminFeedbackPage() {
       )}
 
       {/* Reason breakdown (non-customer only) */}
-      {!loading && data && data.non_customer_count > 0 && (
+      {!loading && data && data.origin_counts.events_page_non_customer > 0 && (
         <div
           style={{
             background: "white",
@@ -881,12 +949,12 @@ export default function AdminFeedbackPage() {
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {sortedMetrics.map((m) => {
               const colors = REASON_COLORS[m.reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" };
-              const isActive = reasonFilter === m.reason;
+              const isActive = preOrderReasonFilter === m.reason;
               return (
                 <div
                   key={m.reason}
                   style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
-                  onClick={() => setReasonFilter(isActive ? "all" : m.reason)}
+                  onClick={() => setPreOrderReasonFilter(isActive ? "all" : m.reason)}
                 >
                   <div style={{ width: 140, flexShrink: 0, fontSize: 13, color: isActive ? "var(--color-forest)" : "var(--color-text)", fontWeight: isActive ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {m.label}
@@ -928,7 +996,7 @@ export default function AdminFeedbackPage() {
           </svg>
           <input
             type="text"
-            placeholder="Search name, contact, message..."
+            placeholder="Search origin, type, name, contact, message..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{
@@ -946,22 +1014,34 @@ export default function AdminFeedbackPage() {
         </div>
 
         <select
+          value={originFilter}
+          onChange={(e) => setOriginFilter(e.target.value)}
+          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
+        >
+          <option value="all">All origins</option>
+          <option value="contact_us">Contact Us</option>
+          <option value="events_page_non_customer">Events Page (Non-customer)</option>
+          <option value="events_page_customer">Events Page (Customer)</option>
+        </select>
+
+        <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
           style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
         >
           <option value="all">All types</option>
-          <option value="customer">Customer</option>
-          <option value="non_customer">Non-customer</option>
-          <option value="general_contact">Contact</option>
+          <option value="general_question">General Question</option>
+          <option value="feedback">Feedback</option>
+          <option value="collaboration">Collaboration</option>
+          <option value="other">Other</option>
         </select>
 
         <select
-          value={reasonFilter}
-          onChange={(e) => setReasonFilter(e.target.value)}
+          value={preOrderReasonFilter}
+          onChange={(e) => setPreOrderReasonFilter(e.target.value)}
           style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
         >
-          <option value="all">All reasons</option>
+          <option value="all">All pre-order reasons</option>
           <option value="price_too_high">Price too high</option>
           <option value="location_not_convenient">Pickup location not convenient</option>
           <option value="dietary_needs">Food does not meet dietary needs</option>
@@ -969,10 +1049,6 @@ export default function AdminFeedbackPage() {
           <option value="different_menu">Prefer a different menu item</option>
           <option value="prefer_delivery">Prefer delivery over pickup</option>
           <option value="not_interested">Not interested at this time</option>
-          <option value="catering_inquiry">Catering inquiry</option>
-          <option value="previous_order_inquiry">Question about a past order</option>
-          <option value="stay_updated">Stay updated on future events</option>
-          <option value="general_feedback">General feedback or suggestions</option>
           <option value="other">Other</option>
         </select>
 
@@ -989,7 +1065,13 @@ export default function AdminFeedbackPage() {
 
         {hasFilters && (
           <button
-            onClick={() => { setTypeFilter("all"); setReasonFilter("all"); setStatusFilter("all"); setSearchQuery(""); }}
+            onClick={() => {
+              setOriginFilter("all");
+              setTypeFilter("all");
+              setPreOrderReasonFilter("all");
+              setStatusFilter("all");
+              setSearchQuery("");
+            }}
             style={{
               display: "inline-flex", alignItems: "center", gap: 6,
               padding: "8px 12px", borderRadius: 12,
@@ -1080,7 +1162,7 @@ export default function AdminFeedbackPage() {
             </svg>
             <p style={{ fontSize: 15, fontWeight: 600, color: "var(--color-forest)", marginBottom: 4 }}>No feedback yet</p>
             <p style={{ fontSize: 13, color: "var(--color-muted)" }}>
-              {hasFilters ? "No results match your filters." : "Feedback from visitors and customers will appear here."}
+              {hasFilters ? "No results match your filters." : "Feedback, contact messages, and customer notes will appear here."}
             </p>
           </div>
         ) : (
@@ -1098,7 +1180,7 @@ export default function AdminFeedbackPage() {
                       style={{ cursor: "pointer" }}
                     />
                   </th>
-                  {["Date", "Type", "Name", "Contact", "Reason", "Status", "Message / Details", ""].map((col) => (
+                  {["Date", "Origin", "Type", "Name", "Contact", "Pre-order Reason", "Status", "Message / Details", ""].map((col) => (
                     <th
                       key={col}
                       style={{
@@ -1151,9 +1233,14 @@ export default function AdminFeedbackPage() {
                           <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 2 }}>{formatTime(item.created_at)}</div>
                         </td>
 
+                        {/* Origin */}
+                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
+                          <OriginBadge origin={item.origin} label={item.origin_label} />
+                        </td>
+
                         {/* Type */}
                         <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <TypeBadge type={item.feedback_type} />
+                          <TypeBadge type={item.feedback_type} label={item.feedback_type_label} />
                         </td>
 
                         {/* Name */}
@@ -1174,7 +1261,7 @@ export default function AdminFeedbackPage() {
                           )}
                         </td>
 
-                        {/* Reason */}
+                        {/* Pre-order Reason */}
                         <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
                           {item.reason && item.reason_label ? (
                             <ReasonBadge reason={item.reason} label={item.reason_label} />

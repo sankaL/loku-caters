@@ -144,17 +144,17 @@ export default function MenuClient({ eventConfig }: MenuClientProps) {
             <section className="bg-[color:var(--color-cream)] text-[color:var(--color-forest)] py-20 px-6 mt-10">
                 <div className="max-w-4xl mx-auto text-center animate-fade-up">
                     <h1 className="text-4xl md:text-6xl font-bold mb-6" style={{ fontFamily: "var(--font-serif)" }}>
-                        Our Offerings
+                        Our Menu
                     </h1>
                     <p className="text-lg md:text-xl text-[color:var(--color-muted)] max-w-2xl mx-auto leading-relaxed">
-                        A carefully curated selection of our finest dishes. Every item is prepared with fresh, locally-sourced ingredients and a passion for flavor.
+                        A carefully curated selection of our finest dishes. Every item is prepared with fresh ingredients and a passion for flavor.
                     </p>
 
-                    {eventConfig?.is_active && (
+                    {eventConfig && (
                         <div className="mt-10 flex justify-center">
                             <Link
                                 href="/orders"
-                                className="inline-flex items-center gap-2 bg-[color:var(--color-accent)] text-[color:var(--color-forest)] px-8 py-3.5 rounded-full font-bold text-lg hover:bg-white transition-all duration-300 shadow-[0_4px_14px_0_rgba(242,175,41,0.39)] hover:scale-105"
+                                className="inline-flex items-center gap-2 bg-[#8B5E3C] text-white px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-forest)] transition-all duration-300 shadow-[0_4px_14px_0_rgba(139,94,60,0.39)] hover:scale-105"
                             >
                                 We have an event running right now. Order here!
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>

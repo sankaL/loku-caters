@@ -168,16 +168,67 @@ FEEDBACK_REASONS = {
     "prefer_delivery",
     "not_interested",
     "other",
-    "catering_inquiry",
-    "previous_order_inquiry",
-    "stay_updated",
-    "general_feedback",
 }
 
-FEEDBACK_TYPES = {"non_customer", "customer", "general_contact"}
+FEEDBACK_REASON_LABELS = {
+    "price_too_high": "Price too high",
+    "location_not_convenient": "Pickup location not convenient",
+    "dietary_needs": "Food does not meet dietary needs",
+    "not_available": "Not available on the event date",
+    "different_menu": "Prefer a different menu item",
+    "prefer_delivery": "Prefer delivery over pickup",
+    "not_interested": "Not interested at this time",
+    "other": "Other",
+}
+
+FEEDBACK_ORIGINS = {
+    "contact_us",
+    "events_page_non_customer",
+    "events_page_customer",
+}
+
+FEEDBACK_ORIGIN_LABELS = {
+    "contact_us": "Contact Us",
+    "events_page_non_customer": "Events Page (Non-customer)",
+    "events_page_customer": "Events Page (Customer)",
+}
+
+FEEDBACK_TYPES = {
+    "general_question",
+    "feedback",
+    "collaboration",
+    "other",
+}
+
+FEEDBACK_TYPE_LABELS = {
+    "general_question": "General Question",
+    "feedback": "Feedback",
+    "collaboration": "Collaboration",
+    "other": "Other",
+}
+
+LEGACY_FEEDBACK_TYPES = {"non_customer", "customer", "general_contact"}
+
+LEGACY_CONTACT_REASON_TO_TYPE = {
+    "catering_inquiry": "general_question",
+    "previous_order_inquiry": "general_question",
+    "stay_updated": "other",
+    "general_feedback": "feedback",
+    "other": "other",
+}
+
+LEGACY_CONTACT_REASONS = set(LEGACY_CONTACT_REASON_TO_TYPE)
+
+LEGACY_CONTACT_SUBJECT_TO_TYPE = {
+    "general question": "general_question",
+    "feedback": "feedback",
+    "collaboration": "collaboration",
+    "other": "other",
+}
 
 
 class FeedbackCreate(BaseModel):
+    origin: Optional[str] = None
     feedback_type: str = "non_customer"
     order_id: Optional[str] = None
     name: Optional[str] = None
@@ -186,17 +237,17 @@ class FeedbackCreate(BaseModel):
     other_details: Optional[str] = None
     message: Optional[str] = None
 
-    @field_validator("feedback_type")
+    @field_validator("origin")
     @classmethod
-    def type_must_be_valid(cls, v: str) -> str:
-        if v not in FEEDBACK_TYPES:
-            raise ValueError("Invalid feedback type")
+    def origin_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in FEEDBACK_ORIGINS:
+            raise ValueError("Invalid feedback origin")
         return v
 
     @field_validator("reason")
     @classmethod
     def reason_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in FEEDBACK_REASONS:
+        if v is not None and v not in FEEDBACK_REASONS and v not in LEGACY_CONTACT_REASONS:
             raise ValueError("Invalid feedback reason")
         return v
 
@@ -222,6 +273,83 @@ class FeedbackStatusUpdate(BaseModel):
 
 class FeedbackCommentUpdate(BaseModel):
     admin_comment: Optional[str] = None
+
+
+def parse_legacy_contact_subject(message: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    if not message:
+        return None, message
+
+    lines = message.splitlines()
+    if not lines:
+        return None, message
+
+    first_line = lines[0].strip()
+    if not first_line.startswith("Subject:"):
+        return None, message
+
+    subject = first_line[len("Subject:"):].strip().lower()
+    feedback_type = LEGACY_CONTACT_SUBJECT_TO_TYPE.get(subject, "other")
+
+    remaining_lines = lines[1:]
+    while remaining_lines and not remaining_lines[0].strip():
+        remaining_lines = remaining_lines[1:]
+
+    normalized_message = "\n".join(remaining_lines).strip() or None
+    return feedback_type, normalized_message
+
+
+def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional[str]]:
+    origin = feedback_in.origin
+    feedback_type = feedback_in.feedback_type
+    reason = feedback_in.reason
+    other_details = feedback_in.other_details
+    message = feedback_in.message
+
+    if origin is None:
+        if feedback_type == "customer":
+            origin = "events_page_customer"
+            feedback_type = "feedback"
+        elif feedback_type == "non_customer":
+            parsed_type, normalized_message = parse_legacy_contact_subject(message)
+            if parsed_type:
+                origin = "contact_us"
+                feedback_type = parsed_type
+                message = normalized_message
+                reason = None
+            else:
+                origin = "events_page_non_customer"
+                feedback_type = "feedback"
+        elif feedback_type == "general_contact":
+            origin = "contact_us"
+            feedback_type = LEGACY_CONTACT_REASON_TO_TYPE.get(reason or "", "other")
+            reason = None
+        else:
+            raise ValueError("Invalid feedback type")
+
+    if feedback_type not in FEEDBACK_TYPES:
+        raise ValueError("Invalid feedback type")
+
+    if origin == "events_page_non_customer":
+        if feedback_type != "feedback":
+            raise ValueError("Events page non-customer feedback must use type 'feedback'")
+        if reason is not None and reason not in FEEDBACK_REASONS:
+            raise ValueError("Invalid feedback reason")
+    else:
+        if feedback_type != "feedback" and origin in {"events_page_customer"}:
+            raise ValueError("Events page customer feedback must use type 'feedback'")
+        reason = None
+        other_details = None
+
+    return {
+        "origin": origin,
+        "feedback_type": feedback_type,
+        "order_id": feedback_in.order_id,
+        "name": feedback_in.name,
+        "contact": feedback_in.contact,
+        "reason": reason,
+        "other_details": other_details,
+        "message": message,
+    }
 
 
 class CateringRequestCreate(BaseModel):

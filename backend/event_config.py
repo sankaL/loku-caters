@@ -85,6 +85,7 @@ def _build_config_from_event(db: Session, event) -> dict:
         "hero_side_image_path": resolve_event_image_path(event.hero_side_image_key),
         "etransfer_enabled": event.etransfer_enabled,
         "etransfer_email": event.etransfer_email,
+        "is_active": bool(event.is_active),
         "items": [
             {
                 "id": item.id,
