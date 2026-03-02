@@ -50,10 +50,10 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
             ) : (
               <>
                 <h2 className="text-xl font-semibold text-white mb-2">
-                  No active pop-ups right now.
+                  No active events at this moment!
                 </h2>
                 <p className="text-[color:var(--color-cream)] opacity-80 text-sm mb-6">
-                  Our kitchen is always open for your special occasions. Let us cater your next event.
+                  Our next batch of Loku Caters is still taking shape. We will share it the moment it is ready. In the meantime, let us cater your next event.
                 </p>
                 <Link
                   href="/catering-request"
@@ -105,16 +105,19 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
-              { title: "Traditional Lamprais", desc: "A fragrant mixed meat curry, frikkadel, blachan, and seeni sambal, wrapped and baked in a banana leaf." },
-              { title: "Chicken Biryani with Raita", desc: "Aromatic basmati rice cooked with rich spices, tender chicken, and served with cooling raita." },
-              { title: "Fish Rolls", desc: "Crispy, golden-fried rolls filled with a savory mix of spiced fish and potatoes. A classic Sri Lankan short eat." }
+              { title: "Traditional Lamprais", desc: "A fragrant mixed meat curry, frikkadel, blachan, and seeni sambal, wrapped and baked in a banana leaf.", image: "/assets/food/lamprais.jpg" },
+              { title: "Chicken Biryani with Raita", desc: "Aromatic basmati rice cooked with rich spices, tender chicken, and served with cooling raita.", image: "/assets/food/chicken-biryani.jpg" },
+              { title: "Fish Rolls", desc: "Crispy, golden-fried rolls filled with a savory mix of spiced fish and potatoes. A classic Sri Lankan short eat.", image: "/assets/food/rolls2.jpg" }
             ].map((dish, idx) => (
               <div
                 key={idx}
                 className={`group bg-white rounded-3xl overflow-hidden border border-[color:var(--color-border)] shadow-sm hover:shadow-xl transition-all duration-300 transform hover:-translate-y-2 animate-fade-up delay-${(idx + 1) * 100}`}
               >
-                <div className="aspect-[4/3] bg-[color:var(--color-cream-dark)] relative overflow-hidden flex items-center justify-center">
-                  <span className="text-[color:var(--color-muted)] opacity-50 font-medium">Image coming soon</span>
+                <div
+                  className="aspect-[4/3] bg-[color:var(--color-cream-dark)] relative overflow-hidden flex items-center justify-center bg-cover bg-center"
+                  style={{ backgroundImage: `url('${dish.image}')` }}
+                >
+                  {!dish.image && <span className="text-[color:var(--color-muted)] opacity-50 font-medium">Image coming soon</span>}
                   {/* Subtle hover effect for images when they exist */}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
                 </div>

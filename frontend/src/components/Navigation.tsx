@@ -47,10 +47,11 @@ export default function Navigation() {
                     />
                     <div>
                         <span
-                            className="text-xl font-bold tracking-tight block"
-                            style={{ fontFamily: "var(--font-serif)", color: "var(--color-forest)" }}
+                            className="text-xl font-bold tracking-tight block flex items-center gap-1"
+                            style={{ fontFamily: "var(--font-serif)" }}
                         >
-                            Loku Caters
+                            <span style={{ color: "var(--color-forest)" }}>Loku </span>
+                            <span style={{ color: "var(--color-sage)" }}>Caters</span>
                         </span>
                     </div>
                 </Link>

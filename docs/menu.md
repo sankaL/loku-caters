@@ -24,7 +24,6 @@
 * **Vegetable (select 3):** Dhall Curry, Brinjal Moju, Brinjal Pahi, Mixed Vegetable Curry, Bean Curry, Potato Curry, Potato Tempered, Cauliflower and Potato Masala, Cashew Curry, Cabbage Mallum, Pineapple Curry, Kola Mallum, or Dhal and Spinach Tempered.
 * **Condiments:** Papadam or Pickle.
 * **Desserts (select 2):** Fruit Platter, Cream Caramel, or Chocolate Pudding.
-* *Note:* Based on a minimum of 30 people.
 
 ### International Buffet
 * **Salads (select 2):** Potato salad, Garden salad, Beet Salad, Apple Cole Slow, Cucumber and Tomato Yoghurt, Pasta Salad, or Caesar Salad.
@@ -35,7 +34,6 @@
 * **Vegetable (select 3):** Garden Vegetable, Buttered Broccoli, Glazed Carrot, Mixed Vegetable Curry, Bean Curry, Vegetable Chop suey, Polos Maluwa, Cashew Curry, Brinjal Moju, Dhal Tempered, Dhal and Spinach Tempered, Cauliflower and Potato Masala, or Steam Vegetable.
 * **Condiments:** Papadam, Pickle, and Dressing.
 * **Dessert (select 2):** Fresh Fruit Salad, Cream Caramel, or Chocolate Pudding.
-* *Note:* Based on a minimum of 35 people.
 
 ### Set Menu (Table d'Hote)
 * **Salad:** Garden Spring Vegetable Salad with Mango Vinaigrette.
@@ -44,23 +42,7 @@
 * **Vegetable:** Buttered Vegetable Medley.
 * **Dessert:** Orange Cream Caramel.
 
----
-
-## Individual Items & Special Dishes
-
-### Lamprais
-* **Contents:** Wrapped in a banana leaf with Ghee Rice, Baked Chicken Curry, Fried boiled egg, Seeni Sambal, Fricadells (Beef and Pork), Ash Plantain curry, Brinjal Pahie, and Blachan.
-* *Note:* Minimum order is 20 packets.
-
-### Special Dishes
-* **Chicken Biryani with Raita:** Minimum order of 25 numbers.
-
-### Kid's Special Dishes
-* Pasta with Chicken and Rose sauce.
-* Meat balls with Tomato sauce.
-* Chicken Fingers with Plum Sauce.
-
-### Additional Desserts
+### Additional Desserts for all above catering menus
 * Pineapple gateau
 * Marshmallow pudding
 * Cream Caramel
@@ -68,10 +50,26 @@
 * Fresh Fruit Salad
 * Fresh Fruit Platter
 
-### Appetizers
-* Cutlets (Fish)
-* Patties (Fish)
-* Rolls (Fish, Mutton & Chicken)
+---
 
-### Additional Items
+## Individual Items & Special Dishes
+
+### Dishes
+
+**Lamprais**
+* **Contents:** Wrapped in a banana leaf with Ghee Rice, Baked Chicken Curry, Fried boiled egg, Seeni Sambal, Fricadells (Beef and Pork), Ash Plantain curry, Brinjal Pahie, and Blachan.
+
+**Chicken Biryani with Raita** 
+
+### Kid's Special Dishes
+* Pasta with Chicken and Rose sauce.
+* Meat balls with Tomato sauce.
+* Chicken Fingers with Plum Sauce.
+
+### Appetizers
+* Cutlets - Fish
+* Patties - Fish
+* Rolls - Fish, Mutton & Chicken
+
+### Speciality Items
 * Sri Lankan Wedding Cakes
