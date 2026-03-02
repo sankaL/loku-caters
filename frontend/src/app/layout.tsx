@@ -14,12 +14,15 @@ const playfair = Playfair_Display({
   display: "swap",
 });
 
+import Navigation from "@/components/Navigation";
+import Footer from "@/components/Footer";
+
 export const metadata: Metadata = {
-  title: "Loku Caters | Authentic Sri Lankan Lamprais",
+  title: "Loku Caters | Authentic Sri Lankan Cuisine",
   description:
     "Pre-order authentic Sri Lankan Lamprais, lovingly prepared and available for pickup. Limited quantities - reserve yours today.",
   openGraph: {
-    title: "Loku Caters | Authentic Sri Lankan Lamprais",
+    title: "Loku Caters | Authentic Sri Lankan Cuisine",
     description: "Pre-order authentic Sri Lankan Lamprais. Limited quantities - reserve yours today.",
     type: "website",
   },
@@ -36,7 +39,11 @@ export default function RootLayout({
       data-scroll-behavior="smooth"
       className={`${inter.variable} ${playfair.variable}`}
     >
-      <body suppressHydrationWarning>{children}</body>
+      <body suppressHydrationWarning className="flex flex-col min-h-screen pt-20">
+        <Navigation />
+        {children}
+        <Footer />
+      </body>
     </html>
   );
 }

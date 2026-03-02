@@ -222,3 +222,34 @@ class FeedbackStatusUpdate(BaseModel):
 
 class FeedbackCommentUpdate(BaseModel):
     admin_comment: Optional[str] = None
+
+
+class CateringRequestCreate(BaseModel):
+    first_name: str
+    last_name: str
+    email: EmailStr
+    phone_number: Optional[str] = None
+    event_date: str
+    guest_count: int
+    event_type: str
+    budget_range: Optional[str] = None
+    special_requests: Optional[str] = None
+
+    @field_validator("guest_count")
+    @classmethod
+    def count_must_be_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Guest count must be at least 1")
+        return v
+
+    @field_validator("first_name", "last_name", "event_date", "event_type")
+    @classmethod
+    def required_non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("Field cannot be empty")
+        return v.strip()
+
+
+class CateringRequestResponse(BaseModel):
+    success: bool
+    request_id: str

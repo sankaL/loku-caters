@@ -1,90 +1,138 @@
 "use client";
 
-import { useState } from "react";
-import Header from "@/components/Header";
-import HeroSection from "@/components/HeroSection";
-import OrderForm from "@/components/OrderForm";
-import SuccessView from "@/components/SuccessView";
-import FeedbackModal from "@/components/FeedbackModal";
-import { captureEvent } from "@/lib/analytics";
+import Link from "next/link";
 import type { EventConfig } from "@/config/event";
-import type { OrderResult } from "@/components/OrderForm";
 
-export default function HomeClient({ eventConfig }: { eventConfig: EventConfig }) {
-  const [orderResults, setOrderResults] = useState<OrderResult[] | null>(null);
-  const [feedbackOpen, setFeedbackOpen] = useState(false);
-
-  function handleOrderSuccess(results: OrderResult[]) {
-    results.forEach((result) => {
-      captureEvent("order_submitted", {
-        order_id: result.order_id,
-        item_id: result.order.item_id,
-        quantity: result.order.quantity,
-        total_price: result.order.total_price,
-        currency: result.order.currency,
-        pickup_location: result.order.pickup_location,
-        pickup_time_slot: result.order.pickup_time_slot,
-      });
-    });
-    setOrderResults(results);
-  }
+export default function HomeClient({ eventConfig }: { eventConfig: EventConfig | null }) {
+  const isActive = eventConfig?.is_active;
 
   return (
-    <main className="min-h-screen" style={{ background: "var(--color-cream)" }}>
-      <Header />
+    <main className="flex-1 flex flex-col bg-[color:var(--color-cream)]">
 
-      {!orderResults && (
-        <HeroSection
-          eventDate={eventConfig.event.date}
-          heroHeader={eventConfig.hero_header}
-          heroHeaderSage={eventConfig.hero_header_sage}
-          heroSubheader={eventConfig.hero_subheader}
-          promoDetails={eventConfig.promo_details}
-          tooltipEnabled={eventConfig.tooltip_enabled}
-          tooltipHeader={eventConfig.tooltip_header}
-          tooltipBody={eventConfig.tooltip_body}
-          tooltipImagePath={eventConfig.tooltip_image_path}
-          heroSideImagePath={eventConfig.hero_side_image_path}
-          onFeedbackClick={() => {
-            captureEvent("feedback_modal_opened");
-            setFeedbackOpen(true);
-          }}
-        />
-      )}
-
-      <div className="max-w-2xl mx-auto px-6 mb-8">
-        <div className="flex items-center gap-4">
-          <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
-          <p
-            className="text-xs font-semibold tracking-widest uppercase"
-            style={{ color: "var(--color-sage)" }}
-          >
-            {orderResults ? "Order Confirmed" : "Pre-Order Below"}
-          </p>
-          <div className="flex-1 h-px" style={{ background: "var(--color-border)" }} />
+      {/* Hero Section */}
+      <section className="relative w-full min-h-[85vh] flex items-center justify-center overflow-hidden">
+        {/* Background Image / Overlay */}
+        <div className="absolute inset-0 z-0 bg-[color:var(--color-cream)]">
+          <div
+            className="absolute inset-0 bg-cover bg-center"
+            style={{ backgroundImage: "url('/assets/food/multi-food6.jpg')" }}
+          />
+          <div className="absolute inset-0 bg-black/40" />
+          {/* Smooth opaque gradient transition to the next section */}
+          <div className="absolute inset-x-0 bottom-0 h-64 bg-gradient-to-t from-[color:var(--color-cream)] to-transparent" />
         </div>
-      </div>
 
-      {orderResults ? (
-        <SuccessView results={orderResults} />
-      ) : (
-        <OrderForm
-          items={eventConfig.items}
-          locations={eventConfig.locations}
-          onSuccess={handleOrderSuccess}
-        />
-      )}
+        <div className="relative z-10 max-w-4xl mx-auto px-6 text-center animate-fade-up">
+          <h1 className="text-5xl md:text-7xl font-bold leading-tight mb-6 text-white drop-shadow-lg" style={{ fontFamily: "var(--font-serif)" }}>
+            A Taste of Excellence
+          </h1>
+          <p className="text-lg md:text-2xl text-[color:var(--color-cream)] mb-10 max-w-2xl mx-auto font-medium opacity-90 drop-shadow-md">
+            Authentic Sri Lankan food for special events, corporate gatherings, and intimate celebrations.
+          </p>
 
-      <FeedbackModal isOpen={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+          {/* Dynamic CTA Block */}
+          <div className="bg-white/10 backdrop-blur-md border border-white/20 p-8 rounded-3xl max-w-xl mx-auto shadow-2xl animate-fade-up delay-200">
+            {isActive ? (
+              <>
+                <h2 className="text-xl font-semibold text-white mb-2">
+                  We are currently accepting orders for {eventConfig.event.date}!
+                </h2>
+                <p className="text-[color:var(--color-cream)] opacity-80 text-sm mb-6">
+                  {eventConfig.hero_subheader || "Pre-order your meal before quantities run out."}
+                </p>
+                <Link
+                  href="/orders"
+                  className="inline-block bg-[color:var(--color-accent)] text-[color:var(--color-forest)] px-8 py-3.5 rounded-full font-bold text-lg hover:bg-white hover:scale-105 transition-all duration-300 shadow-lg"
+                >
+                  Order Now
+                </Link>
+              </>
+            ) : (
+              <>
+                <h2 className="text-xl font-semibold text-white mb-2">
+                  No active pop-ups right now.
+                </h2>
+                <p className="text-[color:var(--color-cream)] opacity-80 text-sm mb-6">
+                  Our kitchen is always open for your special occasions. Let us cater your next event.
+                </p>
+                <Link
+                  href="/catering-request"
+                  className="inline-block bg-[color:var(--color-sage)] text-white px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-forest)] hover:scale-105 transition-all duration-300 shadow-lg"
+                >
+                  Request Catering
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      </section>
 
-      <footer
-        className="text-center py-8 px-6"
-        style={{ borderTop: "1px solid var(--color-border)" }}
-      >
-        <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-          © {new Date().getFullYear()} Loku Caters · Authentic Sri Lankan Cuisine
-        </p>
-      </footer>
+      {/* About Snippet */}
+      <section className="pb-24 pt-12 px-6 bg-[color:var(--color-cream)]">
+        <div className="max-w-4xl mx-auto text-center animate-fade-up">
+          <div className="text-[color:var(--color-sage)] flex justify-center mb-6">
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2" />
+              <path d="M7 2v20" />
+              <path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7" />
+            </svg>
+          </div>
+          <h2 className="text-3xl md:text-5xl font-bold mb-8 text-[color:var(--color-forest)]" style={{ fontFamily: "var(--font-serif)" }}>
+            Crafted with Passion
+          </h2>
+          <p className="text-lg md:text-xl text-[color:var(--color-muted)] leading-relaxed max-w-3xl mx-auto mb-10">
+            At Loku Caters, we believe that food is the heart of every gathering. We combine locally sourced ingredients with authentic family recipes to deliver a culinary experience that your guests will remember long after the last bite.
+          </p>
+          <Link
+            href="/about"
+            className="inline-flex items-center gap-2 text-[color:var(--color-sage)] font-semibold hover:text-[color:var(--color-forest)] transition-colors text-lg"
+          >
+            Discover Our Story
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+          </Link>
+        </div>
+      </section>
+
+      {/* Visual Highlights */}
+      <section className="py-24 px-6">
+        <div className="max-w-6xl mx-auto">
+          <div className="text-center mb-16 animate-fade-up">
+            <span className="text-sm font-bold tracking-widest uppercase text-[color:var(--color-sage)] block mb-4">Our Menu</span>
+            <h2 className="text-3xl md:text-5xl font-bold text-[color:var(--color-forest)]" style={{ fontFamily: "var(--font-serif)" }}>
+              Signature Dishes
+            </h2>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {[
+              { title: "Traditional Lamprais", desc: "A fragrant mixed meat curry, frikkadel, blachan, and seeni sambal, wrapped and baked in a banana leaf." },
+              { title: "Chicken Biryani with Raita", desc: "Aromatic basmati rice cooked with rich spices, tender chicken, and served with cooling raita." },
+              { title: "Fish Rolls", desc: "Crispy, golden-fried rolls filled with a savory mix of spiced fish and potatoes. A classic Sri Lankan short eat." }
+            ].map((dish, idx) => (
+              <div
+                key={idx}
+                className={`group bg-white rounded-3xl overflow-hidden border border-[color:var(--color-border)] shadow-sm hover:shadow-xl transition-all duration-300 transform hover:-translate-y-2 animate-fade-up delay-${(idx + 1) * 100}`}
+              >
+                <div className="aspect-[4/3] bg-[color:var(--color-cream-dark)] relative overflow-hidden flex items-center justify-center">
+                  <span className="text-[color:var(--color-muted)] opacity-50 font-medium">Image coming soon</span>
+                  {/* Subtle hover effect for images when they exist */}
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
+                </div>
+                <div className="p-8">
+                  <h3 className="text-xl font-bold text-[color:var(--color-forest)] mb-3" style={{ fontFamily: "var(--font-serif)" }}>{dish.title}</h3>
+                  <p className="text-[color:var(--color-muted)] text-sm leading-relaxed mb-6">
+                    {dish.desc}
+                  </p>
+                  <Link href="/menu" className="text-sm font-bold text-[color:var(--color-sage)] hover:text-[color:var(--color-forest)] transition-colors">
+                    Explore Menu &rarr;
+                  </Link>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
     </main>
   );
 }

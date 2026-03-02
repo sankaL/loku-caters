@@ -98,3 +98,22 @@ class Feedback(Base):
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="new")
     admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+
+class CateringRequest(Base):
+    __tablename__ = "catering_requests"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    first_name: Mapped[str] = mapped_column(String, nullable=False)
+    last_name: Mapped[str] = mapped_column(String, nullable=False)
+    email: Mapped[str] = mapped_column(String, nullable=False)
+    phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    event_date: Mapped[str] = mapped_column(String, nullable=False)
+    guest_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_type: Mapped[str] = mapped_column(String, nullable=False)
+    budget_range: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    special_requests: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, nullable=False, default="new")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )

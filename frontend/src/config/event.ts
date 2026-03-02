@@ -32,13 +32,19 @@ export interface EventConfig {
   hero_side_image_path: string | null;
   etransfer_enabled: boolean;
   etransfer_email: string | null;
+  is_active: boolean;
   items: Item[];
   locations: Location[];
 }
 
 export async function fetchEventConfig(): Promise<EventConfig | null> {
-  const res = await fetch(`${API_URL}/api/config`, { cache: "no-store" });
-  if (res.status === 404) return null;
-  if (!res.ok) throw new Error("Failed to load event configuration");
-  return res.json();
+  try {
+    const res = await fetch(`${API_URL}/api/config`, { cache: "no-store" });
+    if (res.status === 404) return null;
+    if (!res.ok) throw new Error("Failed to load event configuration");
+    return res.json();
+  } catch (error) {
+    console.error("Failed to fetch event configuration:", error);
+    return null;
+  }
 }
