@@ -486,18 +486,24 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                 onClick={() => setPickerOpen(false)}
               />
 
-              {/* Sheet: bottom-sheet on mobile, centered modal on md+ */}
+              {/* Centered modal on all screen sizes */}
               <div
-                className="animate-slide-up left-0 right-0 bottom-0 md:bottom-auto md:top-1/2 md:-translate-y-1/2 md:left-1/2 md:-translate-x-1/2 md:right-auto md:max-w-lg md:w-full md:rounded-3xl"
+                className="animate-scale-in"
                 style={{
                   position: "fixed",
                   zIndex: 201,
+                  top: "50%",
+                  left: "50%",
+                  transform: "translate(-50%, -50%)",
+                  width: "calc(100% - 32px)",
+                  maxWidth: "512px",
+                  maxHeight: "85vh",
                   background: "white",
-                  borderRadius: "24px 24px 0 0",
+                  borderRadius: "24px",
                   border: "1px solid var(--color-border)",
-                  maxHeight: "80vh",
                   display: "flex",
                   flexDirection: "column",
+                  overflow: "hidden",
                 }}
               >
                 {/* Header */}
