@@ -5,29 +5,14 @@ import Link from "next/link";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
-
-const eventTypes = [
-    { id: "corporate", name: "Corporate Event" },
-    { id: "wedding", name: "Wedding" },
-    { id: "birthday", name: "Birthday Party" },
-    { id: "private-dinner", name: "Private Dinner" },
-    { id: "other", name: "Other" }
-];
-
-const budgetRanges = [
-    { id: "under-500", name: "Under CAD 500" },
-    { id: "500-1000", name: "CAD 500 - 1,000" },
-    { id: "1000-2500", name: "CAD 1,000 - 2,500" },
-    { id: "2500-5000", name: "CAD 2,500 - 5,000" },
-    { id: "5000-plus", name: "CAD 5,000+" }
-];
+import { CATERING_BUDGET_RANGES, CATERING_EVENT_TYPES } from "@/lib/cateringRequestOptions";
 
 export default function CateringRequestPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
     const [errorDetails, setErrorDetails] = useState<string | null>(null);
-    const [selectedEventType, setSelectedEventType] = useState(eventTypes[0]);
-    const [selectedBudgetRange, setSelectedBudgetRange] = useState(budgetRanges[0]);
+    const [selectedEventType, setSelectedEventType] = useState(CATERING_EVENT_TYPES[0]);
+    const [selectedBudgetRange, setSelectedBudgetRange] = useState(CATERING_BUDGET_RANGES[0]);
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
         e.preventDefault();
@@ -174,7 +159,7 @@ export default function CateringRequestPage() {
                                                 </span>
                                             </ListboxButton>
                                             <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
-                                                {eventTypes.map((type, idx) => (
+                                                {CATERING_EVENT_TYPES.map((type, idx) => (
                                                     <ListboxOption
                                                         key={idx}
                                                         className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
@@ -208,7 +193,7 @@ export default function CateringRequestPage() {
                                                 </span>
                                             </ListboxButton>
                                             <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
-                                                {budgetRanges.map((range, idx) => (
+                                                {CATERING_BUDGET_RANGES.map((range, idx) => (
                                                     <ListboxOption
                                                         key={idx}
                                                         className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"

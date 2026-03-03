@@ -4,11 +4,10 @@ import Link from "next/link";
 import type { EventConfig } from "@/config/event";
 
 export default function HomeClient({ eventConfig }: { eventConfig: EventConfig | null }) {
-  const isActive = eventConfig !== null;
+  const hasActiveEvent = Boolean(eventConfig);
 
   return (
     <main className="flex-1 flex flex-col bg-[color:var(--color-cream)]">
-
       {/* Hero Section */}
       <section className="relative w-full min-h-[85vh] flex items-center justify-center overflow-hidden">
         {/* Background Image / Overlay */}
@@ -31,8 +30,12 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
           </p>
 
           {/* Dynamic CTA Block */}
-          <div className={`backdrop-blur-md border p-8 rounded-3xl max-w-xl mx-auto shadow-2xl animate-fade-up delay-200 ${isActive ? "bg-black/40 border-white/30" : "bg-white/10 border-white/20"}`}>
-            {isActive ? (
+          <div
+            className={`backdrop-blur-md border p-8 rounded-3xl max-w-xl mx-auto shadow-2xl animate-fade-up delay-200 ${
+              hasActiveEvent ? "bg-black/40 border-white/30" : "bg-white/10 border-white/20"
+            }`}
+          >
+            {eventConfig ? (
               <>
                 <h2 className="text-xl font-semibold text-white mb-2">
                   We are currently accepting orders for {eventConfig.event.date}!

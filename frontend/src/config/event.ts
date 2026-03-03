@@ -38,13 +38,8 @@ export interface EventConfig {
 }
 
 export async function fetchEventConfig(): Promise<EventConfig | null> {
-  try {
-    const res = await fetch(`${API_URL}/api/config`, { cache: "no-store" });
-    if (res.status === 404) return null;
-    if (!res.ok) throw new Error("Failed to load event configuration");
-    return res.json();
-  } catch (error) {
-    console.error("Failed to fetch event configuration:", error);
-    return null;
-  }
+  const res = await fetch(`${API_URL}/api/config`, { cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error("Failed to load event configuration");
+  return res.json();
 }

@@ -217,8 +217,16 @@ textarea {
   animation: slideInRight 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.delay-0 {
+  animation-delay: 0s;
+}
+
 .delay-100 {
   animation-delay: 0.1s;
+}
+
+.delay-150 {
+  animation-delay: 0.15s;
 }
 
 .delay-200 {

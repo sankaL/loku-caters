@@ -85,7 +85,7 @@ export default function Footer() {
                     © {new Date().getFullYear()} Loku Caters. All rights reserved.
                 </p>
                 <p className="text-xs opacity-60">
-                    Made in Toronto with ♥
+                    Made in Toronto with love
                 </p>
             </div>
         </footer>

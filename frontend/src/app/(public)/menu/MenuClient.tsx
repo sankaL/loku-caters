@@ -3,11 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import type { EventConfig } from "@/config/event";
-
-interface MenuClientProps {
-    eventConfig: EventConfig | null;
-}
 
 interface MenuItem {
     name: string;
@@ -16,7 +11,7 @@ interface MenuItem {
     hasTooltip?: boolean;
 }
 
-export default function MenuClient({ eventConfig }: MenuClientProps) {
+export default function MenuClient() {
     const [isLampraisModalOpen, setIsLampraisModalOpen] = useState(false);
 
     const individualItems = {
@@ -300,7 +295,7 @@ export default function MenuClient({ eventConfig }: MenuClientProps) {
 
                         <div className="relative w-full">
                             <Image
-                                src="/assets/img/lumprais-how-its-made-compressed.png"
+                                src="/assets/img/tooltip/lamprais-how-its-made-compressed.png"
                                 alt="How Lamprais is made"
                                 width={800}
                                 height={600}

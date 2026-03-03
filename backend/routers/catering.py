@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -8,7 +8,11 @@ from schemas import CateringRequestCreate, CateringRequestResponse
 
 router = APIRouter(prefix="/api/catering-requests", tags=["catering"])
 
-@router.post("", response_model=CateringRequestResponse)
+@router.post(
+    "",
+    response_model=CateringRequestResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def create_catering_request(
     request: CateringRequestCreate, db: Session = Depends(get_db)
 ):

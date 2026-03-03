@@ -1,8 +1,8 @@
 import HomeClient from "@/app/HomeClient";
-import { fetchEventConfig, type EventConfig } from "@/config/event";
+import { fetchEventConfig } from "@/config/event";
 
 export default async function Home() {
-  let eventConfig: EventConfig | null = null;
+  let eventConfig = null;
 
   try {
     eventConfig = await fetchEventConfig();

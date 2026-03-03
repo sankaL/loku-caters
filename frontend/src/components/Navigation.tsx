@@ -45,7 +45,7 @@ export default function Navigation() {
                     <Link href="/catering-request" className={linkStyle("/catering-request")}>Catering Request</Link>
                     <Link
                         href="/orders"
-                        className="bg-[#F2AF29] text-white px-5 py-2.5 rounded-full text-sm font-bold hover:bg-[color:var(--color-forest)] transition-colors duration-200 shadow-md transform hover:-translate-y-0.5"
+                        className="bg-[color:var(--color-accent)] text-white px-5 py-2.5 rounded-full text-sm font-bold hover:bg-[color:var(--color-forest)] transition-colors duration-200 shadow-md transform hover:-translate-y-0.5"
                     >
                         Order Now
                     </Link>
@@ -84,7 +84,7 @@ export default function Navigation() {
                         <Link href="/catering-request" className={linkStyle("/catering-request")} onClick={() => setIsMenuOpen(false)}>Catering Request</Link>
                         <Link
                             href="/orders"
-                            className="bg-[#F2AF29] text-white px-5 py-3 rounded-xl text-center font-bold mt-2"
+                            className="bg-[color:var(--color-accent)] text-white px-5 py-3 rounded-xl text-center font-bold mt-2"
                             onClick={() => setIsMenuOpen(false)}
                         >
                             Order Now

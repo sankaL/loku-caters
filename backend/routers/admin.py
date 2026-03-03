@@ -20,10 +20,11 @@ from event_config import (
     get_config_for_event_id_from_db,
 )
 from event_images import get_event_image_catalog, validate_event_image_key
-from models import Event, Feedback, Item, Location, Order
+from models import CateringRequest, CateringRequestComment, Event, Feedback, Item, Location, Order
 from schemas import (
     EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
-    FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES, FEEDBACK_TYPE_LABELS,
+    CATERING_REQUEST_STATUSES, FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES,
+    FEEDBACK_TYPE_LABELS, CateringRequestCommentCreate, CateringRequestStatusUpdate,
     FeedbackStatusUpdate, FeedbackCommentUpdate,
 )
 from services.email import send_confirmation, send_reminder
@@ -298,6 +299,15 @@ class FeedbackBulkDeleteRequest(BaseModel):
 
 
 class FeedbackBulkStatusRequest(BaseModel):
+    ids: list[str]
+    status: str
+
+
+class CateringRequestBulkDeleteRequest(BaseModel):
+    ids: list[str]
+
+
+class CateringRequestBulkStatusRequest(BaseModel):
     ids: list[str]
     status: str
 
@@ -1229,6 +1239,171 @@ def delete_order(
     db.delete(order)
     db.commit()
     return {"success": True}
+
+
+# ---------------------------------------------------------------------------
+# Catering request endpoints
+# ---------------------------------------------------------------------------
+
+@router.get("/catering-requests")
+def admin_list_catering_requests(
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    rows = db.query(CateringRequest).order_by(CateringRequest.created_at.desc()).all()
+    comments = (
+        db.query(CateringRequestComment)
+        .order_by(CateringRequestComment.created_at.desc())
+        .all()
+    )
+
+    comments_by_request_id: dict[str, list[dict]] = {}
+    for comment in comments:
+        comments_by_request_id.setdefault(comment.catering_request_id, []).append(
+            {
+                "id": comment.id,
+                "body": comment.body,
+                "created_at": comment.created_at.isoformat() if comment.created_at else None,
+            }
+        )
+
+    items = []
+    for row in rows:
+        normalized_status = "done" if row.status == "resolved" else row.status
+        full_name = " ".join(
+            part.strip()
+            for part in [row.first_name, row.last_name]
+            if part and part.strip()
+        ).strip()
+        items.append(
+            {
+                "id": row.id,
+                "first_name": row.first_name,
+                "last_name": row.last_name,
+                "full_name": full_name,
+                "email": row.email,
+                "phone_number": row.phone_number,
+                "event_date": row.event_date,
+                "guest_count": row.guest_count,
+                "event_type": row.event_type,
+                "budget_range": row.budget_range,
+                "special_requests": row.special_requests,
+                "status": normalized_status,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "comments": comments_by_request_id.get(row.id, []),
+            }
+        )
+
+    status_counts = {
+        status_key: sum(
+            1
+            for row in rows
+            if ("done" if row.status == "resolved" else row.status) == status_key
+        )
+        for status_key in ("new", "in_review", "in_progress", "rejected", "done")
+    }
+
+    return {
+        "total": len(rows),
+        "status_counts": status_counts,
+        "items": items,
+    }
+
+
+@router.post("/catering-requests/bulk-delete")
+def bulk_delete_catering_requests(
+    body: CateringRequestBulkDeleteRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    deleted = 0
+    if body.ids:
+        db.query(CateringRequestComment).filter(
+            CateringRequestComment.catering_request_id.in_(body.ids)
+        ).delete(synchronize_session=False)
+        deleted = db.query(CateringRequest).filter(CateringRequest.id.in_(body.ids)).delete(
+            synchronize_session=False
+        )
+        db.commit()
+    return {"success": True, "deleted": deleted}
+
+
+@router.post("/catering-requests/bulk-status")
+def bulk_update_catering_request_status(
+    body: CateringRequestBulkStatusRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    if body.status not in CATERING_REQUEST_STATUSES:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    if body.ids:
+        db.query(CateringRequest).filter(CateringRequest.id.in_(body.ids)).update(
+            {"status": body.status},
+            synchronize_session=False,
+        )
+        db.commit()
+    return {"success": True}
+
+
+@router.delete("/catering-requests/{request_id}")
+def delete_catering_request(
+    request_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    catering_request = db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    if catering_request is None:
+        raise HTTPException(status_code=404, detail="Catering request not found")
+    db.query(CateringRequestComment).filter(
+        CateringRequestComment.catering_request_id == request_id
+    ).delete(synchronize_session=False)
+    db.delete(catering_request)
+    db.commit()
+    return {"success": True}
+
+
+@router.patch("/catering-requests/{request_id}/status")
+def update_catering_request_status(
+    request_id: str,
+    body: CateringRequestStatusUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    catering_request = db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    if catering_request is None:
+        raise HTTPException(status_code=404, detail="Catering request not found")
+    catering_request.status = body.status
+    db.commit()
+    return {"success": True, "status": catering_request.status}
+
+
+@router.post("/catering-requests/{request_id}/comments")
+def add_catering_request_comment(
+    request_id: str,
+    body: CateringRequestCommentCreate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    catering_request = db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    if catering_request is None:
+        raise HTTPException(status_code=404, detail="Catering request not found")
+
+    comment = CateringRequestComment(
+        id=str(uuid.uuid4()),
+        catering_request_id=request_id,
+        body=body.comment,
+    )
+    db.add(comment)
+    db.commit()
+    db.refresh(comment)
+    return {
+        "success": True,
+        "comment": {
+            "id": comment.id,
+            "body": comment.body,
+            "created_at": comment.created_at.isoformat() if comment.created_at else None,
+        },
+    }
 
 
 # ---------------------------------------------------------------------------

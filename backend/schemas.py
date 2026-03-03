@@ -229,7 +229,7 @@ LEGACY_CONTACT_SUBJECT_TO_TYPE = {
 
 class FeedbackCreate(BaseModel):
     origin: Optional[str] = None
-    feedback_type: str = "non_customer"
+    feedback_type: Optional[str] = None
     order_id: Optional[str] = None
     name: Optional[str] = None
     contact: Optional[str] = None
@@ -306,6 +306,8 @@ def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional
     message = feedback_in.message
 
     if origin is None:
+        if feedback_type is None:
+            feedback_type = "non_customer"
         if feedback_type == "customer":
             origin = "events_page_customer"
             feedback_type = "feedback"
@@ -325,6 +327,18 @@ def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional
             reason = None
         else:
             raise ValueError("Invalid feedback type")
+    else:
+        if feedback_type is None:
+            if origin in {"events_page_non_customer", "events_page_customer"}:
+                feedback_type = "feedback"
+            else:
+                feedback_type = "other"
+        elif feedback_type in LEGACY_FEEDBACK_TYPES:
+            if feedback_type in {"customer", "non_customer"}:
+                feedback_type = "feedback"
+            elif feedback_type == "general_contact":
+                feedback_type = LEGACY_CONTACT_REASON_TO_TYPE.get(reason or "", "other")
+                reason = None
 
     if feedback_type not in FEEDBACK_TYPES:
         raise ValueError("Invalid feedback type")
@@ -381,3 +395,29 @@ class CateringRequestCreate(BaseModel):
 class CateringRequestResponse(BaseModel):
     success: bool
     request_id: str
+
+
+CATERING_REQUEST_STATUSES = {"new", "in_review", "in_progress", "rejected", "done"}
+
+
+class CateringRequestStatusUpdate(BaseModel):
+    status: str
+
+    @field_validator("status")
+    @classmethod
+    def status_must_be_valid(cls, v: str) -> str:
+        if v not in CATERING_REQUEST_STATUSES:
+            raise ValueError("Invalid status")
+        return v
+
+
+class CateringRequestCommentCreate(BaseModel):
+    comment: str
+
+    @field_validator("comment")
+    @classmethod
+    def comment_must_not_be_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Comment cannot be empty")
+        return stripped

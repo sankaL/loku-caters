@@ -179,6 +179,50 @@ Stores all contact messages, pre-order event feedback, and post-order customer f
 
 ---
 
+## Table: `catering_requests`
+
+Stores inbound quote requests from the public `/catering-request` form. Managed via `/admin/catering-requests` in the admin panel.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `first_name` | `TEXT` | NOT NULL | Requester first name |
+| `last_name` | `TEXT` | NOT NULL | Requester last name |
+| `email` | `TEXT` | NOT NULL | Primary contact email |
+| `phone_number` | `TEXT` | nullable | Optional phone number |
+| `event_date` | `TEXT` | NOT NULL | Customer-provided event date string from the form date input |
+| `guest_count` | `INTEGER` | NOT NULL, CHECK >= 1 at API level | Estimated guest count |
+| `event_type` | `TEXT` | NOT NULL | Machine-readable event type key from the public form |
+| `budget_range` | `TEXT` | nullable | Machine-readable budget range key from the public form |
+| `special_requests` | `TEXT` | nullable | Free-form request details |
+| `status` | `VARCHAR` | NOT NULL, default `'new'` | Admin workflow state (see allowed values below) |
+| `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+
+### Allowed `status` values
+
+| Value | Meaning |
+|---|---|
+| `new` | Newly submitted and not yet reviewed |
+| `in_review` | Being reviewed by the team before a decision or follow-up |
+| `in_progress` | Actively being worked on |
+| `rejected` | Request was declined or cannot be accommodated |
+| `done` | Request has been fully handled |
+
+---
+
+## Table: `catering_request_comments`
+
+Stores internal admin comment history for catering requests. Comments are shown in the admin portal only and are kept separate from the new-comment input for each request.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `catering_request_id` | `TEXT` | NOT NULL, indexed | Logical parent `catering_requests.id`; maintained by the backend |
+| `body` | `TEXT` | NOT NULL | Internal comment text |
+| `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+
+---
+
 ## Applying migrations
 
 Migrations live in `backend/alembic/versions/`. To apply all pending migrations:
@@ -209,6 +253,7 @@ alembic upgrade head
 | `0017_phone_optional` | updates `ck_orders_contact_required_unless_excluded` constraint to only require `email` (not `phone_number`) when `exclude_email` is false |
 | `db2173ba0be0_create_catering_requests` | `catering_requests` table |
 | `4f7d2b6c9a10_feedback_origin_rework` | adds `origin` to `feedback`; backfills legacy rows into canonical `origin` and `feedback_type` values |
+| `9c8b0b7f2e1a_catering_request_comments_and_statuses` | `catering_request_comments` table; remaps `catering_requests.status='resolved'` to `'done'` |
 
 ---
 

@@ -108,13 +108,13 @@ function ChartLegend({
   hasOther: boolean;
 }) {
   const entries = [
-    ...topItems.map((item, i) => ({ label: item.itemName, color: AREA_COLORS[i] })),
-    ...(hasOther ? [{ label: "Other", color: AREA_COLORS[5] }] : []),
+    ...topItems.map((item, i) => ({ key: item.itemId, label: item.itemName, color: AREA_COLORS[i] })),
+    ...(hasOther ? [{ key: "__other__", label: "Other", color: AREA_COLORS[5] }] : []),
   ];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 16px", justifyContent: "center", marginTop: 12 }}>
-      {entries.map(({ label, color }) => (
-        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--color-muted)" }}>
+      {entries.map(({ key, label, color }) => (
+        <div key={key} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--color-muted)" }}>
           <span style={{ width: 10, height: 10, borderRadius: 2, background: color, flexShrink: 0, display: "inline-block" }} />
           {label}
         </div>
