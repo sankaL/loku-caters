@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
+import ReactDOM from "react-dom";
 import { API_URL, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
 import Modal from "@/components/ui/Modal";
@@ -63,7 +64,6 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const savedScrollY = useRef(0);
 
   const timeSlots = form.pickup_location
     ? (locations.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
@@ -88,15 +88,24 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
 
   useEffect(() => {
     if (!pickerOpen) return;
-    savedScrollY.current = window.scrollY;
+
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        setPickerOpen(false);
+      }
+    }
+
     document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+
     // Focus the search input after the modal renders, without scrolling
     requestAnimationFrame(() => {
       searchInputRef.current?.focus({ preventScroll: true });
     });
+
     return () => {
+      document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
-      window.scrollTo({ top: savedScrollY.current, behavior: "instant" });
     };
   }, [pickerOpen]);
 
@@ -216,6 +225,190 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
       ? "border-red-400 focus:ring-red-200"
       : "border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:ring-opacity-40 focus:border-[var(--color-sage)]"
     }`;
+
+  const pickerModal = pickerOpen
+    ? ReactDOM.createPortal(
+      <div
+        className="animate-fade-in"
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 200,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          padding: "16px",
+          background: "rgba(0,0,0,0.45)",
+        }}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) {
+            setPickerOpen(false);
+          }
+        }}
+      >
+        <div
+          className="animate-scale-in"
+          style={{
+            width: "100%",
+            maxWidth: "512px",
+            maxHeight: "min(calc(100dvh - 32px), 85vh)",
+            minHeight: 0,
+            background: "white",
+            borderRadius: "24px",
+            border: "1px solid var(--color-border)",
+            display: "flex",
+            flexDirection: "column",
+            overflow: "hidden",
+          }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          {/* Header */}
+          <div
+            className="flex items-center justify-between px-5 py-4 border-b shrink-0"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <h3 className="text-base font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              Add Items
+            </h3>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(false)}
+              aria-label="Close item picker"
+              className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-semibold transition-all"
+              style={{ color: "var(--color-muted)", background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
+            >
+              X
+            </button>
+          </div>
+
+          {/* Search */}
+          <div className="px-5 py-3 border-b shrink-0" style={{ borderColor: "var(--color-border)" }}>
+            <input
+              type="text"
+              value={pickerSearch}
+              onChange={(e) => setPickerSearch(e.target.value)}
+              ref={searchInputRef}
+              placeholder="Search items..."
+              className="w-full px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
+              style={{
+                borderColor: "var(--color-border)",
+                color: "var(--color-text)",
+              }}
+            />
+          </div>
+
+          {/* Item list */}
+          <div
+            className="overflow-y-auto flex-1 min-h-0 px-5 py-3 space-y-2"
+            style={{ overscrollBehavior: "contain" }}
+          >
+            {pickerItems.length === 0 ? (
+              <p className="text-sm py-4 text-center" style={{ color: "var(--color-muted)" }}>No items match your search.</p>
+            ) : (
+              pickerItems.map((item) => {
+                const qty = quantities[item.id] ?? 0;
+                const inCart = qty > 0;
+                const price = item.discounted_price ?? item.price;
+                const minimumOrderQuantity = getMinimumOrderQuantity(item);
+                return (
+                  <div
+                    key={item.id}
+                    className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all"
+                    style={{
+                      border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
+                      background: inCart ? "#f0fdf4" : "white",
+                    }}
+                  >
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
+                      {item.description && (
+                        <p className="text-xs mt-0.5 truncate" style={{ color: "var(--color-muted)" }}>{item.description}</p>
+                      )}
+                      <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+                          ${price.toFixed(2)}
+                        </span>
+                        {item.discounted_price != null && (
+                          <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
+                            ${item.price.toFixed(2)}
+                          </span>
+                        )}
+                        {minimumOrderQuantity > 1 && (
+                          <span
+                            className="text-xs font-semibold"
+                            style={{ color: "var(--color-sage)" }}
+                          >
+                            Min {minimumOrderQuantity}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {inCart ? (
+                      <div className="flex items-center gap-0 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => changeQty(item.id, -1)}
+                          className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
+                          style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                          aria-label={`Decrease ${item.name} quantity`}
+                        >
+                          -
+                        </button>
+                        <div
+                          className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b"
+                          style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}
+                        >
+                          {qty}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => changeQty(item.id, 1)}
+                          className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
+                          style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                          aria-label={`Increase ${item.name} quantity`}
+                        >
+                          +
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => changeQty(item.id, 1)}
+                        className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                        style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                      >
+                        + Add
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Footer */}
+          <div
+            className="px-5 py-4 border-t shrink-0 flex items-center justify-between gap-3"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+              {selectedLines.length} item{selectedLines.length !== 1 ? "s" : ""} selected
+            </p>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(false)}
+              className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+    : null;
 
   return (
     <section className="w-full max-w-2xl mx-auto px-6 pb-16">
@@ -476,180 +669,10 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
           <p className="text-xs text-center" style={{ color: "var(--color-muted)" }}>
             By submitting, you agree that we may contact you via email to confirm your order.
           </p>
-
-          {/* Item Picker overlay */}
-          {pickerOpen && (
-            <>
-              {/* Backdrop */}
-              <div
-                style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 200 }}
-                onClick={() => setPickerOpen(false)}
-              />
-
-              {/* Centered modal on all screen sizes */}
-              <div
-                className="animate-scale-in"
-                style={{
-                  position: "fixed",
-                  zIndex: 201,
-                  top: "50%",
-                  left: "50%",
-                  transform: "translate(-50%, -50%)",
-                  width: "calc(100% - 32px)",
-                  maxWidth: "512px",
-                  maxHeight: "85vh",
-                  background: "white",
-                  borderRadius: "24px",
-                  border: "1px solid var(--color-border)",
-                  display: "flex",
-                  flexDirection: "column",
-                  overflow: "hidden",
-                }}
-              >
-                {/* Header */}
-                <div
-                  className="flex items-center justify-between px-5 py-4 border-b shrink-0"
-                  style={{ borderColor: "var(--color-border)" }}
-                >
-                  <h3 className="text-base font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
-                    Add Items
-                  </h3>
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(false)}
-                    aria-label="Close item picker"
-                    className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-semibold transition-all"
-                    style={{ color: "var(--color-muted)", background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
-                  >
-                    X
-                  </button>
-                </div>
-
-                {/* Search */}
-                <div className="px-5 py-3 border-b shrink-0" style={{ borderColor: "var(--color-border)" }}>
-                  <input
-                    type="text"
-                    value={pickerSearch}
-                    onChange={(e) => setPickerSearch(e.target.value)}
-                    ref={searchInputRef}
-                    placeholder="Search items..."
-                    className="w-full px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
-                    style={{
-                      borderColor: "var(--color-border)",
-                      color: "var(--color-text)",
-                    }}
-                  />
-                </div>
-
-                {/* Item list */}
-                <div className="overflow-y-auto flex-1 px-5 py-3 space-y-2">
-                  {pickerItems.length === 0 ? (
-                    <p className="text-sm py-4 text-center" style={{ color: "var(--color-muted)" }}>No items match your search.</p>
-                  ) : (
-                    pickerItems.map((item) => {
-                      const qty = quantities[item.id] ?? 0;
-                      const inCart = qty > 0;
-                      const price = item.discounted_price ?? item.price;
-                      const minimumOrderQuantity = getMinimumOrderQuantity(item);
-                      return (
-                        <div
-                          key={item.id}
-                          className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all"
-                          style={{
-                            border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
-                            background: inCart ? "#f0fdf4" : "white",
-                          }}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
-                            {item.description && (
-                              <p className="text-xs mt-0.5 truncate" style={{ color: "var(--color-muted)" }}>{item.description}</p>
-                            )}
-                            <div className="mt-0.5 flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
-                                ${price.toFixed(2)}
-                              </span>
-                              {item.discounted_price != null && (
-                                <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
-                                  ${item.price.toFixed(2)}
-                                </span>
-                              )}
-                              {minimumOrderQuantity > 1 && (
-                                <span
-                                  className="text-xs font-semibold"
-                                  style={{ color: "var(--color-sage)" }}
-                                >
-                                  Min {minimumOrderQuantity}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {inCart ? (
-                            <div className="flex items-center gap-0 shrink-0">
-                              <button
-                                type="button"
-                                onClick={() => changeQty(item.id, -1)}
-                                className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
-                                style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                                aria-label={`Decrease ${item.name} quantity`}
-                              >
-                                -
-                              </button>
-                              <div
-                                className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b"
-                                style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}
-                              >
-                                {qty}
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => changeQty(item.id, 1)}
-                                className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
-                                style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                                aria-label={`Increase ${item.name} quantity`}
-                              >
-                                +
-                              </button>
-                            </div>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => changeQty(item.id, 1)}
-                              className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-                              style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                            >
-                              + Add
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                {/* Footer */}
-                <div
-                  className="px-5 py-4 border-t shrink-0 flex items-center justify-between gap-3"
-                  style={{ borderColor: "var(--color-border)" }}
-                >
-                  <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                    {selectedLines.length} item{selectedLines.length !== 1 ? "s" : ""} selected
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setPickerOpen(false)}
-                    className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
-                    style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                  >
-                    Done
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
         </form>
       </div>
+
+      {pickerModal}
 
       <Modal
         isOpen={showErrorModal}
