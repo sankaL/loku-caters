@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
+import type { EventConfig } from "@/config/event";
 
 interface MenuItem {
     name: string;
@@ -11,7 +12,7 @@ interface MenuItem {
     hasTooltip?: boolean;
 }
 
-export default function MenuClient() {
+export default function MenuClient({ eventConfig }: { eventConfig: EventConfig | null }) {
     const [isLampraisModalOpen, setIsLampraisModalOpen] = useState(false);
 
     const individualItems = {

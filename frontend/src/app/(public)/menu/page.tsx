@@ -1,4 +1,5 @@
 import MenuClient from "./MenuClient";
+import { fetchEventConfig } from "@/config/event";
 
 export const metadata = {
     title: "Catering Menu | Loku Caters",
@@ -6,5 +7,13 @@ export const metadata = {
 };
 
 export default async function MenuPage() {
-    return <MenuClient />;
+    let eventConfig = null;
+
+    try {
+        eventConfig = await fetchEventConfig();
+    } catch (err) {
+        console.error("Failed to load event config:", err);
+    }
+
+    return <MenuClient eventConfig={eventConfig} />;
 }
