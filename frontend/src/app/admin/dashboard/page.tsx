@@ -22,8 +22,12 @@ import TimeSlotRadialChart from "@/components/admin/dashboard/TimeSlotRadialChar
 import TopOrdersList from "@/components/admin/dashboard/TopOrdersList";
 import OpenOrdersList from "@/components/admin/dashboard/OpenOrdersList";
 import OrdersAreaChart from "@/components/admin/dashboard/OrdersAreaChart";
+import TopEventsRevenueTile, {
+  type DashboardEventSummary,
+} from "@/components/admin/dashboard/TopEventsRevenueTile";
 
 type Range = "7d" | "30d" | "1y";
+const TOP_METRIC_HEIGHT = 160;
 
 // ---------------------------------------------------------------------------
 // Skeleton helpers
@@ -107,9 +111,17 @@ interface KpiTileProps {
   delta: number | null;
   trendText: string;
   subtitle: string;
+  height?: number;
 }
 
-function KpiTile({ label, value, delta, trendText, subtitle }: KpiTileProps) {
+function KpiTile({
+  label,
+  value,
+  delta,
+  trendText,
+  subtitle,
+  height = TOP_METRIC_HEIGHT,
+}: KpiTileProps) {
   const up = delta === null ? null : delta >= 0;
   const trendArrow = up === null ? null : up ? (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -129,10 +141,12 @@ function KpiTile({ label, value, delta, trendText, subtitle }: KpiTileProps) {
         background: "var(--color-forest)",
         border: "1px solid rgba(255,255,255,0.08)",
         borderRadius: 20,
+        height,
         padding: "20px 22px",
         display: "flex",
         flexDirection: "column",
         gap: 0,
+        boxSizing: "border-box",
       }}
     >
       {/* Label row + badge */}
@@ -189,10 +203,6 @@ function trendLabel(delta: number | null, upLabel: string, downLabel: string, ne
   return "No change this month";
 }
 
-function fmt(amount: number, currency: string): string {
-  return new Intl.NumberFormat("en-CA", { style: "currency", currency }).format(amount);
-}
-
 function fmt0(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-CA", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
 }
@@ -203,6 +213,8 @@ function fmt0(amount: number, currency: string): string {
 export default function DashboardPage() {
   const router = useRouter();
   const [orders, setOrders] = useState<Order[]>([]);
+  const [events, setEvents] = useState<DashboardEventSummary[]>([]);
+  const [eventsLoadFailed, setEventsLoadFailed] = useState(false);
   const [currency, setCurrency] = useState(CURRENCY);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState<Range>("7d");
@@ -217,12 +229,16 @@ export default function DashboardPage() {
       try {
         const token = await getAdminToken();
         if (!token) { router.push("/admin/login"); return; }
+        setEventsLoadFailed(false);
 
-        const [ordersResult, configResult] = await Promise.allSettled([
+        const [ordersResult, configResult, eventsResult] = await Promise.allSettled([
           fetch(`${API_URL}/api/admin/orders`, {
             headers: { Authorization: `Bearer ${token}` },
           }),
           fetchEventConfig(),
+          fetch(`${API_URL}/api/admin/events`, {
+            headers: { Authorization: `Bearer ${token}` },
+          }),
         ]);
 
         if (ordersResult.status === "rejected") {
@@ -236,6 +252,16 @@ export default function DashboardPage() {
         setOrders(await ordersRes.json());
         if (configResult.status === "fulfilled" && configResult.value) {
           setCurrency(configResult.value.currency);
+        }
+        if (eventsResult.status === "fulfilled" && eventsResult.value.status === 401) {
+          router.push("/admin/login");
+          return;
+        }
+        if (eventsResult.status === "fulfilled" && eventsResult.value.ok) {
+          setEvents(await eventsResult.value.json());
+        } else {
+          setEvents([]);
+          setEventsLoadFailed(true);
         }
       } catch {
         setToast("Failed to load dashboard data");
@@ -294,12 +320,12 @@ export default function DashboardPage() {
       {/* ---- Row 0: KPI bar ---- */}
       {loading ? (
         <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          {[0, 1, 2, 3].map((i) => (
+          {[0, 1].map((i) => (
             <div
               key={i}
               style={{
                 flex: 1,
-                height: 138,
+                height: TOP_METRIC_HEIGHT,
                 background: "var(--color-forest)",
                 borderRadius: 20,
                 opacity: 0.4,
@@ -307,6 +333,17 @@ export default function DashboardPage() {
               }}
             />
           ))}
+          <div
+            className="sm:col-span-2 xl:col-span-2"
+            style={{
+              flex: 1,
+              height: TOP_METRIC_HEIGHT,
+              background: "var(--color-forest)",
+              borderRadius: 20,
+              opacity: 0.4,
+              animation: "pulse 1.5s ease-in-out infinite",
+            }}
+          />
         </div>
       ) : (
         <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -315,7 +352,7 @@ export default function DashboardPage() {
             value={String(kpis.totalOrders)}
             delta={kpis.totalOrdersDelta}
             trendText={trendLabel(kpis.totalOrdersDelta, "Trending up this month", "Trending down this month", "Orders this month")}
-            subtitle={`Non-cancelled pre-orders | ${kpis.totalItems} ${itemWord(kpis.totalItems)} this month`}
+            subtitle={`${kpis.totalItems} ${itemWord(kpis.totalItems)} this month`}
           />
           <KpiTile
             label="Total Revenue"
@@ -324,20 +361,14 @@ export default function DashboardPage() {
             trendText={`This month: ${fmt0(currMonthRevenue, currency)}`}
             subtitle="Excludes no-shows and cancellations"
           />
-          <KpiTile
-            label="Avg Order Value"
-            value={fmt(kpis.avgOrderValue, currency)}
-            delta={kpis.avgOrderValueDelta}
-            trendText={trendLabel(kpis.avgOrderValueDelta, "Value trending up", "Value trending down", "Average per order")}
-            subtitle="Excludes no-shows and cancellations"
-          />
-          <KpiTile
-            label="Pickup Completion"
-            value={`${kpis.completionRate}%`}
-            delta={kpis.completionRateDelta}
-            trendText={trendLabel(kpis.completionRateDelta, "Completion improving", "More no-shows this month", "Pickup completion rate")}
-            subtitle="Of expected pickups fulfilled"
-          />
+          <div className="sm:col-span-2 xl:col-span-2">
+            <TopEventsRevenueTile
+              events={events}
+              currency={currency}
+              height={TOP_METRIC_HEIGHT}
+              loadFailed={eventsLoadFailed}
+            />
+          </div>
         </div>
       )}
 
