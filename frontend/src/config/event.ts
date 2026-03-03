@@ -9,6 +9,7 @@ export interface Item {
   description?: string;
   price: number;
   discounted_price?: number | null;
+  minimum_order_quantity?: number;
 }
 
 export interface Location {

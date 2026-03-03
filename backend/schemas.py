@@ -47,6 +47,14 @@ class ItemCreate(BaseModel):
     description: str = ""
     price: float
     discounted_price: Optional[float] = None
+    minimum_order_quantity: Optional[int] = None
+
+    @field_validator("minimum_order_quantity")
+    @classmethod
+    def minimum_order_must_be_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("Minimum order quantity must be at least 1")
+        return v
 
 
 class ItemUpdate(BaseModel):
@@ -54,6 +62,14 @@ class ItemUpdate(BaseModel):
     description: str = ""
     price: float
     discounted_price: Optional[float] = None
+    minimum_order_quantity: Optional[int] = None
+
+    @field_validator("minimum_order_quantity")
+    @classmethod
+    def minimum_order_must_be_positive(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and v < 1:
+            raise ValueError("Minimum order quantity must be at least 1")
+        return v
 
 
 class ItemResponse(BaseModel):
@@ -62,6 +78,7 @@ class ItemResponse(BaseModel):
     description: str
     price: float
     discounted_price: Optional[float]
+    minimum_order_quantity: int
     sort_order: int
 
 

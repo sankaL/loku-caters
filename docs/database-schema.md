@@ -63,6 +63,7 @@ Relational table for menu items. Managed via `/admin/items` in the admin panel.
 | `description` | `TEXT` | NOT NULL, default `''` | Shown below item selector on order form |
 | `price` | `NUMERIC(10,2)` | NOT NULL | Regular price |
 | `discounted_price` | `NUMERIC(10,2)` | NULLABLE | Overrides `price` for display and order calculation if set |
+| `minimum_order_quantity` | `INTEGER` | NOT NULL, default `1`, CHECK >= 1 | Minimum quantity required on the public order form for this item |
 | `sort_order` | `INTEGER` | NOT NULL, default `0` | Controls display order |
 
 ---

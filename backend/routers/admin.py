@@ -540,12 +540,14 @@ def admin_delete_event(
 # ---------------------------------------------------------------------------
 
 def _item_dict(item: Item) -> dict:
+    minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
     return {
         "id": item.id,
         "name": item.name,
         "description": item.description,
         "price": float(item.price),
         "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
+        "minimum_order_quantity": minimum_order_quantity,
         "sort_order": item.sort_order,
     }
 
@@ -572,6 +574,7 @@ def admin_create_item(
         description=body.description,
         price=body.price,
         discounted_price=body.discounted_price,
+        minimum_order_quantity=body.minimum_order_quantity if body.minimum_order_quantity is not None else 1,
         sort_order=next_sort,
     )
     db.add(item)
@@ -594,6 +597,8 @@ def admin_update_item(
     item.description = body.description
     item.price = body.price
     item.discounted_price = body.discounted_price
+    if body.minimum_order_quantity is not None:
+        item.minimum_order_quantity = body.minimum_order_quantity
     db.commit()
     db.refresh(item)
     return _item_dict(item)

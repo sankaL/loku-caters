@@ -93,6 +93,7 @@ def _build_config_from_event(db: Session, event) -> dict:
                 "description": item.description,
                 "price": float(item.price),
                 "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
+                "minimum_order_quantity": max(1, int(getattr(item, "minimum_order_quantity", 1) or 1)),
             }
             for item in items
         ],

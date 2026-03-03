@@ -20,6 +20,7 @@ class Item(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     discounted_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
+    minimum_order_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 

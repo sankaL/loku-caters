@@ -11,6 +11,7 @@ interface Item {
   description: string;
   price: number;
   discounted_price: number | null;
+  minimum_order_quantity?: number;
   sort_order: number;
 }
 
@@ -19,6 +20,7 @@ const EMPTY_FORM = {
   description: "",
   price: "",
   discounted_price: "",
+  minimum_order_quantity: "1",
 };
 
 export default function AdminItemsPage() {
@@ -66,12 +68,18 @@ export default function AdminItemsPage() {
       description: item.description,
       price: String(item.price),
       discounted_price: item.discounted_price != null ? String(item.discounted_price) : "",
+      minimum_order_quantity: String(item.minimum_order_quantity ?? 1),
     });
     setShowModal(true);
   }
 
   async function handleSave() {
     if (!form.name.trim() || !form.price) return;
+    const minimumOrderQuantity = Number.parseInt(form.minimum_order_quantity, 10);
+    if (!Number.isFinite(minimumOrderQuantity) || minimumOrderQuantity < 1) {
+      showToast("Minimum order must be at least 1.", "error");
+      return;
+    }
     setSaving(true);
     try {
       const token = await getAdminToken();
@@ -82,6 +90,7 @@ export default function AdminItemsPage() {
         description: form.description.trim(),
         price: parseFloat(form.price) || 0,
         discounted_price: form.discounted_price ? parseFloat(form.discounted_price) : null,
+        minimum_order_quantity: minimumOrderQuantity,
       };
 
       let res: Response;
@@ -195,13 +204,14 @@ export default function AdminItemsPage() {
           style={{ background: "white", border: "1px solid var(--color-border)" }}
         >
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[820px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>ID</th>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Name</th>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Price</th>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Sale Price</th>
+                <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Min Order</th>
                 <th className="px-5 py-3" />
               </tr>
             </thead>
@@ -223,6 +233,9 @@ export default function AdminItemsPage() {
                   <td className="px-5 py-3" style={{ color: "var(--color-text)" }}>${item.price.toFixed(2)}</td>
                   <td className="px-5 py-3" style={{ color: item.discounted_price != null ? "#12270F" : "var(--color-muted)" }}>
                     {item.discounted_price != null ? `$${item.discounted_price.toFixed(2)}` : "-"}
+                  </td>
+                  <td className="px-5 py-3" style={{ color: "var(--color-text)" }}>
+                    {item.minimum_order_quantity ?? 1}
                   </td>
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3 justify-end">
@@ -290,7 +303,7 @@ export default function AdminItemsPage() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
               <div>
                 <label className={labelClass} style={{ color: "var(--color-text)" }}>Price ({CURRENCY})</label>
                 <input
@@ -313,6 +326,19 @@ export default function AdminItemsPage() {
                   value={form.discounted_price}
                   onChange={(e) => setForm((p) => ({ ...p, discounted_price: e.target.value }))}
                   placeholder="Leave blank"
+                  className={inputClass}
+                  style={{ color: "var(--color-text)" }}
+                />
+              </div>
+              <div>
+                <label className={labelClass} style={{ color: "var(--color-text)" }}>Min Order</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={form.minimum_order_quantity}
+                  onChange={(e) => setForm((p) => ({ ...p, minimum_order_quantity: e.target.value }))}
+                  placeholder="1"
                   className={inputClass}
                   style={{ color: "var(--color-text)" }}
                 />

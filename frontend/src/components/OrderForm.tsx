@@ -39,6 +39,14 @@ interface OrderFormProps {
   onSuccess: (results: OrderResult[]) => void;
 }
 
+function getMinimumOrderQuantity(item: Item | undefined): number {
+  const value = Number(item?.minimum_order_quantity ?? 1);
+  if (!Number.isFinite(value)) {
+    return 1;
+  }
+  return Math.max(1, Math.ceil(value));
+}
+
 export default function OrderForm({ items, locations, onSuccess }: OrderFormProps) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [form, setForm] = useState<ContactForm>({
@@ -61,7 +69,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
 
   const selectedLines = items
     .filter((i) => (quantities[i.id] ?? 0) > 0)
-    .map((i) => ({ item: i, qty: quantities[i.id] }));
+    .map((i) => ({ item: i, qty: quantities[i.id] ?? 0 }));
 
   const grandTotal = selectedLines.reduce((sum, { item, qty }) => {
     return sum + (item.discounted_price ?? item.price) * qty;
@@ -83,11 +91,31 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   }, [pickerOpen]);
 
   function changeQty(itemId: string, delta: number) {
-    setQuantities((prev) => ({
-      ...prev,
-      [itemId]: Math.max(0, (prev[itemId] ?? 0) + delta),
-    }));
+    setQuantities((prev) => {
+      const next = { ...prev };
+      const currentQty = prev[itemId] ?? 0;
+      const item = items.find((entry) => entry.id === itemId);
+      const minimumOrderQuantity = getMinimumOrderQuantity(item);
+
+      if (delta > 0) {
+        next[itemId] = currentQty === 0 ? minimumOrderQuantity : currentQty + delta;
+        return next;
+      }
+
+      if (delta < 0) {
+        if (currentQty <= minimumOrderQuantity) {
+          delete next[itemId];
+          return next;
+        }
+
+        next[itemId] = Math.max(minimumOrderQuantity, currentQty + delta);
+        return next;
+      }
+
+      return next;
+    });
     setErrors((prev) => ({ ...prev, items: "" }));
+    setServerError("");
   }
 
   function handleChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -110,6 +138,13 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   function validate(): boolean {
     const newErrors: Record<string, string> = {};
     if (selectedLines.length === 0) newErrors.items = "Please add at least one item.";
+    for (const { item, qty } of selectedLines) {
+      const minimumOrderQuantity = getMinimumOrderQuantity(item);
+      if (qty < minimumOrderQuantity) {
+        newErrors.items = `${item.name} requires a minimum order of ${minimumOrderQuantity}.`;
+        break;
+      }
+    }
     if (!form.name.trim()) newErrors.name = "Please enter your name.";
     if (!form.pickup_location) newErrors.pickup_location = "Please select a pickup location.";
     if (!form.pickup_time_slot) newErrors.pickup_time_slot = "Please select a time slot.";
@@ -223,6 +258,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
               <div className="space-y-2 mb-3">
                 {selectedLines.map(({ item, qty }) => {
                   const price = item.discounted_price ?? item.price;
+                  const minimumOrderQuantity = getMinimumOrderQuantity(item);
                   return (
                     <div
                       key={item.id}
@@ -232,6 +268,11 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
                         <p className="text-xs" style={{ color: "var(--color-muted)" }}>${price.toFixed(2)} each</p>
+                        {minimumOrderQuantity > 1 && (
+                          <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                            Minimum order: {minimumOrderQuantity}
+                          </p>
+                        )}
                       </div>
                       <div className="flex items-center gap-0 shrink-0">
                         <button
@@ -494,6 +535,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                       const qty = quantities[item.id] ?? 0;
                       const inCart = qty > 0;
                       const price = item.discounted_price ?? item.price;
+                      const minimumOrderQuantity = getMinimumOrderQuantity(item);
                       return (
                         <div
                           key={item.id}
@@ -515,6 +557,14 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                               {item.discounted_price != null && (
                                 <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
                                   ${item.price.toFixed(2)}
+                                </span>
+                              )}
+                              {minimumOrderQuantity > 1 && (
+                                <span
+                                  className="text-xs font-semibold"
+                                  style={{ color: "var(--color-sage)" }}
+                                >
+                                  Min {minimumOrderQuantity}
                                 </span>
                               )}
                             </div>

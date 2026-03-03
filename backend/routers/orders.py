@@ -27,6 +27,13 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
     if item is None:
         raise HTTPException(status_code=400, detail=f"Unknown item: {order_in.item_id}")
 
+    minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+    if order_in.quantity < minimum_order_quantity:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Minimum order quantity for {item.name} is {minimum_order_quantity}",
+        )
+
     effective_price = float(item.discounted_price) if item.discounted_price is not None else float(item.price)
     total_price = round(order_in.quantity * effective_price, 2)
 
