@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { API_URL, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
 import Modal from "@/components/ui/Modal";
@@ -62,6 +62,8 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const savedScrollY = useRef(0);
 
   const timeSlots = form.pickup_location
     ? (locations.find((l) => l.name === form.pickup_location)?.timeSlots ?? [])
@@ -86,8 +88,16 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
 
   useEffect(() => {
     if (!pickerOpen) return;
+    savedScrollY.current = window.scrollY;
     document.body.style.overflow = "hidden";
-    return () => { document.body.style.overflow = ""; };
+    // Focus the search input after the modal renders, without scrolling
+    requestAnimationFrame(() => {
+      searchInputRef.current?.focus({ preventScroll: true });
+    });
+    return () => {
+      document.body.style.overflow = "";
+      window.scrollTo({ top: savedScrollY.current, behavior: "instant" });
+    };
   }, [pickerOpen]);
 
   function changeQty(itemId: string, delta: number) {
@@ -202,10 +212,9 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   }
 
   const inputClass = (field: string) =>
-    `w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all ${
-      errors[field]
-        ? "border-red-400 focus:ring-red-200"
-        : "border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:ring-opacity-40 focus:border-[var(--color-sage)]"
+    `w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all ${errors[field]
+      ? "border-red-400 focus:ring-red-200"
+      : "border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:ring-opacity-40 focus:border-[var(--color-sage)]"
     }`;
 
   return (
@@ -516,8 +525,8 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                     type="text"
                     value={pickerSearch}
                     onChange={(e) => setPickerSearch(e.target.value)}
+                    ref={searchInputRef}
                     placeholder="Search items..."
-                    autoFocus
                     className="w-full px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
                     style={{
                       borderColor: "var(--color-border)",
