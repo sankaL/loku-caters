@@ -183,7 +183,7 @@ export default function TopEventsRevenueTile({
               flexDirection: "column",
               gap: 6,
               flex: 1,
-              justifyContent: "space-between",
+              justifyContent: "flex-start",
               minHeight: 0,
             }}
           >
