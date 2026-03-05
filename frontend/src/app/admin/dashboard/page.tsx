@@ -359,7 +359,7 @@ export default function DashboardPage() {
             value={fmt0(revenue.total, currency)}
             delta={revenueDelta}
             trendText={`This month: ${fmt0(currMonthRevenue, currency)}`}
-            subtitle="Excludes no-shows and cancellations"
+            subtitle="All time"
           />
           <div className="sm:col-span-2 xl:col-span-2">
             <TopEventsRevenueTile
