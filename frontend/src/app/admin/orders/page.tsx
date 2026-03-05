@@ -2,11 +2,17 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
+import { API_URL, CURRENCY, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
 import SearchableSelect from "@/components/ui/SearchableSelect";
+import ItemQuantityPicker from "@/components/admin/orders/ItemQuantityPicker";
+import {
+  getMinimumOrderQuantity,
+  linesFromQuantities,
+  type OrderLineItem,
+} from "@/lib/orderLineUtils";
 
 interface Order {
   id: string;
@@ -154,8 +160,6 @@ interface AddOrderForm {
   name: string;
   email: string;
   phone_number: string;
-  item_id: string;
-  quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
   notes: string;
@@ -164,7 +168,6 @@ interface AddOrderForm {
 
 const EMPTY_ADD_FORM: AddOrderForm = {
   name: "", email: "", phone_number: "",
-  item_id: "", quantity: 1,
   pickup_location: "", pickup_time_slot: "",
   notes: "",
   exclude_email: false,
@@ -384,6 +387,8 @@ export default function AdminOrdersPage() {
   // Add order modal
   const [showAddOrderModal, setShowAddOrderModal] = useState(false);
   const [addOrderForm, setAddOrderForm] = useState<AddOrderForm>(EMPTY_ADD_FORM);
+  const [addOrderQuantities, setAddOrderQuantities] = useState<Record<string, number>>({});
+  const [addOrderItemsError, setAddOrderItemsError] = useState<string>("");
   const [addingOrder, setAddingOrder] = useState(false);
   const [addModalEventId, setAddModalEventId] = useState<number | null>(null);
   const [addModalEventConfig, setAddModalEventConfig] = useState<EventConfig | null>(null);
@@ -1132,25 +1137,85 @@ export default function AdminOrdersPage() {
       showToast("Please select an event", "error");
       return;
     }
+
+    const addModalItems: OrderLineItem[] = (addModalEventConfig?.items ?? []).map((item) => ({
+      ...item,
+      is_locked: false,
+    }));
+    const selectedLines = linesFromQuantities(addModalItems, addOrderQuantities);
+    if (selectedLines.length === 0) {
+      setAddOrderItemsError("Please add at least one item.");
+      return;
+    }
+    for (const { item, qty } of selectedLines) {
+      const minimumOrderQuantity = getMinimumOrderQuantity(item);
+      if (qty < minimumOrderQuantity) {
+        setAddOrderItemsError(`${item.name} requires a minimum order of ${minimumOrderQuantity}.`);
+        return;
+      }
+    }
+
     setAddingOrder(true);
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/orders`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...addOrderForm,
-          event_id: addModalEventId,
-        }),
-      });
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to create order"));
+
+      const createResults = await Promise.allSettled(
+        selectedLines.map(async ({ item, qty }) => {
+          const res = await fetch(`${API_URL}/api/admin/orders`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...addOrderForm,
+              item_id: item.id,
+              quantity: qty,
+              event_id: addModalEventId,
+            }),
+          });
+          if (!res.ok) {
+            throw new Error(await getApiErrorMessage(res, `Failed to create line for ${item.name}`));
+          }
+          return true;
+        })
+      );
+
+      const succeeded = createResults.filter((result) => result.status === "fulfilled").length;
+      const failed = createResults.length - succeeded;
+      const failedLines = selectedLines.filter((_, index) => createResults[index]?.status === "rejected");
+
+      if (succeeded > 0) {
+        await fetchOrders();
+        if (failed > 0) {
+          const nextQuantities: Record<string, number> = {};
+          for (const { item, qty } of failedLines) {
+            nextQuantities[item.id] = qty;
+          }
+          setAddOrderQuantities(nextQuantities);
+          setAddOrderItemsError("Some lines were created. Only failed lines remain selected for retry.");
+        }
       }
-      showToast("Order created successfully", "success");
-      setShowAddOrderModal(false);
-      setAddOrderForm(EMPTY_ADD_FORM);
-      await fetchOrders();
+
+      if (failed === 0) {
+        showToast(`Created ${succeeded} order line${succeeded !== 1 ? "s" : ""}`, "success");
+        setShowAddOrderModal(false);
+        setAddOrderForm(EMPTY_ADD_FORM);
+        setAddOrderQuantities({});
+        setAddOrderItemsError("");
+        return;
+      }
+
+      const firstFailure = createResults.find((result) => result.status === "rejected");
+      const firstFailureMessage = firstFailure && firstFailure.status === "rejected"
+        ? firstFailure.reason instanceof Error
+          ? firstFailure.reason.message
+          : "Unknown error"
+        : "Unknown error";
+
+      if (succeeded === 0) {
+        throw new Error(firstFailureMessage);
+      }
+
+      showToast(`Created ${succeeded}, failed ${failed}. First error: ${firstFailureMessage}`, "error");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to create order", "error");
     } finally {
@@ -1385,6 +1450,18 @@ export default function AdminOrdersPage() {
     return loc?.timeSlots ?? [];
   }, [addModalEventConfig, addOrderForm.pickup_location]);
 
+  const addOrderPickerItems = useMemo<OrderLineItem[]>(
+    () => (addModalEventConfig?.items ?? []).map((item) => ({ ...item, is_locked: false })),
+    [addModalEventConfig]
+  );
+
+  function resetAddOrderModalState() {
+    setShowAddOrderModal(false);
+    setAddOrderForm(EMPTY_ADD_FORM);
+    setAddOrderQuantities({});
+    setAddOrderItemsError("");
+  }
+
   const normalizedAddModalEventQuery = useMemo(() => {
     return addModalEventSearch
       .toLowerCase()
@@ -1471,6 +1548,8 @@ export default function AdminOrdersPage() {
             onClick={() => {
               setShowAddOrderModal(true);
               setAddOrderForm(EMPTY_ADD_FORM);
+              setAddOrderQuantities({});
+              setAddOrderItemsError("");
               setAddModalEventId(configEventId);
               setAddModalEventConfig(configEventId ? eventConfig : null);
               const matchedEvent = configEventId ? events.find(e => e.id === configEventId) : null;
@@ -2260,7 +2339,7 @@ export default function AdminOrdersPage() {
         {showAddOrderModal && (
           <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAddOrderModal(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) resetAddOrderModalState(); }}
         >
           <div
             style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "580px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
@@ -2290,7 +2369,9 @@ export default function AdminOrdersPage() {
                       if (!selectedEvent || nextSearch !== selectedEventLabel) {
                         setAddModalEventId(null);
                         setAddModalEventConfig(null);
-                        setAddOrderForm((f) => ({ ...f, item_id: "", pickup_location: "", pickup_time_slot: "" }));
+                        setAddOrderForm((f) => ({ ...f, pickup_location: "", pickup_time_slot: "" }));
+                        setAddOrderQuantities({});
+                        setAddOrderItemsError("");
                       }
                     }}
                     onFocus={() => setShowAddEventDropdown(true)}
@@ -2312,7 +2393,9 @@ export default function AdminOrdersPage() {
                               setAddModalEventId(e.id);
                               setAddModalEventSearch(`${e.name} (${e.event_date})`);
                               setShowAddEventDropdown(false);
-                              setAddOrderForm(f => ({ ...f, item_id: "", pickup_location: "", pickup_time_slot: "" }));
+                              setAddOrderForm(f => ({ ...f, pickup_location: "", pickup_time_slot: "" }));
+                              setAddOrderQuantities({});
+                              setAddOrderItemsError("");
                             }}
                             style={{
                               padding: "8px 12px", cursor: "pointer",
@@ -2366,17 +2449,6 @@ export default function AdminOrdersPage() {
                     style={inputStyle}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Quantity</label>
-                  <input
-                    required
-                    type="number"
-                    min={1}
-                    value={addOrderForm.quantity}
-                    onChange={(e) => setAddOrderForm((f) => ({ ...f, quantity: parseInt(e.target.value, 10) || 1 }))}
-                    style={inputStyle}
-                  />
-                </div>
 
                 <div style={{ gridColumn: "1 / -1" }}>
                   <label className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-text)" }}>
@@ -2395,21 +2467,22 @@ export default function AdminOrdersPage() {
               </div>
 
               <div>
-                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Item</label>
-                <div className="relative">
-                  <select
-                    required
-                    value={addOrderForm.item_id}
-                    onChange={(e) => setAddOrderForm((f) => ({ ...f, item_id: e.target.value }))}
-                    style={{ ...inputStyle, paddingRight: "2rem" }}
-                  >
-                    <option value="">Select item...</option>
-                    {addModalEventConfig?.items.map((item) => (
-                      <option key={item.id} value={item.id}>{item.name}</option>
-                    ))}
-                  </select>
-                  <SelectChevron />
-                </div>
+                <ItemQuantityPicker
+                  items={addOrderPickerItems}
+                  quantities={addOrderQuantities}
+                  onChange={(next) => {
+                    setAddOrderQuantities(next);
+                    setAddOrderItemsError("");
+                  }}
+                  currency={addModalEventConfig?.currency ?? CURRENCY}
+                  disabled={!addModalEventConfig}
+                  error={addOrderItemsError}
+                />
+                {configUsesFallback && (
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    Using active event catalog as a fallback.
+                  </p>
+                )}
               </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
@@ -2468,7 +2541,7 @@ export default function AdminOrdersPage() {
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddOrderModal(false)}
+                  onClick={resetAddOrderModalState}
                   className="px-4 py-2 rounded-xl text-sm font-medium"
                   style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
                 >

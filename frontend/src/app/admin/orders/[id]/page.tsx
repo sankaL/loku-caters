@@ -1,13 +1,19 @@
 "use client";
 
-import { useState, useEffect, use, useMemo } from "react";
+import { useState, useEffect, use, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL, fetchEventConfig, EventConfig } from "@/config/event";
+import { API_URL, CURRENCY, fetchEventConfig, EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import CustomSelect from "@/components/ui/CustomSelect";
-import SearchableSelect from "@/components/ui/SearchableSelect";
 import Modal from "@/components/ui/Modal";
+import ItemQuantityPicker from "@/components/admin/orders/ItemQuantityPicker";
+import {
+  buildLegacyItemsFromOrders,
+  getMinimumOrderQuantity,
+  linesFromQuantities,
+  type OrderLineItem,
+} from "@/lib/orderLineUtils";
 
 interface Order {
   id: string;
@@ -42,8 +48,6 @@ interface EditOrderForm {
   name: string;
   email: string;
   phone_number: string;
-  item_id: string;
-  quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
   notes: string;
@@ -132,6 +136,8 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [configUsesFallback, setConfigUsesFallback] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<EditOrderForm | null>(null);
+  const [editQuantities, setEditQuantities] = useState<Record<string, number>>({});
+  const [editItemsError, setEditItemsError] = useState("");
   const [savingEdits, setSavingEdits] = useState(false);
 
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -145,45 +151,55 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [addItemQty, setAddItemQty] = useState(1);
   const [addingItem, setAddingItem] = useState(false);
 
-  const showToast = (message: string, type: "success" | "error") => {
+  const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
-  };
+  }, []);
 
-  useEffect(() => {
-    async function fetchOrder() {
+  const fetchOrderById = useCallback(
+    async (options?: { showLoader?: boolean; suppressErrorToast?: boolean }) => {
+      const showLoader = options?.showLoader ?? true;
+      if (showLoader) setLoading(true);
+
       try {
         const token = await getAdminToken();
-        if (!token) return;
+        if (!token) return null;
         const res = await fetch(`${API_URL}/api/admin/orders/${id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (res.status === 404) {
           setNotFound(true);
-          return;
+          return null;
         }
         if (!res.ok) throw new Error("Failed to fetch order");
-        const data = await res.json();
+        const data = (await res.json()) as Order;
+        setNotFound(false);
         setOrder(data);
         setEditForm({
           name: data.name ?? "",
           email: data.email ?? "",
           phone_number: data.phone_number ?? "",
-          item_id: data.item_id ?? "",
-          quantity: data.quantity ?? 1,
           pickup_location: data.pickup_location ?? "",
           pickup_time_slot: data.pickup_time_slot ?? "",
           notes: data.notes ?? "",
           exclude_email: !!data.exclude_email,
         });
+        return data;
       } catch {
-        showToast("Failed to load order", "error");
+        if (!options?.suppressErrorToast) {
+          showToast("Failed to load order", "error");
+        }
+        return null;
       } finally {
-        setLoading(false);
+        if (showLoader) setLoading(false);
       }
-    }
-    fetchOrder();
-  }, [id]);
+    },
+    [id, showToast]
+  );
+
+  useEffect(() => {
+    void fetchOrderById();
+  }, [fetchOrderById]);
 
   useEffect(() => {
     let cancelled = false;
@@ -292,15 +308,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     return loc?.timeSlots ?? [];
   }, [eventConfig, editForm?.pickup_location]);
 
-  const editItemOptions = useMemo(() => {
-    const base = (eventConfig?.items ?? []).map((i) => ({ value: i.id, label: i.name }));
-    const selectedId = (editForm?.item_id ?? "").trim();
-    if (!selectedId) return base;
-    if (base.some((o) => o.value === selectedId)) return base;
-    const label = (order?.item_name ?? selectedId).trim() || selectedId;
-    return [{ value: selectedId, label: `${label} (current)` }, ...base];
-  }, [eventConfig, editForm?.item_id, order?.item_name]);
-
   const editLocationOptions = useMemo(() => {
     const base = (eventConfig?.locations ?? []).map((l) => ({ value: l.name, label: l.name }));
     const selected = (editForm?.pickup_location ?? "").trim();
@@ -316,6 +323,87 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     if (base.some((o) => o.value === selected)) return base;
     return [{ value: selected, label: `${selected} (current)` }, ...base];
   }, [editTimeSlots, editForm?.pickup_time_slot]);
+
+  const editScopeOrders = useMemo<Order[]>(() => {
+    if (!order) return [];
+    const email = String(order.email ?? "").trim().toLowerCase();
+    if (!email) return [order];
+
+    const scoped = siblingOrders.filter((row) => {
+      const rowEmail = String(row.email ?? "").trim().toLowerCase();
+      return row.event_id === order.event_id && rowEmail === email;
+    });
+    if (scoped.length === 0) return [order];
+    if (scoped.some((row) => row.id === order.id)) return scoped;
+    return [order, ...scoped];
+  }, [order, siblingOrders]);
+
+  const editEventItems = useMemo<OrderLineItem[]>(
+    () => (eventConfig?.items ?? []).map((item) => ({ ...item, is_locked: false })),
+    [eventConfig]
+  );
+
+  const editLegacyItems = useMemo<OrderLineItem[]>(() => {
+    const knownItemIds = new Set(editEventItems.map((item) => item.id));
+    return buildLegacyItemsFromOrders(editScopeOrders, knownItemIds);
+  }, [editEventItems, editScopeOrders]);
+
+  const duplicateEditableRowItems = useMemo<OrderLineItem[]>(() => {
+    const catalogById = new Map(editEventItems.map((item) => [item.id, item] as const));
+    const lockedItemIds = new Set(editLegacyItems.map((item) => item.id));
+    const editableRows = editScopeOrders.filter((row) => !lockedItemIds.has(row.item_id));
+
+    const rowCountByItemId: Record<string, number> = {};
+    for (const row of editableRows) {
+      if (!catalogById.has(row.item_id)) continue;
+      rowCountByItemId[row.item_id] = (rowCountByItemId[row.item_id] ?? 0) + 1;
+    }
+
+    const rowNumberByItemId: Record<string, number> = {};
+    const rowItems: OrderLineItem[] = [];
+    for (const row of editableRows) {
+      const base = catalogById.get(row.item_id);
+      if (!base || (rowCountByItemId[row.item_id] ?? 0) < 2) continue;
+
+      rowNumberByItemId[row.item_id] = (rowNumberByItemId[row.item_id] ?? 0) + 1;
+      const lineNumber = rowNumberByItemId[row.item_id];
+
+      const qty = Number(row.quantity);
+      const total = Number(row.total_price);
+      const unitPrice =
+        Number.isFinite(qty) && qty > 0 && Number.isFinite(total)
+          ? Math.max(0, total / qty)
+          : (base.discounted_price ?? base.price);
+
+      rowItems.push({
+        ...base,
+        id: `line:${row.id}`,
+        name: `${base.name} (line ${lineNumber})`,
+        price: unitPrice,
+        discounted_price: null,
+        is_locked: false,
+        source_item_id: base.id,
+        source_order_id: row.id,
+      });
+    }
+
+    return rowItems;
+  }, [editEventItems, editLegacyItems, editScopeOrders]);
+
+  const duplicatePickerIdByOrderId = useMemo(() => {
+    const idByOrderId = new Map<string, string>();
+    for (const item of duplicateEditableRowItems) {
+      if (item.source_order_id) {
+        idByOrderId.set(item.source_order_id, item.id);
+      }
+    }
+    return idByOrderId;
+  }, [duplicateEditableRowItems]);
+
+  const editPickerItems = useMemo<OrderLineItem[]>(
+    () => [...editLegacyItems, ...duplicateEditableRowItems, ...editEventItems],
+    [editLegacyItems, duplicateEditableRowItems, editEventItems]
+  );
 
   async function handleStatusChange(newStatus: string) {
     if (!order) return;
@@ -400,38 +488,273 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     }
   }
 
+  function openEditModal() {
+    if (!order) return;
+    const seedRows = editScopeOrders.length > 0 ? editScopeOrders : [order];
+    const nextQuantities: Record<string, number> = {};
+    for (const row of seedRows) {
+      const key = duplicatePickerIdByOrderId.get(row.id) ?? row.item_id;
+      const qty = Number(row.quantity);
+      if (!Number.isFinite(qty) || qty <= 0) continue;
+      nextQuantities[key] = (nextQuantities[key] ?? 0) + qty;
+    }
+
+    setEditForm({
+      name: order.name ?? "",
+      email: order.email ?? "",
+      phone_number: order.phone_number ?? "",
+      pickup_location: order.pickup_location ?? "",
+      pickup_time_slot: order.pickup_time_slot ?? "",
+      notes: order.notes ?? "",
+      exclude_email: !!order.exclude_email,
+    });
+    setEditQuantities(nextQuantities);
+    setEditItemsError("");
+    setShowEditModal(true);
+  }
+
+  function closeEditModal() {
+    setShowEditModal(false);
+    setEditItemsError("");
+  }
+
+  function statusPatchSteps(targetStatus: string): string[] {
+    if (targetStatus === "pending") return [];
+    if (targetStatus === "confirmed") return ["confirmed"];
+    if (targetStatus === "picked_up") return ["confirmed", "picked_up"];
+    if (targetStatus === "no_show") return ["confirmed", "no_show"];
+    if (targetStatus === "cancelled") return ["cancelled"];
+    return [];
+  }
+
+  function resolveBackendItemId(item: OrderLineItem): string {
+    return item.source_item_id ?? item.id;
+  }
+
   async function handleSaveEdits(e: React.FormEvent) {
     e.preventDefault();
-    if (!editForm) return;
+    if (!order || !editForm) return;
+
+    const desiredLines = linesFromQuantities(editPickerItems, editQuantities);
+    if (desiredLines.length === 0) {
+      setEditItemsError("Please add at least one item.");
+      return;
+    }
+    for (const { item, qty } of desiredLines) {
+      const minimumOrderQuantity = getMinimumOrderQuantity(item);
+      if (qty < minimumOrderQuantity) {
+        setEditItemsError(`${item.name} requires a minimum order of ${minimumOrderQuantity}.`);
+        return;
+      }
+    }
+    setEditItemsError("");
+
     setSavingEdits(true);
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/orders/${id}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(editForm),
-      });
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to update order"));
+
+      const basePayload = {
+        name: editForm.name,
+        email: editForm.email,
+        phone_number: editForm.phone_number,
+        pickup_location: editForm.pickup_location,
+        pickup_time_slot: editForm.pickup_time_slot,
+        notes: editForm.notes,
+        exclude_email: editForm.exclude_email,
+      };
+
+      const existingRows = [...(editScopeOrders.length > 0 ? editScopeOrders : [order])];
+      const targetStatus = order.status;
+      const targetPaid = !!order.paid;
+      const targetPaymentMethod = order.payment_method;
+      const targetPaymentMethodOther = order.payment_method_other;
+      const lockedItemIds = new Set(editLegacyItems.map((item) => item.id));
+      const lockedExistingRows = existingRows.filter((row) => lockedItemIds.has(row.item_id));
+
+      const desiredEditableLines = desiredLines.filter((line) => !line.item.is_locked);
+      const editableExistingRows = existingRows.filter((row) => !lockedItemIds.has(row.item_id));
+
+      const assignments: Array<{
+        row: Order;
+        line: (typeof desiredEditableLines)[number];
+      }> = [];
+
+      const desiredQueue = [...desiredEditableLines];
+      const unusedRows = [...editableExistingRows];
+      const unmatchedDesired: typeof desiredQueue = [];
+      for (const line of desiredQueue) {
+        const sourceOrderId = line.item.source_order_id;
+        if (!sourceOrderId) {
+          unmatchedDesired.push(line);
+          continue;
+        }
+
+        const sourceRowIndex = unusedRows.findIndex((row) => row.id === sourceOrderId);
+        if (sourceRowIndex >= 0) {
+          const sourceRow = unusedRows.splice(sourceRowIndex, 1)[0];
+          assignments.push({ row: sourceRow, line });
+        } else {
+          unmatchedDesired.push(line);
+        }
       }
-      const data = await res.json();
-      setOrder(data);
-      setEditForm({
-        name: data.name ?? "",
-        email: data.email ?? "",
-        phone_number: data.phone_number ?? "",
-        item_id: data.item_id ?? "",
-        quantity: data.quantity ?? 1,
-        pickup_location: data.pickup_location ?? "",
-        pickup_time_slot: data.pickup_time_slot ?? "",
-        notes: data.notes ?? "",
-        exclude_email: !!data.exclude_email,
-      });
-      setShowEditModal(false);
-      showToast("Order updated", "success");
+
+      const firstLine = unmatchedDesired.shift();
+      if (firstLine) {
+        const currentRowIndex = unusedRows.findIndex((row) => row.id === order.id);
+        if (currentRowIndex >= 0) {
+          const currentRow = unusedRows.splice(currentRowIndex, 1)[0];
+          assignments.push({ row: currentRow, line: firstLine });
+        } else {
+          const reusableRow = unusedRows.shift();
+          if (reusableRow) {
+            assignments.push({ row: reusableRow, line: firstLine });
+          } else {
+            unmatchedDesired.push(firstLine);
+          }
+        }
+      }
+
+      const unmatchedAfterItemMatch: typeof unmatchedDesired = [];
+      for (const line of unmatchedDesired) {
+        const targetItemId = resolveBackendItemId(line.item);
+        const sameItemIndex = unusedRows.findIndex((row) => row.item_id === targetItemId);
+        if (sameItemIndex >= 0) {
+          const row = unusedRows.splice(sameItemIndex, 1)[0];
+          assignments.push({ row, line });
+        } else {
+          unmatchedAfterItemMatch.push(line);
+        }
+      }
+
+      const createLines: typeof desiredEditableLines = [];
+      for (const line of unmatchedAfterItemMatch) {
+        const nextRow = unusedRows.shift();
+        if (nextRow) {
+          assignments.push({ row: nextRow, line });
+        } else {
+          createLines.push(line);
+        }
+      }
+
+      const deleteRows = [...unusedRows];
+
+      let updatedCount = 0;
+      let addedCount = 0;
+      let removedCount = 0;
+
+      for (const assignment of assignments) {
+        const updateRes = await fetch(`${API_URL}/api/admin/orders/${assignment.row.id}`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...basePayload,
+            item_id: resolveBackendItemId(assignment.line.item),
+            quantity: assignment.line.qty,
+          }),
+        });
+        if (!updateRes.ok) {
+          throw new Error(await getApiErrorMessage(updateRes, "Failed to update order line"));
+        }
+        const updatedRow = (await updateRes.json()) as Order;
+        if (updatedRow.id === order.id) {
+          setOrder(updatedRow);
+        }
+        updatedCount += 1;
+      }
+
+      for (const line of createLines) {
+        const createRes = await fetch(`${API_URL}/api/admin/orders`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...basePayload,
+            event_id: order.event_id,
+            item_id: resolveBackendItemId(line.item),
+            quantity: line.qty,
+          }),
+        });
+        if (!createRes.ok) {
+          throw new Error(await getApiErrorMessage(createRes, "Failed to create order line"));
+        }
+        const createdRow = (await createRes.json()) as Order;
+
+        for (const status of statusPatchSteps(targetStatus)) {
+          const statusRes = await fetch(`${API_URL}/api/admin/orders/${createdRow.id}/status`, {
+            method: "PATCH",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({ status }),
+          });
+          if (!statusRes.ok) {
+            throw new Error(await getApiErrorMessage(statusRes, "Failed to inherit order status"));
+          }
+        }
+
+        if (targetPaid && targetStatus !== "pending" && targetPaymentMethod) {
+          const paymentPayload: {
+            paid: boolean;
+            payment_method: "cash" | "etransfer" | "other";
+            payment_method_other?: string;
+          } = {
+            paid: true,
+            payment_method: targetPaymentMethod as "cash" | "etransfer" | "other",
+          };
+          if (targetPaymentMethod === "other" && targetPaymentMethodOther) {
+            paymentPayload.payment_method_other = targetPaymentMethodOther;
+          }
+          const paymentRes = await fetch(`${API_URL}/api/admin/orders/${createdRow.id}/payment`, {
+            method: "PATCH",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify(paymentPayload),
+          });
+          if (!paymentRes.ok) {
+            throw new Error(await getApiErrorMessage(paymentRes, "Failed to inherit payment state"));
+          }
+        }
+
+        addedCount += 1;
+      }
+
+      for (const row of lockedExistingRows) {
+        const syncRes = await fetch(`${API_URL}/api/admin/orders/${row.id}`, {
+          method: "PUT",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...basePayload,
+            item_id: row.item_id,
+            quantity: row.quantity,
+          }),
+        });
+        if (!syncRes.ok) {
+          throw new Error(await getApiErrorMessage(syncRes, "Failed to sync legacy order line"));
+        }
+        const syncedRow = (await syncRes.json()) as Order;
+        if (syncedRow.id === order.id) {
+          setOrder(syncedRow);
+        }
+        updatedCount += 1;
+      }
+
+      for (const row of deleteRows) {
+        const deleteRes = await fetch(`${API_URL}/api/admin/orders/${row.id}`, {
+          method: "DELETE",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!deleteRes.ok) {
+          throw new Error(await getApiErrorMessage(deleteRes, "Failed to remove obsolete order line"));
+        }
+        removedCount += 1;
+      }
+
+      await fetchOrderById({ showLoader: false, suppressErrorToast: true });
+      setSiblingVersion((version) => version + 1);
+      closeEditModal();
+      showToast(`Updated ${updatedCount} lines, added ${addedCount}, removed ${removedCount}`, "success");
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to update order", "error");
+      await fetchOrderById({ showLoader: false, suppressErrorToast: true });
+      setSiblingVersion((version) => version + 1);
+      const message = err instanceof Error ? err.message : "Failed to update order";
+      showToast(`Bundle update partially applied. Reloaded latest data. ${message}`, "error");
     } finally {
       setSavingEdits(false);
     }
@@ -706,7 +1029,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           </div>
 
           <button
-            onClick={() => setShowEditModal(true)}
+            onClick={openEditModal}
             className="w-full py-2.5 rounded-xl text-sm font-semibold transition-all"
             style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
           >
@@ -974,7 +1297,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       {showEditModal && editForm && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowEditModal(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeEditModal(); }}
         >
           <div
             style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "720px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
@@ -1014,17 +1337,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     style={inputStyle}
                   />
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Quantity</label>
-                  <input
-                    required
-                    type="number"
-                    min={1}
-                    value={editForm.quantity}
-                    onChange={(e) => setEditForm((f) => f ? ({ ...f, quantity: parseInt(e.target.value, 10) || 1 }) : f)}
-                    style={inputStyle}
-                  />
-                </div>
 
                 <div style={{ gridColumn: "1 / -1" }}>
                   <label className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-text)" }}>
@@ -1043,13 +1355,22 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               </div>
 
               <div>
-                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Item</label>
-                <SearchableSelect
-                  options={editItemOptions}
-                  value={editForm.item_id}
-                  onChange={(v) => setEditForm((f) => f ? ({ ...f, item_id: v }) : f)}
-                  disabled={!eventConfig}
-                  searchPlaceholder="Search items..."
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>
+                  Bundle Items
+                  <span className="ml-1 text-[11px] font-normal">
+                    ({editScopeOrders.length > 0 ? editScopeOrders.length : 1} line{(editScopeOrders.length > 0 ? editScopeOrders.length : 1) !== 1 ? "s" : ""} in scope)
+                  </span>
+                </label>
+                <ItemQuantityPicker
+                  items={editPickerItems}
+                  quantities={editQuantities}
+                  onChange={(next) => {
+                    setEditQuantities(next);
+                    setEditItemsError("");
+                  }}
+                  currency={eventConfig?.currency ?? CURRENCY}
+                  disabled={editPickerItems.length === 0}
+                  error={editItemsError}
                 />
                 {configUsesFallback && (
                   <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
@@ -1097,7 +1418,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowEditModal(false)}
+                  onClick={closeEditModal}
                   className="px-4 py-2 rounded-xl text-sm font-medium"
                   style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
                 >
