@@ -9,16 +9,16 @@ export default function AboutPage() {
     return (
         <main className="flex-1 bg-[color:var(--color-cream)] pb-24">
             {/* Our Story Section */}
-            <section className="pt-32 pb-24 px-6 mt-10">
-                <div className="max-w-6xl mx-auto flex flex-col lg:flex-row gap-16 lg:gap-24 items-center overflow-hidden py-4">
-                    <div className="lg:w-1/2 animate-slide-in-left">
+            <section className="px-6 pt-16 pb-14">
+                <div className="max-w-6xl mx-auto animate-fade-up">
+                    <div>
                         <h1 className="text-5xl md:text-7xl font-bold text-[color:var(--color-forest)] mb-10" style={{ fontFamily: "var(--font-serif)" }}>
                             Our Story
                         </h1>
                         <h2 className="text-2xl font-bold text-[color:var(--color-forest)] mb-6">
                             From Our Family to Yours
                         </h2>
-                        <div className="flex flex-col gap-6 text-[color:var(--color-muted)] text-[17px] leading-relaxed max-w-[95%]">
+                        <div className="flex flex-col gap-6 text-[color:var(--color-muted)] text-[17px] leading-relaxed">
                             <p>
                                 Loku Caters was born from our family&apos;s passion for sharing authentic Sri Lankan flavors with our community in Canada. Led by professional chef Jayampathi Lokuliyana, whose culinary expertise spans both Sri Lanka and Canada, we started out by sharing our heritage recipes with our neighbors in Brampton. As excitement grew, our signature traditional Lamprais quickly became a local favorite.
                             </p>
@@ -27,13 +27,36 @@ export default function AboutPage() {
                             </p>
                         </div>
                     </div>
+                </div>
+            </section>
 
-                    <div className="lg:w-1/2 w-full animate-slide-in-right delay-200 lg:pl-4">
-                        <div className="relative aspect-[4/3] w-full rounded-2xl overflow-hidden shadow-2xl lg:scale-95 origin-right">
+            {/* Meet the Chef Section */}
+            <section className="px-6 mb-12">
+                <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-[1.05fr_0.95fr] gap-10 lg:gap-16 items-center bg-white rounded-3xl border border-[color:var(--color-border)] p-8 md:p-10 shadow-sm overflow-hidden">
+                    <div className="animate-slide-in-left">
+                        <p className="text-sm font-bold tracking-[0.3em] uppercase text-[color:var(--color-sage)] mb-4">
+                            Meet the chef
+                        </p>
+                        <div className="flex flex-col gap-5 text-[color:var(--color-muted)] text-[17px] leading-relaxed">
+                            <p>
+                                Jay is a well-seasoned chef with over 40 years of experience in the culinary world. After completing his hotel schooling in Sri Lanka, Jay had the opportunity to attend training colleges including La Varenne Ecole de Cuisine in France and Thai Cooking School of the Oriental Hotel School in Bangkok, Thailand, along with others around the world, acquiring the comprehensive knowledge he continues to use in his day-to-day work.
+                            </p>
+                            <p>
+                                Jay has also travelled around the world in leading positions at star-class hotels such as the Intercontinental, Meridian, Sheraton, LTI Hotel Chain, Galle Face Hotel, and AMICA Retirement Homes. These roles helped shape his disciplined approach to service, presentation, and flavor.
+                            </p>
+                            <p>
+                                During his travels to Dubai, Bahrain, Germany, Greece, Singapore, and France, Jay built a broad understanding of different cultural cuisines. He also took part in numerous food festivals, challenges, and competitions organized by renowned chef associations including Les Toques Blanches and Chaine Des Rotisseurs, winning Gold, Silver, and Bronze medals in categories such as Best Creative Menu, Best Buffet Presentation, and Best Food Carvings.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="animate-slide-in-right delay-200">
+                        <div className="relative aspect-[4/5] w-full rounded-3xl overflow-hidden bg-[color:var(--color-cream-dark)]">
                             <Image
                                 src="/assets/chef/chef-pic.jpg"
                                 alt="Chef Jayampathi Lokuliyana"
                                 fill
+                                sizes="(min-width: 1024px) 40vw, 100vw"
                                 className="object-cover"
                             />
                         </div>
