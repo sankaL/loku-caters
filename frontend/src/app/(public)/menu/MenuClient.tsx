@@ -137,7 +137,7 @@ export default function MenuClient({ eventConfig }: { eventConfig: EventConfig |
     return (
         <main className="flex-1 bg-[color:var(--color-cream)]">
             {/* Header Banner */}
-            <section className="bg-[color:var(--color-cream)] text-[color:var(--color-forest)] py-20 px-6 mt-10">
+            <section className="bg-[color:var(--color-cream)] text-[color:var(--color-forest)] pt-12 pb-16 px-6">
                 <div className="max-w-4xl mx-auto text-center animate-fade-up">
                     <h1 className="text-4xl md:text-6xl font-bold mb-6" style={{ fontFamily: "var(--font-serif)" }}>
                         Our Menu
