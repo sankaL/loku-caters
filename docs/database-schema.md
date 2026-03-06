@@ -4,7 +4,7 @@ Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in
 
 ## Security: Row Level Security (RLS)
 
-App tables live in the `public` schema but are not intended to be accessed via Supabase PostgREST from the browser. RLS is enabled on these tables, and no RLS policies are defined. The FastAPI backend connects directly to Postgres as the table owner and performs all reads and writes.
+App tables that live in the `public` schema, plus `public.alembic_version`, are not intended to be accessed via Supabase PostgREST from the browser. RLS is enabled on these tables, no RLS policies are defined, and direct grants to Supabase API roles are revoked when those roles exist. The FastAPI backend connects directly to Postgres as the table owner and performs all reads and writes.
 
 ---
 
@@ -245,7 +245,7 @@ alembic upgrade head
 | `0008_uuid_item_location_ids` | replaces slug item/location IDs with server-generated UUIDs; cascades to `events` and `orders` |
 | `0009_event_hero_tooltip_images` | adds hero split text, tooltip config, and image-key fields to `events`; backfills tooltip defaults for existing events |
 | `0010_event_etransfer_fields` | adds optional e-transfer toggle and email fields to `events`; backfills existing rows to enabled with legacy email |
-| `0011_enable_rls_public_tables` | enables RLS on app tables in `public` |
+| `0011_enable_rls_public_tables` | enables RLS on the initial app tables in `public` |
 | `0012_order_notes_exclude_email` | adds `notes` and `exclude_email` to `orders`; makes `email` and `phone_number` nullable |
 | `0013_orders_event_id` | adds `event_id` to `orders` and backfills to the active event |
 | `0014_add_reminded_boolean` | adds `reminded` boolean to `orders`; backfills existing `status='reminded'` rows to `reminded=true, status='confirmed'` |
@@ -255,6 +255,8 @@ alembic upgrade head
 | `db2173ba0be0_create_catering_requests` | `catering_requests` table |
 | `4f7d2b6c9a10_feedback_origin_rework` | adds `origin` to `feedback`; backfills legacy rows into canonical `origin` and `feedback_type` values |
 | `9c8b0b7f2e1a_catering_request_comments_and_statuses` | `catering_request_comments` table; remaps `catering_requests.status='resolved'` to `'done'` |
+| `c3f9a6e7b2d1_add_item_minimum_order_quantity` | adds `minimum_order_quantity` to `items` with a check constraint enforcing values >= 1 |
+| `7b1d5f8c2a4e_enable_rls_catering_and_alembic_version` | enables RLS on `catering_requests`, `catering_request_comments`, and `alembic_version`; revokes `anon` and `authenticated` access when those roles exist |
 
 ---
 
