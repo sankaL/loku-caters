@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 import json
 import uuid
 from urllib.request import urlopen
-from typing import Optional, Union
+from typing import Any, Optional, Union
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -28,6 +28,7 @@ from schemas import (
     FeedbackStatusUpdate, FeedbackCommentUpdate,
 )
 from services.email import send_confirmation, send_reminder
+from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -175,6 +176,7 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
 
 class AdminOrderCreate(BaseModel):
     event_id: Optional[int] = None
+    group_id: Optional[str] = None
     name: str
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
@@ -223,6 +225,14 @@ class AdminOrderCreate(BaseModel):
         if v < 1:
             raise ValueError("Quantity must be at least 1")
         return v
+
+    @field_validator("group_id", mode="before")
+    @classmethod
+    def normalize_group_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
 
     @model_validator(mode="after")
     def require_contact_unless_excluded(self) -> "AdminOrderCreate":
@@ -335,6 +345,7 @@ def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 
         "is_active": event.is_active,
         "item_ids": event.item_ids or [],
         "location_ids": event.location_ids or [],
+        "combo_deals": event.combo_deals or [],
         "updated_at": event.updated_at.isoformat() if event.updated_at else None,
         "total_revenue": total_revenue,
         "order_count": order_count,
@@ -348,6 +359,15 @@ def _validate_event_images(payload: Union[EventCreate, EventUpdate]) -> tuple[Op
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return tooltip_image_key, hero_side_image_key
+
+
+def _validate_event_combo_deals(payload: Union[EventCreate, EventUpdate]) -> list[dict[str, Any]]:
+    try:
+        combo_payload = [entry.model_dump(mode="json") for entry in payload.combo_deals]
+        normalize_combo_deals(combo_payload, allowed_item_ids=set(payload.item_ids))
+        return combo_payload
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/event-images")
@@ -425,6 +445,7 @@ def admin_create_event(
     _: dict = Depends(verify_admin_token),
 ):
     tooltip_image_key, hero_side_image_key = _validate_event_images(body)
+    combo_deals = _validate_event_combo_deals(body)
     event = Event(
         name=body.name,
         event_date=body.event_date,
@@ -442,6 +463,7 @@ def admin_create_event(
         is_active=False,
         item_ids=body.item_ids,
         location_ids=body.location_ids,
+        combo_deals=combo_deals,
         updated_at=datetime.now(timezone.utc),
     )
     db.add(event)
@@ -458,6 +480,7 @@ def admin_update_event(
     _: dict = Depends(verify_admin_token),
 ):
     tooltip_image_key, hero_side_image_key = _validate_event_images(body)
+    combo_deals = _validate_event_combo_deals(body)
     event = db.query(Event).filter(Event.id == event_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
@@ -476,6 +499,7 @@ def admin_update_event(
     event.etransfer_email = str(body.etransfer_email) if body.etransfer_email is not None else None
     event.item_ids = body.item_ids
     event.location_ids = body.location_ids
+    event.combo_deals = combo_deals
     event.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(event)
@@ -701,6 +725,7 @@ def _order_dict(order: Order) -> dict:
     return {
         "id": order.id,
         "event_id": int(order.event_id) if getattr(order, "event_id", None) is not None else None,
+        "group_id": order.group_id,
         "name": order.name,
         "email": order.email,
         "phone_number": order.phone_number,
@@ -709,7 +734,10 @@ def _order_dict(order: Order) -> dict:
         "quantity": order.quantity,
         "pickup_location": order.pickup_location,
         "pickup_time_slot": order.pickup_time_slot,
+        "base_total_price": float(order.base_total_price),
+        "discount_total": float(order.discount_total),
         "total_price": float(order.total_price),
+        "pricing_meta": order.pricing_meta or {},
         "status": order.status,
         "reminded": bool(order.reminded),
         "paid": bool(order.paid),
@@ -759,41 +787,41 @@ def _prepare_reminder_order_data(
     events_by_id: dict[int, Event],
     active_event_date: str,
     active_etransfer: dict,
-) -> tuple[Optional[dict], Optional[dict]]:
-    if order.status != OrderStatus.CONFIRMED:
+) -> tuple[Optional[dict], Optional[dict], list[Order]]:
+    group_orders = _get_order_group_rows(db, order)
+
+    if any(group_order.status != OrderStatus.CONFIRMED for group_order in group_orders):
         return _reminder_result(
             order,
             status="skipped_not_confirmed",
             message="Only confirmed orders can be reminded",
-        ), None
+        ), None, group_orders
 
-    if order.reminded:
+    if all(group_order.reminded for group_order in group_orders):
         return _reminder_result(
             order,
             status="skipped_already_reminded",
             message="Already reminded",
-        ), None
+        ), None, group_orders
 
-    if order.exclude_email:
+    if any(group_order.exclude_email for group_order in group_orders):
         return _reminder_result(
             order,
             status="skipped_excluded",
             message="Excluded from email",
-        ), None
+        ), None, group_orders
 
     if not order.email or not str(order.email).strip():
         return _reminder_result(
             order,
             status="skipped_missing_email",
             message="Missing email",
-        ), None
+        ), None, group_orders
 
     location = db.query(Location).filter(
         or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
     ).first()
     address = location.address if location else ""
-
-    effective_price = float(order.total_price) / order.quantity if order.quantity else 0.0
 
     event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
     event_date = event.event_date if event else active_event_date
@@ -802,23 +830,12 @@ def _prepare_reminder_order_data(
         "email": event.etransfer_email if event else active_etransfer["email"],
     }
 
-    order_data = {
-        "name": order.name,
-        "item_name": order.item_name,
-        "quantity": order.quantity,
-        "pickup_location": order.pickup_location,
-        "pickup_time_slot": order.pickup_time_slot,
-        "email": order.email,
-        "total_price": float(order.total_price),
-        "price_per_item": effective_price,
-        "currency": CURRENCY,
-        "address": address,
-        "event_date": event_date,
-        "etransfer_enabled": etransfer["enabled"],
-        "etransfer_email": etransfer["email"],
-    }
+    order_data = _group_email_order_data(orders=group_orders, event=event, address=address)
+    order_data["event_date"] = event_date
+    order_data["etransfer_enabled"] = etransfer["enabled"]
+    order_data["etransfer_email"] = etransfer["email"]
 
-    return None, order_data
+    return None, order_data, group_orders
 
 
 def _send_order_reminder(
@@ -829,7 +846,7 @@ def _send_order_reminder(
     active_event_date: str,
     active_etransfer: dict,
 ) -> dict:
-    skipped_result, order_data = _prepare_reminder_order_data(
+    skipped_result, order_data, group_orders = _prepare_reminder_order_data(
         order,
         db,
         events_by_id=events_by_id,
@@ -849,7 +866,8 @@ def _send_order_reminder(
             message="Failed to send reminder",
         )
 
-    order.reminded = True
+    for group_order in group_orders:
+        group_order.reminded = True
     return _reminder_result(
         order,
         status="sent",
@@ -857,14 +875,182 @@ def _send_order_reminder(
     )
 
 
-def _effective_item_price(item: Item) -> float:
-    if item.discounted_price is not None:
-        return float(item.discounted_price)
-    return float(item.price)
+def _event_items_for_pricing(db: Session, event: Event) -> list[Item]:
+    item_ids = event.item_ids or []
+    if not item_ids:
+        return []
+    return db.query(Item).filter(Item.id.in_(item_ids)).order_by(Item.sort_order).all()
 
 
-def _compute_total_price(item: Item, quantity: int) -> float:
-    return round(_effective_item_price(item) * quantity, 2)
+def _event_items_payload(items: list[Item]) -> list[dict[str, Any]]:
+    return [
+        {
+            "id": item.id,
+            "name": item.name,
+            "description": item.description,
+            "price": float(item.price),
+            "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
+            "minimum_order_quantity": max(1, int(getattr(item, "minimum_order_quantity", 1) or 1)),
+        }
+        for item in items
+    ]
+
+
+def _event_locations_lookup(db: Session, event: Event) -> dict[str, Location]:
+    location_ids = event.location_ids or []
+    if not location_ids:
+        return {}
+    locations = db.query(Location).filter(Location.id.in_(location_ids)).all()
+    lookup = {location.id: location for location in locations}
+    lookup.update({location.name: location for location in locations})
+    return lookup
+
+
+def _validate_order_line_inputs(
+    *,
+    lines: list[PricingLineInput],
+    event_items: list[Item],
+) -> dict[str, Item]:
+    item_lookup = {item.id: item for item in event_items}
+    for line in lines:
+        item = item_lookup.get(line.item_id)
+        if item is None:
+            raise HTTPException(status_code=400, detail="Invalid item_id for event")
+        minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+        if line.quantity < minimum_order_quantity:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Minimum order quantity for {item.name} is {minimum_order_quantity}",
+            )
+    return item_lookup
+
+
+def _validate_order_location(
+    *,
+    db: Session,
+    event: Event,
+    pickup_location: str,
+    pickup_time_slot: str,
+) -> Location:
+    location_lookup = _event_locations_lookup(db, event)
+    location = location_lookup.get(pickup_location)
+    if not location:
+        raise HTTPException(status_code=400, detail="Invalid pickup_location")
+    if location.id not in (event.location_ids or []):
+        raise HTTPException(status_code=400, detail="Invalid pickup_location for event")
+    if pickup_time_slot not in (location.time_slots or []):
+        raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
+    return location
+
+
+def _quote_event_lines(
+    *,
+    db: Session,
+    event: Event,
+    lines: list[PricingLineInput],
+) -> dict[str, Any]:
+    event_items = _event_items_for_pricing(db, event)
+    _validate_order_line_inputs(lines=lines, event_items=event_items)
+    try:
+        return quote_cart(
+            items=_event_items_payload(event_items),
+            combo_deals=event.combo_deals or [],
+            lines=lines,
+            currency=CURRENCY,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+def _get_order_group_rows(db: Session, order: Order) -> list[Order]:
+    if order.group_id:
+        return db.query(Order).filter(Order.group_id == order.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
+    return [order]
+
+
+def _apply_pricing_to_orders(
+    *,
+    orders: list[Order],
+    pricing: dict[str, Any],
+    shared_meta: Optional[dict[str, Any]] = None,
+) -> None:
+    by_line_id = {line["line_id"]: line for line in pricing["lines"]}
+    shared_meta = shared_meta or {}
+    for order in orders:
+        priced_line = by_line_id.get(order.id)
+        if priced_line is None:
+            continue
+        order.item_id = priced_line["item_id"]
+        order.item_name = priced_line["item_name"]
+        order.quantity = priced_line["quantity"]
+        order.base_total_price = priced_line["base_total"]
+        order.discount_total = priced_line["discount_total"]
+        order.total_price = priced_line["total_price"]
+        order.pricing_meta = {
+            **shared_meta,
+            "base_total": priced_line["base_total"],
+            "discount_total": priced_line["discount_total"],
+            "applied_combos": pricing["applied_combos"],
+        }
+
+
+def _reprice_order_group(
+    *,
+    db: Session,
+    event: Event,
+    orders: list[Order],
+) -> dict[str, Any]:
+    pricing = _quote_event_lines(
+        db=db,
+        event=event,
+        lines=[
+            PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=int(order.quantity))
+            for order in orders
+        ],
+    )
+    shared_meta = {"group_id": orders[0].group_id} if orders and orders[0].group_id else {}
+    _apply_pricing_to_orders(orders=orders, pricing=pricing, shared_meta=shared_meta)
+    return pricing
+
+
+def _group_email_order_data(
+    *,
+    orders: list[Order],
+    event: Optional[Event],
+    address: str,
+) -> dict[str, Any]:
+    first = orders[0]
+    lines = [
+        {
+            "item_id": order.item_id,
+            "item_name": order.item_name,
+            "quantity": int(order.quantity),
+            "base_total": float(order.base_total_price),
+            "discount_total": float(order.discount_total),
+            "total_price": float(order.total_price),
+        }
+        for order in orders
+    ]
+    subtotal = round(sum(float(order.base_total_price) for order in orders), 2)
+    discount_total = round(sum(float(order.discount_total) for order in orders), 2)
+    grand_total = round(sum(float(order.total_price) for order in orders), 2)
+    return {
+        "group_id": first.group_id,
+        "name": first.name,
+        "email": first.email,
+        "phone_number": first.phone_number,
+        "pickup_location": first.pickup_location,
+        "pickup_time_slot": first.pickup_time_slot,
+        "currency": CURRENCY,
+        "address": address,
+        "event_date": event.event_date if event else "",
+        "etransfer_enabled": bool(event.etransfer_enabled) if event else False,
+        "etransfer_email": event.etransfer_email if event else None,
+        "subtotal": subtotal,
+        "discount_total": discount_total,
+        "total_price": grand_total,
+        "items": lines,
+    }
 
 
 @router.post("/orders", status_code=201)
@@ -886,45 +1072,62 @@ def admin_create_order(
         if event is None:
             raise HTTPException(status_code=400, detail="No active event")
 
-    item = db.query(Item).filter(Item.id == body.item_id).first()
-    if not item:
-        raise HTTPException(status_code=400, detail="Invalid item_id")
-    if item.id not in (event.item_ids or []):
-        raise HTTPException(status_code=400, detail="Invalid item_id for event")
-    if body.quantity < 1:
-        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    _validate_order_location(
+        db=db,
+        event=event,
+        pickup_location=body.pickup_location,
+        pickup_time_slot=body.pickup_time_slot,
+    )
 
-    pickup_location = body.pickup_location
-    pickup_time_slot = body.pickup_time_slot
-    location = db.query(Location).filter(
-        or_(Location.name == pickup_location, Location.id == pickup_location)
-    ).first()
-    if not location:
-        raise HTTPException(status_code=400, detail="Invalid pickup_location")
-    if location.id not in (event.location_ids or []):
-        raise HTTPException(status_code=400, detail="Invalid pickup_location for event")
-    if pickup_time_slot not in (location.time_slots or []):
-        raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
-
-    total_price = _compute_total_price(item, body.quantity)
+    existing_group_orders = (
+        db.query(Order).filter(Order.group_id == body.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
+        if body.group_id
+        else []
+    )
+    inherited_status = existing_group_orders[0].status if existing_group_orders else OrderStatus.PENDING
+    inherited_paid = bool(existing_group_orders[0].paid) if existing_group_orders else False
+    inherited_payment_method = existing_group_orders[0].payment_method if existing_group_orders else None
+    inherited_payment_method_other = existing_group_orders[0].payment_method_other if existing_group_orders else None
 
     order = Order(
         id=str(uuid.uuid4()),
         event_id=int(event.id),
+        group_id=body.group_id,
         name=body.name,
         email=str(body.email) if body.email is not None else None,
         phone_number=body.phone_number,
-        item_id=item.id,
-        item_name=item.name,
+        item_id=body.item_id,
+        item_name=body.item_id,
         quantity=body.quantity,
-        pickup_location=pickup_location,
-        pickup_time_slot=pickup_time_slot,
-        total_price=total_price,
-        status=OrderStatus.PENDING,
+        pickup_location=body.pickup_location,
+        pickup_time_slot=body.pickup_time_slot,
+        base_total_price=0,
+        discount_total=0,
+        total_price=0,
+        pricing_meta={},
+        status=inherited_status,
+        paid=inherited_paid,
+        payment_method=inherited_payment_method,
+        payment_method_other=inherited_payment_method_other,
         notes=body.notes,
         exclude_email=body.exclude_email,
     )
     db.add(order)
+    db.flush()
+
+    if order.group_id:
+        group_orders = db.query(Order).filter(Order.group_id == order.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
+        if any(int(group_order.event_id) != int(event.id) for group_order in group_orders):
+            raise HTTPException(status_code=400, detail="group_id cannot span multiple events")
+        _reprice_order_group(db=db, event=event, orders=group_orders)
+    else:
+        pricing = _quote_event_lines(
+            db=db,
+            event=event,
+            lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
+        )
+        _apply_pricing_to_orders(orders=[order], pricing=pricing)
+
     db.commit()
     db.refresh(order)
 
@@ -975,11 +1178,16 @@ def admin_bulk_remind(
     skipped_already_reminded = 0
     skipped_excluded = 0
     skipped_missing_email = 0
+    processed_groups: set[str] = set()
 
     for order_id in unique_ids:
         order = orders_by_id.get(order_id)
         if order is None:
             continue
+        group_key = order.group_id or order.id
+        if group_key in processed_groups:
+            continue
+        processed_groups.add(group_key)
         result = _send_order_reminder(
             order,
             db,
@@ -1058,48 +1266,46 @@ def admin_update_order(
 
     event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
     enforce_event_membership = event is not None
+    if not enforce_event_membership or event is None:
+        raise HTTPException(status_code=400, detail="Order is missing event context")
 
-    item = db.query(Item).filter(Item.id == body.item_id).first()
-    if not item:
-        raise HTTPException(status_code=400, detail="Invalid item_id")
-    if enforce_event_membership and item.id not in (event.item_ids or []):
-        raise HTTPException(status_code=400, detail="Invalid item_id for event")
-    if body.quantity < 1:
-        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    _validate_order_location(
+        db=db,
+        event=event,
+        pickup_location=body.pickup_location,
+        pickup_time_slot=body.pickup_time_slot,
+    )
 
-    pickup_location = body.pickup_location
-    pickup_time_slot = body.pickup_time_slot
-    location = db.query(Location).filter(
-        or_(Location.name == pickup_location, Location.id == pickup_location)
-    ).first()
-    if not location:
-        raise HTTPException(status_code=400, detail="Invalid pickup_location")
-    if enforce_event_membership and location.id not in (event.location_ids or []):
-        raise HTTPException(status_code=400, detail="Invalid pickup_location for event")
-    if pickup_time_slot not in (location.time_slots or []):
-        raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
-
-    total_price = float(order.total_price)
-    if order.item_id != item.id:
-        total_price = _compute_total_price(item, body.quantity)
-    elif order.quantity != body.quantity:
-        if order.quantity > 0:
-            historical_unit = float(order.total_price) / order.quantity
-            total_price = round(historical_unit * body.quantity, 2)
-        else:
-            total_price = _compute_total_price(item, body.quantity)
-
-    order.name = body.name
-    order.email = str(body.email) if body.email is not None else None
-    order.phone_number = body.phone_number
-    order.item_id = item.id
-    order.item_name = item.name
-    order.quantity = body.quantity
-    order.pickup_location = pickup_location
-    order.pickup_time_slot = pickup_time_slot
-    order.total_price = total_price
-    order.notes = body.notes
-    order.exclude_email = body.exclude_email
+    if order.group_id:
+        group_orders = _get_order_group_rows(db, order)
+        for group_order in group_orders:
+            group_order.name = body.name
+            group_order.email = str(body.email) if body.email is not None else None
+            group_order.phone_number = body.phone_number
+            group_order.pickup_location = body.pickup_location
+            group_order.pickup_time_slot = body.pickup_time_slot
+            group_order.notes = body.notes
+            group_order.exclude_email = body.exclude_email
+            if group_order.id == order.id:
+                group_order.item_id = body.item_id
+                group_order.quantity = body.quantity
+        _reprice_order_group(db=db, event=event, orders=group_orders)
+    else:
+        order.name = body.name
+        order.email = str(body.email) if body.email is not None else None
+        order.phone_number = body.phone_number
+        order.item_id = body.item_id
+        order.quantity = body.quantity
+        order.pickup_location = body.pickup_location
+        order.pickup_time_slot = body.pickup_time_slot
+        order.notes = body.notes
+        order.exclude_email = body.exclude_email
+        pricing = _quote_event_lines(
+            db=db,
+            event=event,
+            lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
+        )
+        _apply_pricing_to_orders(orders=[order], pricing=pricing)
 
     db.commit()
     db.refresh(order)
@@ -1115,13 +1321,14 @@ def admin_confirm_order(
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    if order.status == OrderStatus.CONFIRMED:
+    group_orders = _get_order_group_rows(db, order)
+    if all(group_order.status == OrderStatus.CONFIRMED for group_order in group_orders):
         raise HTTPException(status_code=409, detail="Order already confirmed")
-    if order.status != OrderStatus.PENDING:
+    if any(group_order.status not in {OrderStatus.PENDING, OrderStatus.CONFIRMED} for group_order in group_orders):
         raise HTTPException(status_code=409, detail="Only pending orders can be confirmed")
 
     email_sent = False
-    email_suppressed = bool(order.exclude_email)
+    email_suppressed = any(group_order.exclude_email for group_order in group_orders)
 
     if not email_suppressed:
         if not order.email or not str(order.email).strip():
@@ -1144,25 +1351,10 @@ def admin_confirm_order(
         ).first()
         address = location.address if location else ""
 
-        effective_price = float(order.total_price) / order.quantity
-
-        order_data = {
-            "name": order.name,
-            "item_id": order.item_id,
-            "item_name": order.item_name,
-            "quantity": order.quantity,
-            "pickup_location": order.pickup_location,
-            "pickup_time_slot": order.pickup_time_slot,
-            "phone_number": order.phone_number,
-            "email": order.email,
-            "total_price": float(order.total_price),
-            "price_per_item": effective_price,
-            "currency": CURRENCY,
-            "address": address,
-            "event_date": event_date,
-            "etransfer_enabled": etransfer["enabled"],
-            "etransfer_email": etransfer["email"],
-        }
+        order_data = _group_email_order_data(orders=group_orders, event=event, address=address)
+        order_data["event_date"] = event_date
+        order_data["etransfer_enabled"] = etransfer["enabled"]
+        order_data["etransfer_email"] = etransfer["email"]
 
         email_sent = True
         try:
@@ -1171,7 +1363,8 @@ def admin_confirm_order(
             email_sent = False
             print(f"[email] Failed to send confirmation to {order.email}: {exc}")
 
-    order.status = OrderStatus.CONFIRMED
+    for group_order in group_orders:
+        group_order.status = OrderStatus.CONFIRMED
     db.commit()
 
     return {
@@ -1202,7 +1395,9 @@ def update_order_status(
     if body.status not in allowed:
         raise HTTPException(status_code=409, detail="Invalid status transition")
 
-    order.status = body.status
+    group_orders = _get_order_group_rows(db, order)
+    for group_order in group_orders:
+        group_order.status = body.status
     db.commit()
     return {"success": True, "status": order.status}
 
@@ -1220,9 +1415,11 @@ def update_order_payment(
     if body.paid and order.status == OrderStatus.PENDING:
         raise HTTPException(status_code=409, detail="Cannot mark as paid while status is pending")
 
-    order.paid = body.paid
-    order.payment_method = body.payment_method
-    order.payment_method_other = body.payment_method_other
+    group_orders = _get_order_group_rows(db, order)
+    for group_order in group_orders:
+        group_order.paid = body.paid
+        group_order.payment_method = body.payment_method
+        group_order.payment_method_other = body.payment_method_other
     db.commit()
     return {
         "success": True,
@@ -1241,7 +1438,14 @@ def delete_order(
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
+    event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
+    group_id = order.group_id
     db.delete(order)
+    db.flush()
+    if group_id and event is not None:
+        remaining_orders = db.query(Order).filter(Order.group_id == group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
+        if remaining_orders:
+            _reprice_order_group(db=db, event=event, orders=remaining_orders)
     db.commit()
     return {"success": True}
 

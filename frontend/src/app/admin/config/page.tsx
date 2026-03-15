@@ -27,6 +27,7 @@ interface EventItem {
   is_active: boolean;
   item_ids: string[];
   location_ids: string[];
+  combo_deals: ComboDeal[];
   updated_at: string | null;
   total_revenue?: number;
   order_count?: number;
@@ -76,6 +77,28 @@ interface EventForm {
   etransfer_email: string;
   item_ids: string[];
   location_ids: string[];
+  combo_deals: ComboDeal[];
+}
+
+interface ComboRequirement {
+  item_id: string;
+  min_quantity: number;
+}
+
+interface ComboDiscount {
+  type: "fixed_amount";
+  amount: number;
+  applies_to: "combo_total" | "item";
+  target_item_id: string | null;
+}
+
+interface ComboDeal {
+  id: string;
+  name: string;
+  enabled: boolean;
+  sort_order: number;
+  requirements: ComboRequirement[];
+  discount: ComboDiscount;
 }
 
 const EMPTY_FORM: EventForm = {
@@ -94,6 +117,7 @@ const EMPTY_FORM: EventForm = {
   etransfer_email: "",
   item_ids: [],
   location_ids: [],
+  combo_deals: [],
 };
 
 const EMPTY_IMAGE_CATALOG: EventImageCatalog = {
@@ -136,6 +160,57 @@ function normalizeImageCatalog(data: unknown): EventImageCatalog {
     },
     images: normalizedImages,
   };
+}
+
+function createEmptyComboDeal(sortOrder: number): ComboDeal {
+  return {
+    id: crypto.randomUUID(),
+    name: "",
+    enabled: true,
+    sort_order: sortOrder,
+    requirements: [{ item_id: "", min_quantity: 1 }],
+    discount: {
+      type: "fixed_amount",
+      amount: 0,
+      applies_to: "combo_total",
+      target_item_id: null,
+    },
+  };
+}
+
+function normalizeComboDeals(comboDeals: ComboDeal[]): ComboDeal[] {
+  return comboDeals.map((combo, index) => ({
+    ...combo,
+    sort_order: index,
+    requirements: combo.requirements.map((requirement) => ({
+      item_id: requirement.item_id,
+      min_quantity: Math.max(1, Number(requirement.min_quantity || 1)),
+    })),
+    discount: {
+      ...combo.discount,
+      amount: Number(combo.discount.amount || 0),
+      target_item_id: combo.discount.applies_to === "item" ? (combo.discount.target_item_id ?? null) : null,
+    },
+  }));
+}
+
+function comboPreviewText(
+  combo: ComboDeal,
+  itemsById: Map<string, AdminItem>,
+  currency: string
+): string {
+  const requirementCopy = combo.requirements
+    .map((requirement) => {
+      const label = itemsById.get(requirement.item_id)?.name ?? "item";
+      return `${requirement.min_quantity} x ${label}`;
+    })
+    .join(", ");
+  const amountCopy = `${currency} $${combo.discount.amount.toFixed(2)}`;
+  if (combo.discount.applies_to === "combo_total") {
+    return `Buy ${requirementCopy} and save ${amountCopy} on the combo.`;
+  }
+  const targetLabel = itemsById.get(combo.discount.target_item_id ?? "")?.name ?? "selected item";
+  return `Buy ${requirementCopy} and save ${amountCopy} on ${targetLabel}.`;
 }
 
 function Spinner() {
@@ -310,6 +385,7 @@ function AdminEventsPageInner() {
   const [itemsOpen, setItemsOpen] = useState(false);
   const [locationsOpen, setLocationsOpen] = useState(false);
   const [tooltipOpen, setTooltipOpen] = useState(false);
+  const [comboDealsOpen, setComboDealsOpen] = useState(false);
   const [itemsSearch, setItemsSearch] = useState("");
   const [locationsSearch, setLocationsSearch] = useState("");
   const showToast = (message: string, type: "success" | "error") => {
@@ -334,6 +410,10 @@ function AdminEventsPageInner() {
     () => heroSideImageOptions.find((image) => image.key === form.hero_side_image_key) ?? null,
     [heroSideImageOptions, form.hero_side_image_key]
   );
+  const itemsById = useMemo(
+    () => new Map(allItems.map((item) => [item.id, item] as const)),
+    [allItems]
+  );
 
   const filteredEvents = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -349,6 +429,7 @@ function AdminEventsPageInner() {
     setItemsSearch("");
     setLocationsSearch("");
     setTooltipOpen(false);
+    setComboDealsOpen(false);
   }, []);
 
   const loadData = useCallback(async () => {
@@ -423,6 +504,7 @@ function AdminEventsPageInner() {
         etransfer_email: event.etransfer_email ?? "",
         item_ids: [...event.item_ids],
         location_ids: [...event.location_ids],
+        combo_deals: normalizeComboDeals(event.combo_deals ?? []),
       });
       resetSelectorState();
       setModalOpen(true);
@@ -450,6 +532,47 @@ function AdminEventsPageInner() {
     });
   }
 
+  function addComboDeal() {
+    setForm((prev) => ({
+      ...prev,
+      combo_deals: [...prev.combo_deals, createEmptyComboDeal(prev.combo_deals.length)],
+    }));
+    setComboDealsOpen(true);
+  }
+
+  function updateComboDeal(comboId: string, updater: (combo: ComboDeal) => ComboDeal) {
+    setForm((prev) => ({
+      ...prev,
+      combo_deals: prev.combo_deals.map((combo) =>
+        combo.id === comboId ? updater(combo) : combo
+      ),
+    }));
+  }
+
+  function deleteComboDeal(comboId: string) {
+    setForm((prev) => ({
+      ...prev,
+      combo_deals: normalizeComboDeals(prev.combo_deals.filter((combo) => combo.id !== comboId)),
+    }));
+  }
+
+  function moveComboDeal(comboId: string, direction: -1 | 1) {
+    setForm((prev) => {
+      const index = prev.combo_deals.findIndex((combo) => combo.id === comboId);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= prev.combo_deals.length) {
+        return prev;
+      }
+      const nextCombos = [...prev.combo_deals];
+      const [moved] = nextCombos.splice(index, 1);
+      nextCombos.splice(nextIndex, 0, moved);
+      return {
+        ...prev,
+        combo_deals: normalizeComboDeals(nextCombos),
+      };
+    });
+  }
+
   async function handleSave() {
     if (!form.name.trim() || !form.event_date.trim() || !form.hero_header.trim()) {
       showToast("Event Name, Event Date, and Hero Header (White) are required", "error");
@@ -462,6 +585,51 @@ function AdminEventsPageInner() {
     if (form.etransfer_enabled && !form.etransfer_email.trim()) {
       showToast("E-transfer email is required when e-transfer is enabled", "error");
       return;
+    }
+
+    const selectedItemIds = new Set(form.item_ids);
+    for (const combo of form.combo_deals) {
+      if (!combo.name.trim()) {
+        showToast("Each combo deal needs a name", "error");
+        return;
+      }
+      if (combo.requirements.length === 0) {
+        showToast(`Combo "${combo.name || "Untitled combo"}" needs at least one requirement`, "error");
+        return;
+      }
+      const requirementItemIds = combo.requirements.map((requirement) => requirement.item_id).filter(Boolean);
+      if (requirementItemIds.length !== combo.requirements.length) {
+        showToast(`Combo "${combo.name}" has a requirement without an item`, "error");
+        return;
+      }
+      if (new Set(requirementItemIds).size !== requirementItemIds.length) {
+        showToast(`Combo "${combo.name}" references the same item more than once`, "error");
+        return;
+      }
+      for (const requirement of combo.requirements) {
+        if (!selectedItemIds.has(requirement.item_id)) {
+          showToast(`Combo "${combo.name}" references an item that is not selected for the event`, "error");
+          return;
+        }
+        if (requirement.min_quantity < 1) {
+          showToast(`Combo "${combo.name}" has an invalid minimum quantity`, "error");
+          return;
+        }
+      }
+      if (combo.discount.amount <= 0) {
+        showToast(`Combo "${combo.name}" needs a discount amount greater than 0`, "error");
+        return;
+      }
+      if (combo.discount.applies_to === "item") {
+        if (!combo.discount.target_item_id) {
+          showToast(`Combo "${combo.name}" needs a target item`, "error");
+          return;
+        }
+        if (!requirementItemIds.includes(combo.discount.target_item_id)) {
+          showToast(`Combo "${combo.name}" target item must be one of its requirements`, "error");
+          return;
+        }
+      }
     }
 
     setSaving(true);
@@ -484,6 +652,20 @@ function AdminEventsPageInner() {
         etransfer_email: form.etransfer_enabled ? form.etransfer_email.trim() : null,
         item_ids: form.item_ids,
         location_ids: form.location_ids,
+        combo_deals: normalizeComboDeals(form.combo_deals).map((combo, index) => ({
+          ...combo,
+          name: combo.name.trim(),
+          sort_order: index,
+          requirements: combo.requirements.map((requirement) => ({
+            item_id: requirement.item_id,
+            min_quantity: Math.max(1, Number(requirement.min_quantity || 1)),
+          })),
+          discount: {
+            ...combo.discount,
+            amount: Number(combo.discount.amount || 0),
+            target_item_id: combo.discount.applies_to === "item" ? combo.discount.target_item_id : null,
+          },
+        })),
       };
 
       const url = editingEvent
@@ -1155,6 +1337,298 @@ function AdminEventsPageInner() {
                 searchPlaceholder="Search items by name..."
                 emptyLabel="No items selected yet."
               />
+
+              <div className="rounded-2xl border" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
+                <button
+                  type="button"
+                  onClick={() => setComboDealsOpen((v) => !v)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-left"
+                >
+                  <div>
+                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Combo Deals</p>
+                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      {form.combo_deals.length} configured combo{form.combo_deals.length !== 1 ? "s" : ""}
+                    </p>
+                  </div>
+                  <span className="text-sm" style={{ color: "var(--color-muted)" }}>{comboDealsOpen ? "Hide" : "Show"}</span>
+                </button>
+
+                {form.combo_deals.length > 0 && !comboDealsOpen && (
+                  <div className="px-4 pb-4">
+                    <div className="space-y-2">
+                      {form.combo_deals.map((combo) => (
+                        <div key={combo.id} className="rounded-xl px-3 py-2" style={{ background: "white", border: "1px solid var(--color-border)" }}>
+                          <div className="flex items-center justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{combo.name || "Untitled combo"}</p>
+                              <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                                {comboPreviewText(combo, itemsById, CURRENCY)}
+                              </p>
+                            </div>
+                            <span className="text-[11px] font-semibold rounded-full px-2 py-1" style={{ background: combo.enabled ? "#d1fae5" : "#f3f4f6", color: combo.enabled ? "#065f46" : "#6b7280" }}>
+                              {combo.enabled ? "Enabled" : "Disabled"}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {comboDealsOpen && (
+                  <div className="px-4 pb-4 border-t space-y-4" style={{ borderColor: "var(--color-border)" }}>
+                    <div className="pt-4 flex items-center justify-between gap-3">
+                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                        Build event-specific combos that the public order page can price and upsell dynamically.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={addComboDeal}
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0"
+                        style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                      >
+                        + Add Combo
+                      </button>
+                    </div>
+
+                    {form.item_ids.length === 0 ? (
+                      <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+                        Select event items first. Combo deals can only reference items included in this event.
+                      </p>
+                    ) : form.combo_deals.length === 0 ? (
+                      <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+                        No combo deals yet.
+                      </p>
+                    ) : (
+                      form.combo_deals.map((combo, comboIndex) => {
+                        const selectedEventItems = form.item_ids
+                          .map((itemId) => itemsById.get(itemId))
+                          .filter((item): item is AdminItem => Boolean(item));
+                        return (
+                          <div key={combo.id} className="rounded-2xl p-4 space-y-4" style={{ background: "white", border: "1px solid var(--color-border)" }}>
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1">
+                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                                  Combo Name
+                                </label>
+                                <input
+                                  type="text"
+                                  value={combo.name}
+                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({ ...current, name: event.target.value }))}
+                                  placeholder="e.g. Lamprais + Rolls Deal"
+                                  className={inputClass}
+                                  style={{ color: "var(--color-text)" }}
+                                />
+                              </div>
+                              <div className="shrink-0 flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => moveComboDeal(combo.id, -1)}
+                                  disabled={comboIndex === 0}
+                                  className="px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
+                                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+                                >
+                                  Up
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => moveComboDeal(combo.id, 1)}
+                                  disabled={comboIndex === form.combo_deals.length - 1}
+                                  className="px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
+                                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+                                >
+                                  Down
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => deleteComboDeal(combo.id)}
+                                  className="px-3 py-2 rounded-xl text-xs font-semibold"
+                                  style={{ background: "#fee2e2", color: "#991b1b" }}
+                                >
+                                  Delete
+                                </button>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-3" style={{ background: "var(--color-cream)" }}>
+                              <div>
+                                <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Visible to customers</p>
+                                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                                  {comboPreviewText(combo, itemsById, CURRENCY)}
+                                </p>
+                              </div>
+                              <label className="inline-flex items-center gap-2 text-sm shrink-0" style={{ color: "var(--color-text)" }}>
+                                <input
+                                  type="checkbox"
+                                  checked={combo.enabled}
+                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({ ...current, enabled: event.target.checked }))}
+                                  style={{ accentColor: "var(--color-sage)" }}
+                                />
+                                Enabled
+                              </label>
+                            </div>
+
+                            <div className="space-y-3">
+                              <div className="flex items-center justify-between gap-3">
+                                <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Requirements</p>
+                                <button
+                                  type="button"
+                                  onClick={() => updateComboDeal(combo.id, (current) => ({
+                                    ...current,
+                                    requirements: [...current.requirements, { item_id: "", min_quantity: 1 }],
+                                  }))}
+                                  className="px-3 py-1.5 rounded-xl text-xs font-semibold"
+                                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+                                >
+                                  + Add Requirement
+                                </button>
+                              </div>
+
+                              {combo.requirements.map((requirement, requirementIndex) => (
+                                <div key={`${combo.id}-requirement-${requirementIndex}`} className="grid grid-cols-1 md:grid-cols-[1fr_140px_auto] gap-3 items-end">
+                                  <div>
+                                    <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                                      Item
+                                    </label>
+                                    <select
+                                      value={requirement.item_id}
+                                      onChange={(event) => updateComboDeal(combo.id, (current) => ({
+                                        ...current,
+                                        requirements: current.requirements.map((entry, index) =>
+                                          index === requirementIndex ? { ...entry, item_id: event.target.value } : entry
+                                        ),
+                                        discount: current.discount.applies_to === "item" && current.discount.target_item_id === requirement.item_id
+                                          ? { ...current.discount, target_item_id: event.target.value || null }
+                                          : current.discount,
+                                      }))}
+                                      className={inputClass}
+                                      style={{ color: "var(--color-text)", background: "white" }}
+                                    >
+                                      <option value="">Select an item</option>
+                                      {selectedEventItems.map((item) => (
+                                        <option key={item.id} value={item.id}>
+                                          {item.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+                                  <div>
+                                    <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                                      Minimum Qty
+                                    </label>
+                                    <input
+                                      type="number"
+                                      min={1}
+                                      value={requirement.min_quantity}
+                                      onChange={(event) => updateComboDeal(combo.id, (current) => ({
+                                        ...current,
+                                        requirements: current.requirements.map((entry, index) =>
+                                          index === requirementIndex
+                                            ? { ...entry, min_quantity: Math.max(1, Number(event.target.value || 1)) }
+                                            : entry
+                                        ),
+                                      }))}
+                                      className={inputClass}
+                                      style={{ color: "var(--color-text)" }}
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => updateComboDeal(combo.id, (current) => ({
+                                      ...current,
+                                      requirements: current.requirements.length > 1
+                                        ? current.requirements.filter((_, index) => index !== requirementIndex)
+                                        : current.requirements,
+                                      discount: current.discount.target_item_id === requirement.item_id
+                                        ? { ...current.discount, target_item_id: null, applies_to: "combo_total" }
+                                        : current.discount,
+                                    }))}
+                                    disabled={combo.requirements.length === 1}
+                                    className="px-3 py-3 rounded-xl text-xs font-semibold disabled:opacity-40"
+                                    style={{ background: "#fee2e2", color: "#991b1b" }}
+                                  >
+                                    Remove
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div>
+                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                                  Discount Amount
+                                </label>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  step="0.01"
+                                  value={combo.discount.amount}
+                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
+                                    ...current,
+                                    discount: { ...current.discount, amount: Number(event.target.value || 0) },
+                                  }))}
+                                  className={inputClass}
+                                  style={{ color: "var(--color-text)" }}
+                                />
+                              </div>
+
+                              <div>
+                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                                  Discount Applies To
+                                </label>
+                                <select
+                                  value={combo.discount.applies_to}
+                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
+                                    ...current,
+                                    discount: {
+                                      ...current.discount,
+                                      applies_to: event.target.value as ComboDiscount["applies_to"],
+                                      target_item_id: event.target.value === "item"
+                                        ? (current.discount.target_item_id ?? current.requirements[0]?.item_id ?? null)
+                                        : null,
+                                    },
+                                  }))}
+                                  className={inputClass}
+                                  style={{ color: "var(--color-text)", background: "white" }}
+                                >
+                                  <option value="combo_total">Whole combo</option>
+                                  <option value="item">Specific item</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                                  Target Item
+                                </label>
+                                <select
+                                  value={combo.discount.target_item_id ?? ""}
+                                  disabled={combo.discount.applies_to !== "item"}
+                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
+                                    ...current,
+                                    discount: { ...current.discount, target_item_id: event.target.value || null },
+                                  }))}
+                                  className={inputClass}
+                                  style={{ color: "var(--color-text)", background: "white" }}
+                                >
+                                  <option value="">{combo.discount.applies_to === "item" ? "Select target item" : "Whole combo"}</option>
+                                  {combo.requirements
+                                    .map((requirement) => itemsById.get(requirement.item_id))
+                                    .filter((item): item is AdminItem => Boolean(item))
+                                    .map((item) => (
+                                      <option key={item.id} value={item.id}>
+                                        {item.name}
+                                      </option>
+                                    ))}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
 
               <SelectorSection
                 title="Locations"

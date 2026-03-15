@@ -54,6 +54,7 @@ class Event(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     item_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     location_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    combo_deals: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -68,11 +69,15 @@ class Order(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     pickup_location: Mapped[str] = mapped_column(String, nullable=False)
     pickup_time_slot: Mapped[str] = mapped_column(String, nullable=False)
+    group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     exclude_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    base_total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    discount_total: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    pricing_meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String, default=OrderStatus.PENDING)
     reminded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
