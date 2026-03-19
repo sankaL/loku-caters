@@ -682,6 +682,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           body: JSON.stringify({
             ...basePayload,
             event_id: order.event_id,
+            group_id: order.group_id,
             item_id: resolveBackendItemId(line.item),
             quantity: line.qty,
           }),

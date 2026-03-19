@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
 import { API_URL, CURRENCY, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
+import DescriptionPopover from "@/components/ui/DescriptionPopover";
 import Modal from "@/components/ui/Modal";
 
 export interface AppliedComboSummary {
@@ -142,6 +143,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   const [showErrorModal, setShowErrorModal] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
+  const [openDescriptionItemId, setOpenDescriptionItemId] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const timeSlots = form.pickup_location
@@ -164,6 +166,17 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
       (item.description ?? "").toLowerCase().includes(q)
     );
   }, [items, pickerSearch]);
+
+  useEffect(() => {
+    if (!pickerOpen) {
+      setOpenDescriptionItemId(null);
+      return;
+    }
+
+    if (openDescriptionItemId && !pickerItems.some((item) => item.id === openDescriptionItemId)) {
+      setOpenDescriptionItemId(null);
+    }
+  }, [openDescriptionItemId, pickerItems, pickerOpen]);
 
   const fallbackSubtotal = useMemo(
     () =>
@@ -209,6 +222,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
 
     setQuoteLoading(true);
     setQuoteError("");
+    setQuote(EMPTY_QUOTE);
     const timeoutId = window.setTimeout(async () => {
       try {
         const res = await fetch(`${API_URL}/api/orders/quote`, {
@@ -301,6 +315,11 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
     setForm((prev) => ({ ...prev, [name]: value }));
   }
 
+  function closePicker() {
+    setPickerOpen(false);
+    setOpenDescriptionItemId(null);
+  }
+
   function validate(): boolean {
     const nextErrors: Record<string, string> = {};
     if (selectedLines.length === 0) nextErrors.items = "Please add at least one item.";
@@ -326,6 +345,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     if (!validate()) return;
+    if (quoteLoading) return;
 
     setSubmitting(true);
     setServerError("");
@@ -382,7 +402,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
         }}
         onClick={(event) => {
           if (event.target === event.currentTarget) {
-            setPickerOpen(false);
+            closePicker();
           }
         }}
       >
@@ -408,7 +428,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
             </h3>
             <button
               type="button"
-              onClick={() => setPickerOpen(false)}
+              onClick={closePicker}
               aria-label="Close item picker"
               className="w-8 h-8 flex items-center justify-center rounded-lg text-sm font-semibold transition-all"
               style={{ color: "var(--color-muted)", background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
@@ -450,7 +470,14 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
                       {item.description && (
-                        <p className="text-xs mt-0.5 truncate" style={{ color: "var(--color-muted)" }}>{item.description}</p>
+                        <DescriptionPopover
+                          description={item.description}
+                          open={openDescriptionItemId === item.id}
+                          onOpenChange={(nextOpen) => {
+                            setOpenDescriptionItemId(nextOpen ? item.id : null);
+                          }}
+                          className="text-xs mt-0.5"
+                        />
                       )}
                       <div className="mt-0.5 flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
@@ -616,7 +643,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
 
             <button
               type="button"
-              onClick={() => { setPickerOpen(true); setPickerSearch(""); }}
+              onClick={() => { setPickerOpen(true); setPickerSearch(""); setOpenDescriptionItemId(null); }}
               className="w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2"
               style={{ background: "var(--color-sage)", color: "white", border: "1px solid var(--color-sage)" }}
             >
@@ -837,7 +864,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
 
           <button
             type="submit"
-            disabled={submitting || selectedLines.length === 0}
+            disabled={submitting || quoteLoading || selectedLines.length === 0}
             className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed"
             style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
           >

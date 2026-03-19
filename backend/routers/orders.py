@@ -14,6 +14,7 @@ from schemas import (
     OrderQuoteRequest,
     OrderResponse,
 )
+from services.customers import sync_customer_from_contact
 from services.pricing import PricingLineInput, quote_cart
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
@@ -51,6 +52,13 @@ def _event_items_as_dict(items: list[Item]) -> list[dict]:
             "minimum_order_quantity": max(1, int(getattr(item, "minimum_order_quantity", 1) or 1)),
         }
         for item in items
+    ]
+
+
+def _pricing_lines_from_cart_lines(lines) -> list[PricingLineInput]:
+    return [
+        PricingLineInput(line_id=f"{line.item_id}:{index}", item_id=line.item_id, quantity=line.quantity)
+        for index, line in enumerate(lines)
     ]
 
 
@@ -173,10 +181,7 @@ def quote_order_cart(order_in: OrderQuoteRequest, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="no_active_event")
 
     event_items = _get_event_items(db, event)
-    pricing_lines = [
-        PricingLineInput(line_id=line.item_id, item_id=line.item_id, quantity=line.quantity)
-        for line in order_in.lines
-    ]
+    pricing_lines = _pricing_lines_from_cart_lines(order_in.lines)
     _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items)
 
     try:
@@ -200,10 +205,7 @@ def checkout_order(order_in: OrderCheckoutCreate, db: Session = Depends(get_db))
         raise HTTPException(status_code=404, detail="no_active_event")
 
     event_items = _get_event_items(db, event)
-    pricing_lines = [
-        PricingLineInput(line_id=line.item_id, item_id=line.item_id, quantity=line.quantity)
-        for line in order_in.lines
-    ]
+    pricing_lines = _pricing_lines_from_cart_lines(order_in.lines)
     _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items)
 
     event_locations = _get_event_locations(db, event)
@@ -246,6 +248,14 @@ def checkout_order(order_in: OrderCheckoutCreate, db: Session = Depends(get_db))
         )
         db.add(order)
         persisted_orders.append(order)
+
+    sync_customer_from_contact(
+        db,
+        name=order_in.name,
+        email=str(order_in.email),
+        phone_number=order_in.phone_number,
+        pickup_location=order_in.pickup_location,
+    )
 
     db.commit()
     for order in persisted_orders:
@@ -308,6 +318,13 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
     )
 
     db.add(order)
+    sync_customer_from_contact(
+        db,
+        name=order_in.name,
+        email=str(order_in.email),
+        phone_number=order_in.phone_number,
+        pickup_location=order_in.pickup_location,
+    )
     db.commit()
     db.refresh(order)
 

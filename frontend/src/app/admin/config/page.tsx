@@ -86,7 +86,7 @@ interface ComboRequirement {
 }
 
 interface ComboDiscount {
-  type: "fixed_amount";
+  type: "fixed_amount" | "percentage";
   amount: number;
   applies_to: "combo_total" | "item";
   target_item_id: string | null;
@@ -205,7 +205,9 @@ function comboPreviewText(
       return `${requirement.min_quantity} x ${label}`;
     })
     .join(", ");
-  const amountCopy = `${currency} $${combo.discount.amount.toFixed(2)}`;
+  const amountCopy = combo.discount.type === "percentage"
+    ? `${combo.discount.amount.toFixed(2).replace(/\.00$/, "")}%`
+    : `${currency} $${combo.discount.amount.toFixed(2)}`;
   if (combo.discount.applies_to === "combo_total") {
     return `Buy ${requirementCopy} and save ${amountCopy} on the combo.`;
   }
@@ -618,6 +620,10 @@ function AdminEventsPageInner() {
       }
       if (combo.discount.amount <= 0) {
         showToast(`Combo "${combo.name}" needs a discount amount greater than 0`, "error");
+        return;
+      }
+      if (combo.discount.type === "percentage" && combo.discount.amount > 100) {
+        showToast(`Combo "${combo.name}" percentage discounts cannot exceed 100`, "error");
         return;
       }
       if (combo.discount.applies_to === "item") {
@@ -1553,15 +1559,40 @@ function AdminEventsPageInner() {
                               ))}
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                               <div>
                                 <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                  Discount Amount
+                                  Discount Type
+                                </label>
+                                <select
+                                  value={combo.discount.type}
+                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
+                                    ...current,
+                                    discount: {
+                                      ...current.discount,
+                                      type: event.target.value as ComboDiscount["type"],
+                                      amount: current.discount.type === event.target.value
+                                        ? current.discount.amount
+                                        : 0,
+                                    },
+                                  }))}
+                                  className={inputClass}
+                                  style={{ color: "var(--color-text)", background: "white" }}
+                                >
+                                  <option value="fixed_amount">Dollar amount</option>
+                                  <option value="percentage">Percentage</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
+                                  {combo.discount.type === "percentage" ? "Discount Percentage" : "Discount Amount"}
                                 </label>
                                 <input
                                   type="number"
                                   min={0}
-                                  step="0.01"
+                                  max={combo.discount.type === "percentage" ? 100 : undefined}
+                                  step={combo.discount.type === "percentage" ? "0.1" : "0.01"}
                                   value={combo.discount.amount}
                                   onChange={(event) => updateComboDeal(combo.id, (current) => ({
                                     ...current,

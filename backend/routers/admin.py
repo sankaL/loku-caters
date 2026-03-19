@@ -20,13 +20,14 @@ from event_config import (
     get_config_for_event_id_from_db,
 )
 from event_images import get_event_image_catalog, validate_event_image_key
-from models import CateringRequest, CateringRequestComment, Event, Feedback, Item, Location, Order
+from models import CateringRequest, CateringRequestComment, Customer, Event, Feedback, Item, Location, Order
 from schemas import (
     EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
     CATERING_REQUEST_STATUSES, FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES,
     FEEDBACK_TYPE_LABELS, CateringRequestCommentCreate, CateringRequestStatusUpdate,
     FeedbackStatusUpdate, FeedbackCommentUpdate,
 )
+from services.customers import sync_customer_from_contact
 from services.email import send_confirmation, send_reminder
 from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart
 
@@ -163,6 +164,18 @@ class PaymentUpdate(BaseModel):
 
         self.payment_method_other = None
         return self
+
+
+class BulkCustomerDeleteRequest(BaseModel):
+    ids: list[str]
+
+    @field_validator("ids")
+    @classmethod
+    def validate_ids(cls, ids: list[str]) -> list[str]:
+        cleaned = [str(value).strip() for value in ids if str(value).strip()]
+        if not cleaned:
+            raise ValueError("ids must contain at least one id")
+        return list(dict.fromkeys(cleaned))
 
 
 ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
@@ -764,6 +777,18 @@ def _get_reminder_context(db: Session, orders: list[Order]) -> tuple[dict[int, E
     return events_by_id, active_event_date, active_etransfer
 
 
+def _customer_dict(customer: Customer) -> dict:
+    return {
+        "id": customer.id,
+        "name": customer.name,
+        "email": customer.email,
+        "phone_number": customer.phone_number,
+        "pickup_locations": list(customer.pickup_locations or []),
+        "created_at": customer.created_at.isoformat() if customer.created_at else None,
+        "updated_at": customer.updated_at.isoformat() if customer.updated_at else None,
+    }
+
+
 def _reminder_result(order: Order, *, status: str, message: str) -> dict:
     email = None
     if order.email and str(order.email).strip():
@@ -1128,6 +1153,14 @@ def admin_create_order(
         )
         _apply_pricing_to_orders(orders=[order], pricing=pricing)
 
+    sync_customer_from_contact(
+        db,
+        name=body.name,
+        email=str(body.email) if body.email is not None else None,
+        phone_number=body.phone_number,
+        pickup_location=body.pickup_location,
+    )
+
     db.commit()
     db.refresh(order)
 
@@ -1307,6 +1340,14 @@ def admin_update_order(
         )
         _apply_pricing_to_orders(orders=[order], pricing=pricing)
 
+    sync_customer_from_contact(
+        db,
+        name=body.name,
+        email=str(body.email) if body.email is not None else None,
+        phone_number=body.phone_number,
+        pickup_location=body.pickup_location,
+    )
+
     db.commit()
     db.refresh(order)
     return _order_dict(order)
@@ -1448,6 +1489,49 @@ def delete_order(
             _reprice_order_group(db=db, event=event, orders=remaining_orders)
     db.commit()
     return {"success": True}
+
+
+@router.get("/customers")
+def admin_list_customers(
+    search: Optional[str] = Query(None),
+    pickup_location: Optional[str] = Query(None),
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    query = db.query(Customer)
+
+    trimmed_search = search.strip() if search else None
+    if trimmed_search:
+        like = f"%{trimmed_search}%"
+        query = query.filter(
+            or_(
+                Customer.name.ilike(like),
+                Customer.email.ilike(like),
+                Customer.phone_number.ilike(like),
+            )
+        )
+
+    trimmed_pickup_location = pickup_location.strip() if pickup_location else None
+    if trimmed_pickup_location:
+        query = query.filter(Customer.pickup_locations.contains([trimmed_pickup_location]))
+
+    customers = query.order_by(Customer.updated_at.desc(), Customer.created_at.desc(), Customer.id.desc()).all()
+    return [_customer_dict(customer) for customer in customers]
+
+
+@router.post("/customers/bulk-delete")
+def admin_bulk_delete_customers(
+    body: BulkCustomerDeleteRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    deleted = (
+        db.query(Customer)
+        .filter(Customer.id.in_(body.ids))
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"success": True, "deleted": deleted}
 
 
 # ---------------------------------------------------------------------------

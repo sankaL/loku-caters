@@ -18,7 +18,7 @@ export interface ComboRequirement {
 }
 
 export interface ComboDiscount {
-  type: "fixed_amount";
+  type: "fixed_amount" | "percentage";
   amount: number;
   applies_to: "combo_total" | "item";
   target_item_id?: string | null;

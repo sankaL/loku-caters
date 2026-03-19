@@ -115,6 +115,61 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(result["discount_total"], 6.0)
         self.assertEqual(result["applied_combos"][0]["application_count"], 2)
 
+    def test_percentage_combo_total_discount(self):
+        result = price_cart(
+            [
+                PricingLineInput(line_id="lamprais", item_id="lamprais", quantity=1),
+                PricingLineInput(line_id="roll", item_id="roll", quantity=5),
+            ],
+            [
+                {
+                    "id": "combo-percent",
+                    "name": "Combo Percent",
+                    "enabled": True,
+                    "sort_order": 0,
+                    "requirements": [
+                        {"item_id": "lamprais", "min_quantity": 1},
+                        {"item_id": "roll", "min_quantity": 5},
+                    ],
+                    "discount": {"type": "percentage", "amount": 10, "applies_to": "combo_total"},
+                }
+            ],
+        )
+        self.assertEqual(result["subtotal"], 35.0)
+        self.assertEqual(result["discount_total"], 3.5)
+        self.assertEqual(result["grand_total"], 31.5)
+
+    def test_percentage_target_item_discount(self):
+        result = price_cart(
+            [
+                PricingLineInput(line_id="dessert", item_id="dessert", quantity=1),
+                PricingLineInput(line_id="roll", item_id="roll", quantity=1),
+            ],
+            [
+                {
+                    "id": "dessert-percent",
+                    "name": "Dessert Percent",
+                    "enabled": True,
+                    "sort_order": 0,
+                    "requirements": [
+                        {"item_id": "dessert", "min_quantity": 1},
+                        {"item_id": "roll", "min_quantity": 1},
+                    ],
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 20,
+                        "applies_to": "item",
+                        "target_item_id": "dessert",
+                    },
+                }
+            ],
+        )
+        self.assertEqual(result["subtotal"], 8.0)
+        self.assertEqual(result["discount_total"], 1.0)
+        dessert_line = next(line for line in result["lines"] if line["item_id"] == "dessert")
+        self.assertEqual(dessert_line["discount_total"], 1.0)
+        self.assertEqual(dessert_line["total_price"], 4.0)
+
     def test_overlap_prefers_best_non_overlapping_solution(self):
         result = price_cart(
             [

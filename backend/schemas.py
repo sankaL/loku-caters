@@ -33,8 +33,8 @@ class ComboDiscountModel(BaseModel):
     @classmethod
     def combo_discount_type_must_be_supported(cls, v: str) -> str:
         stripped = v.strip()
-        if stripped != "fixed_amount":
-            raise ValueError("Only fixed_amount discounts are supported")
+        if stripped not in {"fixed_amount", "percentage"}:
+            raise ValueError("Only fixed_amount and percentage discounts are supported")
         return stripped
 
     @field_validator("amount")
@@ -91,6 +91,8 @@ class ComboDealModel(BaseModel):
                 raise ValueError("target_item_id must be one of the combo requirements")
         else:
             self.discount.target_item_id = None
+        if self.discount.type == "percentage" and self.discount.amount > 100:
+            raise ValueError("Percentage discounts cannot exceed 100")
         return self
 
 
@@ -112,6 +114,20 @@ class CartLine(BaseModel):
         if v < 1:
             raise ValueError("Quantity must be at least 1")
         return v
+
+
+def _validate_unique_cart_line_items(lines: list[CartLine]) -> list[CartLine]:
+    seen_item_ids: set[str] = set()
+    duplicate_item_ids: set[str] = set()
+    for line in lines:
+        if line.item_id in seen_item_ids:
+            duplicate_item_ids.add(line.item_id)
+            continue
+        seen_item_ids.add(line.item_id)
+    if duplicate_item_ids:
+        duplicates = ", ".join(sorted(duplicate_item_ids))
+        raise ValueError(f"Duplicate cart lines are not allowed: {duplicates}")
+    return lines
 
 
 class OrderCreate(BaseModel):
@@ -156,6 +172,11 @@ class OrderResponse(BaseModel):
 class OrderQuoteRequest(BaseModel):
     lines: list[CartLine] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def validate_quote_lines(self) -> "OrderQuoteRequest":
+        _validate_unique_cart_line_items(self.lines)
+        return self
+
 
 class OrderCheckoutCreate(BaseModel):
     name: str
@@ -185,6 +206,7 @@ class OrderCheckoutCreate(BaseModel):
     def validate_checkout_lines(self) -> "OrderCheckoutCreate":
         if not self.lines:
             raise ValueError("At least one cart line is required")
+        _validate_unique_cart_line_items(self.lines)
         return self
 
 

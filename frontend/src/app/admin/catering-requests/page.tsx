@@ -3,6 +3,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
+import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
 import Modal from "@/components/ui/Modal";
 import { getAdminToken } from "@/lib/auth";
 import {
@@ -814,7 +815,7 @@ export default function AdminCateringRequestsPage() {
   };
 
   return (
-    <div style={{ padding: "32px 32px 64px", maxWidth: 1320, margin: "0 auto" }}>
+    <div style={{ padding: "clamp(20px, 2vw, 32px) clamp(16px, 1.25vw, 24px) 56px", maxWidth: 1320, margin: "0 auto" }}>
       <div style={{ marginBottom: 28 }}>
         <h1
           style={{
@@ -849,44 +850,22 @@ export default function AdminCateringRequestsPage() {
       )}
 
       {loading ? (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-            gap: 16,
-            marginBottom: 28,
-          }}
-        >
+        <CompactMetricRail>
           {[...Array(7)].map((_, idx) => (
-            <div
-              key={idx}
-              style={{
-                background: "white",
-                border: "1px solid var(--color-border)",
-                borderRadius: 20,
-                padding: 20,
-              }}
-            >
-              <Skeleton w="60%" h={12} />
+            <CompactMetricCard key={idx} variant={idx === 0 ? "dark" : "light"}>
+              <Skeleton w="60%" h={10} />
               <div style={{ marginTop: 12 }}>
-                <Skeleton w="40%" h={28} />
+                <Skeleton w="40%" h={24} />
               </div>
-            </div>
+            </CompactMetricCard>
           ))}
-        </div>
+        </CompactMetricRail>
       ) : data && (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-            gap: 16,
-            marginBottom: 28,
-          }}
-        >
-          <div style={{ background: "var(--color-forest)", borderRadius: 20, padding: 20 }}>
+        <CompactMetricRail>
+          <CompactMetricCard variant="dark">
             <p
               style={{
-                fontSize: 12,
+                fontSize: 10,
                 fontWeight: 600,
                 color: "var(--color-sage)",
                 textTransform: "uppercase",
@@ -898,7 +877,7 @@ export default function AdminCateringRequestsPage() {
             </p>
             <p
               style={{
-                fontSize: 32,
+                fontSize: "clamp(24px, 2vw, 28px)",
                 fontWeight: 700,
                 color: "var(--color-cream)",
                 fontFamily: "var(--font-serif)",
@@ -907,30 +886,23 @@ export default function AdminCateringRequestsPage() {
             >
               {data.total}
             </p>
-          </div>
+          </CompactMetricCard>
 
           {STATUS_OPTIONS.map((option) => {
             const isActive = statusFilter === option.value;
             return (
-              <div
+              <CompactMetricCard
                 key={option.value}
-                style={{
-                  background: "white",
-                  border: `2px solid ${isActive ? "var(--color-sage)" : "var(--color-border)"}`,
-                  borderRadius: 20,
-                  padding: 20,
-                  cursor: "pointer",
-                  transition: "border-color 0.15s",
-                }}
                 onClick={() => setStatusFilter(isActive ? "all" : option.value)}
+                selected={isActive}
               >
                 <p
                   style={{
-                    fontSize: 11,
+                    fontSize: 10,
                     fontWeight: 600,
                     color: "var(--color-muted)",
                     textTransform: "uppercase",
-                    letterSpacing: "0.07em",
+                    letterSpacing: "0.08em",
                     marginBottom: 8,
                   }}
                 >
@@ -938,7 +910,7 @@ export default function AdminCateringRequestsPage() {
                 </p>
                 <p
                   style={{
-                    fontSize: 28,
+                    fontSize: "clamp(24px, 2vw, 28px)",
                     fontWeight: 700,
                     color: "var(--color-forest)",
                     fontFamily: "var(--font-serif)",
@@ -947,28 +919,21 @@ export default function AdminCateringRequestsPage() {
                 >
                   {data.status_counts[option.value]}
                 </p>
-                <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>
+                <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
                   Click to filter
                 </p>
-              </div>
+              </CompactMetricCard>
             );
           })}
 
-          <div
-            style={{
-              background: "white",
-              border: "1px solid var(--color-border)",
-              borderRadius: 20,
-              padding: 20,
-            }}
-          >
+          <CompactMetricCard>
             <p
               style={{
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: 600,
                 color: "var(--color-muted)",
                 textTransform: "uppercase",
-                letterSpacing: "0.07em",
+                letterSpacing: "0.08em",
                 marginBottom: 8,
               }}
             >
@@ -976,7 +941,7 @@ export default function AdminCateringRequestsPage() {
             </p>
             <p
               style={{
-                fontSize: 28,
+                fontSize: "clamp(24px, 2vw, 28px)",
                 fontWeight: 700,
                 color: "var(--color-forest)",
                 fontFamily: "var(--font-serif)",
@@ -985,11 +950,11 @@ export default function AdminCateringRequestsPage() {
             >
               {averageGuests}
             </p>
-            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>
+            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
               Rounded across all requests
             </p>
-          </div>
-        </div>
+          </CompactMetricCard>
+        </CompactMetricRail>
       )}
 
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>

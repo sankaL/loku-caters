@@ -36,7 +36,7 @@ class ComboRequirement:
 @dataclass(frozen=True)
 class ComboDiscount:
     type: str
-    amount_cents: int
+    amount_value: float
     applies_to: str
     target_item_id: Optional[str]
 
@@ -122,12 +122,14 @@ def normalize_combo_deals(
             raise ValueError(f"Combo deal '{name}' discount is required")
 
         discount_type = str(discount_raw.get("type") or "").strip()
-        if discount_type != "fixed_amount":
-            raise ValueError(f"Combo deal '{name}' discount.type must be 'fixed_amount'")
+        if discount_type not in {"fixed_amount", "percentage"}:
+            raise ValueError(f"Combo deal '{name}' discount.type must be 'fixed_amount' or 'percentage'")
 
-        amount_cents = _to_cents(discount_raw.get("amount"))
-        if amount_cents <= 0:
+        amount_value = round(float(discount_raw.get("amount") or 0), 2)
+        if amount_value <= 0:
             raise ValueError(f"Combo deal '{name}' discount amount must be greater than 0")
+        if discount_type == "percentage" and amount_value > 100:
+            raise ValueError(f"Combo deal '{name}' percentage discounts cannot exceed 100")
 
         applies_to = str(discount_raw.get("applies_to") or "").strip()
         if applies_to not in {"combo_total", "item"}:
@@ -155,7 +157,7 @@ def normalize_combo_deals(
                 requirements=requirements,
                 discount=ComboDiscount(
                     type=discount_type,
-                    amount_cents=amount_cents,
+                    amount_value=amount_value,
                     applies_to=applies_to,
                     target_item_id=target_item_id,
                 ),
@@ -170,7 +172,11 @@ def combo_preview_text(combo: ComboDeal, item_names: dict[str, str], currency: s
         f"{req.min_quantity} x {item_names.get(req.item_id, req.item_id)}"
         for req in combo.requirements
     )
-    discount_amount = format_currency(cents_to_amount(combo.discount.amount_cents), currency)
+    if combo.discount.type == "fixed_amount":
+        discount_amount = format_currency(combo.discount.amount_value, currency)
+    else:
+        normalized_percent = f"{combo.discount.amount_value:.2f}".rstrip("0").rstrip(".")
+        discount_amount = f"{normalized_percent}%"
     if combo.discount.applies_to == "combo_total":
         return f"Buy {requirement_copy} and save {discount_amount} on the combo."
     target_name = item_names.get(combo.discount.target_item_id or "", combo.discount.target_item_id or "selected item")
@@ -183,25 +189,27 @@ def format_currency(amount: float, currency: str) -> str:
 
 def _application_savings_cents(combo: ComboDeal, prices_cents: dict[str, int]) -> int:
     if combo.discount.applies_to == "combo_total":
-        combo_total_cents = sum(prices_cents[req.item_id] * req.min_quantity for req in combo.requirements)
-        return min(combo.discount.amount_cents, combo_total_cents)
+        applicable_total_cents = sum(prices_cents[req.item_id] * req.min_quantity for req in combo.requirements)
+    else:
+        target_item_id = combo.discount.target_item_id or ""
+        target_requirement = next((req for req in combo.requirements if req.item_id == target_item_id), None)
+        if target_requirement is None:
+            return 0
+        applicable_total_cents = prices_cents[target_item_id] * target_requirement.min_quantity
 
-    target_item_id = combo.discount.target_item_id or ""
-    target_requirement = next((req for req in combo.requirements if req.item_id == target_item_id), None)
-    if target_requirement is None:
-        return 0
-    target_total_cents = prices_cents[target_item_id] * target_requirement.min_quantity
-    return min(combo.discount.amount_cents, target_total_cents)
+    if combo.discount.type == "fixed_amount":
+        return min(_to_cents(combo.discount.amount_value), applicable_total_cents)
+    return min(int(round(applicable_total_cents * combo.discount.amount_value / 100.0)), applicable_total_cents)
 
 
 def _allocate_combo_total_discount(
-    combo: ComboDeal,
+    requirements: tuple[ComboRequirement, ...],
     prices_cents: dict[str, int],
     savings_cents: int,
 ) -> dict[str, int]:
     contributions = {
         req.item_id: prices_cents[req.item_id] * req.min_quantity
-        for req in combo.requirements
+        for req in requirements
     }
     total_cents = sum(contributions.values())
     if total_cents <= 0 or savings_cents <= 0:
@@ -219,10 +227,10 @@ def _allocate_combo_total_discount(
     return allocations
 
 
-def _allocate_item_discount(combo: ComboDeal, savings_cents: int) -> dict[str, int]:
-    if savings_cents <= 0 or not combo.discount.target_item_id:
+def _allocate_item_discount(target_item_id: Optional[str], savings_cents: int) -> dict[str, int]:
+    if savings_cents <= 0 or not target_item_id:
         return {}
-    return {combo.discount.target_item_id: savings_cents}
+    return {target_item_id: savings_cents}
 
 
 def _allocate_line_discounts(
@@ -358,39 +366,12 @@ def quote_cart(
             remaining_quantities[requirement.item_id] = remaining_quantities.get(requirement.item_id, 0) - requirement.min_quantity
         if application.applies_to == "combo_total":
             allocations = _allocate_combo_total_discount(
-                ComboDeal(
-                    id=application.combo_id,
-                    name=application.name,
-                    enabled=True,
-                    sort_order=application.sort_order,
-                    requirements=application.requirements,
-                    discount=ComboDiscount(
-                        type=application.discount_type,
-                        amount_cents=application.savings_cents,
-                        applies_to=application.applies_to,
-                        target_item_id=application.target_item_id,
-                    ),
-                ),
+                application.requirements,
                 price_cents_by_item,
                 application.savings_cents,
             )
         else:
-            allocations = _allocate_item_discount(
-                ComboDeal(
-                    id=application.combo_id,
-                    name=application.name,
-                    enabled=True,
-                    sort_order=application.sort_order,
-                    requirements=application.requirements,
-                    discount=ComboDiscount(
-                        type=application.discount_type,
-                        amount_cents=application.savings_cents,
-                        applies_to=application.applies_to,
-                        target_item_id=application.target_item_id,
-                    ),
-                ),
-                application.savings_cents,
-            )
+            allocations = _allocate_item_discount(application.target_item_id, application.savings_cents)
         for item_id, cents in allocations.items():
             item_discount_cents[item_id] = item_discount_cents.get(item_id, 0) + cents
 
