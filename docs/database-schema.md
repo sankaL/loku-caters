@@ -8,6 +8,29 @@ App tables that live in the `public` schema, plus `public.alembic_version`, are 
 
 ---
 
+## Table: `customers`
+
+Stores the backend-managed customer contact registry keyed by normalized email. This table is populated from historical `orders` using `backend/backfill_customers.py` and is updated on new public orders plus admin order create/update flows.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `email` | `TEXT` | NOT NULL, UNIQUE | Stored trimmed and lowercased; automatic identity key |
+| `name` | `TEXT` | NOT NULL | Latest known non-empty customer name for that email |
+| `phone_number` | `TEXT` | nullable | Latest known non-empty phone number; blank later orders do not erase an existing value |
+| `pickup_locations` | `JSONB` | NOT NULL, default `'[]'::jsonb` | Append-only unique array of pickup location names seen on orders for that email |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | First time the customer row was created; backfill seeds this from the earliest order timestamp for that email |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | Last time the customer row changed; backfill seeds this from the latest order timestamp for that email |
+
+### Customer sync behavior
+
+- Email is the only automatic identity key.
+- A different email creates a different customer row until a manual merge feature exists.
+- Customer rows are not removed automatically when orders are deleted.
+- `pickup_locations` is append-only history and is never pruned automatically.
+
+---
+
 ## Table: `orders`
 
 | Column | Type | Constraints | Notes |
@@ -20,11 +43,15 @@ App tables that live in the `public` schema, plus `public.alembic_version`, are 
 | `quantity` | `INTEGER` | NOT NULL, CHECK >= 1 | Number of portions |
 | `pickup_location` | `TEXT` | NOT NULL | Matches a location name in the `locations` table |
 | `pickup_time_slot` | `TEXT` | NOT NULL | Matches a time slot for that location |
+| `group_id` | `TEXT` | nullable, indexed | Shared identifier for cart checkouts that create multiple order rows priced together |
 | `phone_number` | `TEXT` | NULLABLE | Always optional for both customers and admin |
 | `email` | `TEXT` | NULLABLE | Used to send Resend confirmation/reminders unless excluded |
 | `notes` | `TEXT` | NULLABLE | Admin-only internal notes |
 | `exclude_email` | `BOOLEAN` | NOT NULL, default `false` | When true, admin actions will not send confirmation/reminder emails |
+| `base_total_price` | `DECIMAL(10,2)` | NOT NULL | Pre-combo line total computed from base item pricing |
+| `discount_total` | `DECIMAL(10,2)` | NOT NULL | Combo discount allocated to this line |
 | `total_price` | `DECIMAL(10,2)` | NOT NULL | Always computed server-side from items table price |
+| `pricing_meta` | `JSONB` | NOT NULL, default `'{}'::jsonb` | Pricing metadata including applied combo summaries and group context |
 | `status` | `TEXT` | default `'pending'` | See valid values below |
 | `reminded` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether a pickup reminder email has been sent; independent of order status |
 | `paid` | `BOOLEAN` | NOT NULL, default `false` | Tracks whether payment has been recorded; independent of order status |
@@ -105,6 +132,7 @@ Stores events with their associated item and location selections. Only one event
 | `is_active` | `BOOLEAN` | NOT NULL, default `false` | Only one row is `true` at a time; the active event is live on the order page |
 | `item_ids` | `JSONB` | NOT NULL, default `'[]'` | Ordered array of `items.id` strings available for this event |
 | `location_ids` | `JSONB` | NOT NULL, default `'[]'` | Ordered array of `locations.id` strings available for this event |
+| `combo_deals` | `JSONB` | NOT NULL, default `'[]'` | Event-scoped combo pricing rules used by `/api/orders/quote`, `/api/orders/checkout`, and grouped admin repricing; each deal stores requirements plus either a fixed-amount or percentage discount |
 | `updated_at` | `TIMESTAMPTZ` | NULLABLE | Set automatically on create/update |
 
 ---
@@ -253,10 +281,12 @@ alembic upgrade head
 | `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true, payment_method='etransfer', payment_method_other=NULL` |
 | `0017_phone_optional` | updates `ck_orders_contact_required_unless_excluded` constraint to only require `email` (not `phone_number`) when `exclude_email` is false |
 | `db2173ba0be0_create_catering_requests` | `catering_requests` table |
+| `5f2d6c8a9b01_create_customers_table` | `customers` table with backend-only RLS posture |
 | `4f7d2b6c9a10_feedback_origin_rework` | adds `origin` to `feedback`; backfills legacy rows into canonical `origin` and `feedback_type` values |
 | `9c8b0b7f2e1a_catering_request_comments_and_statuses` | `catering_request_comments` table; remaps `catering_requests.status='resolved'` to `'done'` |
 | `c3f9a6e7b2d1_add_item_minimum_order_quantity` | adds `minimum_order_quantity` to `items` with a check constraint enforcing values >= 1 |
 | `7b1d5f8c2a4e_enable_rls_catering_and_alembic_version` | enables RLS on `catering_requests`, `catering_request_comments`, and `alembic_version`; revokes `anon` and `authenticated` access when those roles exist |
+| `a4d7e3b91c2f_add_combo_deals_and_grouped_order_pricing` | adds `events.combo_deals` and grouped cart pricing columns on `orders` (`group_id`, `base_total_price`, `discount_total`, `pricing_meta`) |
 
 ---
 

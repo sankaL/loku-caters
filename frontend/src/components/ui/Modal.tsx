@@ -10,6 +10,7 @@ interface ModalProps {
   children: React.ReactNode;
   actions?: React.ReactNode;
   variant?: "default" | "danger";
+  size?: "md" | "lg" | "xl";
 }
 
 export default function Modal({
@@ -19,6 +20,7 @@ export default function Modal({
   children,
   actions,
   variant = "default",
+  size = "md",
 }: ModalProps) {
   useEffect(() => {
     if (!isOpen) return;
@@ -39,6 +41,7 @@ export default function Modal({
   if (!isOpen) return null;
 
   const titleColor = variant === "danger" ? "#991b1b" : "var(--color-forest)";
+  const maxWidth = size === "xl" ? "960px" : size === "lg" ? "720px" : "440px";
 
   return ReactDOM.createPortal(
     <div
@@ -61,8 +64,10 @@ export default function Modal({
           background: "white",
           borderRadius: "24px",
           border: "1px solid var(--color-border)",
-          maxWidth: "440px",
+          maxWidth,
           width: "100%",
+          maxHeight: "calc(100vh - 32px)",
+          overflowY: "auto",
           padding: "32px",
           boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
         }}

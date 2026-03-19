@@ -37,6 +37,18 @@ const navItems: NavItem[] = [
     ),
   },
   {
+    href: "/admin/customers",
+    label: "Customers",
+    icon: (
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    ),
+  },
+  {
     href: "/admin/config",
     label: "Events",
     icon: (
@@ -159,7 +171,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           className="px-4 py-5 border-b flex items-center overflow-hidden"
           style={{ borderColor: "rgba(255,255,255,0.08)", gap: isCollapsed ? 0 : 12 }}
         >
-          {/* Logo icon — hidden on desktop when collapsed to give room for the toggle */}
+          {/* Logo icon hidden on desktop when collapsed to give room for the toggle */}
           <div className={`shrink-0 ${isCollapsed ? "md:hidden" : ""}`}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-sage)" }}>
               <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />

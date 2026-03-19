@@ -12,6 +12,27 @@ export interface Item {
   minimum_order_quantity?: number;
 }
 
+export interface ComboRequirement {
+  item_id: string;
+  min_quantity: number;
+}
+
+export interface ComboDiscount {
+  type: "fixed_amount" | "percentage";
+  amount: number;
+  applies_to: "combo_total" | "item";
+  target_item_id?: string | null;
+}
+
+export interface ComboDeal {
+  id: string;
+  name: string;
+  enabled: boolean;
+  sort_order: number;
+  requirements: ComboRequirement[];
+  discount: ComboDiscount;
+}
+
 export interface Location {
   id: string;
   name: string;
@@ -34,6 +55,7 @@ export interface EventConfig {
   etransfer_enabled: boolean;
   etransfer_email: string | null;
   is_active: boolean;
+  combo_deals: ComboDeal[];
   items: Item[];
   locations: Location[];
 }

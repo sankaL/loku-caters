@@ -18,6 +18,7 @@ import {
 interface Order {
   id: string;
   event_id: number;
+  group_id: string | null;
   name: string;
   email: string | null;
   phone_number: string | null;
@@ -26,7 +27,10 @@ interface Order {
   quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
+  base_total_price: number;
+  discount_total: number;
   total_price: number;
+  pricing_meta?: Record<string, unknown>;
   status: string;
   reminded: boolean;
   paid: boolean;
@@ -259,7 +263,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   useEffect(() => {
     let cancelled = false;
     async function fetchSiblings() {
-      if (!order?.email || !order?.event_id) {
+      if (!order?.event_id) {
         if (!cancelled) {
           setSiblingOrders([]);
           setLoadingSiblings(false);
@@ -270,7 +274,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       try {
         const token = await getAdminToken();
         if (!token) return;
-        const url = `${API_URL}/api/admin/orders?event_id=${order.event_id}&email=${encodeURIComponent(order.email)}`;
+        const url = order.group_id
+          ? `${API_URL}/api/admin/orders?event_id=${order.event_id}`
+          : `${API_URL}/api/admin/orders?event_id=${order.event_id}&email=${encodeURIComponent(order.email ?? "")}`;
         const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) return;
         const data = await res.json();
@@ -283,7 +289,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     }
     fetchSiblings();
     return () => { cancelled = true; };
-  }, [order?.email, order?.event_id, siblingVersion]);
+  }, [order?.email, order?.event_id, order?.group_id, siblingVersion]);
 
   const eventLabel = useMemo(() => {
     if (!order) return "";
@@ -326,6 +332,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
   const editScopeOrders = useMemo<Order[]>(() => {
     if (!order) return [];
+    if (order.group_id) {
+      const scoped = siblingOrders.filter((row) => row.group_id === order.group_id);
+      if (scoped.length === 0) return [order];
+      if (scoped.some((row) => row.id === order.id)) return scoped;
+      return [order, ...scoped];
+    }
     const email = String(order.email ?? "").trim().toLowerCase();
     if (!email) return [order];
 
@@ -566,9 +578,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       const existingRows = [...(editScopeOrders.length > 0 ? editScopeOrders : [order])];
       const targetStatus = order.status;
-      const targetPaid = !!order.paid;
-      const targetPaymentMethod = order.payment_method;
-      const targetPaymentMethodOther = order.payment_method_other;
       const lockedItemIds = new Set(editLegacyItems.map((item) => item.id));
       const lockedExistingRows = existingRows.filter((row) => lockedItemIds.has(row.item_id));
 
@@ -670,6 +679,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           body: JSON.stringify({
             ...basePayload,
             event_id: order.event_id,
+            group_id: order.group_id,
             item_id: resolveBackendItemId(line.item),
             quantity: line.qty,
           }),
@@ -687,28 +697,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           });
           if (!statusRes.ok) {
             throw new Error(await getApiErrorMessage(statusRes, "Failed to inherit order status"));
-          }
-        }
-
-        if (targetPaid && targetStatus !== "pending" && targetPaymentMethod) {
-          const paymentPayload: {
-            paid: boolean;
-            payment_method: "cash" | "etransfer" | "other";
-            payment_method_other?: string;
-          } = {
-            paid: true,
-            payment_method: targetPaymentMethod as "cash" | "etransfer" | "other",
-          };
-          if (targetPaymentMethod === "other" && targetPaymentMethodOther) {
-            paymentPayload.payment_method_other = targetPaymentMethodOther;
-          }
-          const paymentRes = await fetch(`${API_URL}/api/admin/orders/${createdRow.id}/payment`, {
-            method: "PATCH",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(paymentPayload),
-          });
-          if (!paymentRes.ok) {
-            throw new Error(await getApiErrorMessage(paymentRes, "Failed to inherit payment state"));
           }
         }
 
@@ -794,6 +782,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           event_id: order.event_id,
+          group_id: order.group_id,
           name: order.name,
           email: order.email ?? "",
           phone_number: order.phone_number ?? "",
