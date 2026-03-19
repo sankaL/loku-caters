@@ -7,11 +7,11 @@ import NoEventPage from "@/components/NoEventPage";
 import HeroSection from "@/components/HeroSection";
 import FeedbackModal from "@/components/FeedbackModal";
 import type { EventConfig } from "@/config/event";
-import type { OrderResult } from "@/components/OrderForm";
+import type { CheckoutResult } from "@/components/OrderForm";
 import { captureEvent } from "@/lib/analytics";
 
 export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig | null }) {
-    const [orderResults, setOrderResults] = useState<OrderResult[] | null>(null);
+    const [orderResult, setOrderResult] = useState<CheckoutResult | null>(null);
     const [feedbackOpen, setFeedbackOpen] = useState(false);
 
     if (!eventConfig) {
@@ -22,24 +22,25 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
         );
     }
 
-    function handleOrderSuccess(results: OrderResult[]) {
-        results.forEach((result) => {
+    function handleOrderSuccess(result: CheckoutResult) {
+        result.order.lines.forEach((line) => {
             captureEvent("order_submitted", {
-                order_id: result.order_id,
-                item_id: result.order.item_id,
-                quantity: result.order.quantity,
-                total_price: result.order.total_price,
+                order_id: line.order_id,
+                group_id: result.group_id,
+                item_id: line.item_id,
+                quantity: line.quantity,
+                total_price: line.total_price,
                 currency: result.order.currency,
                 pickup_location: result.order.pickup_location,
                 pickup_time_slot: result.order.pickup_time_slot,
             });
         });
-        setOrderResults(results);
+        setOrderResult(result);
     }
 
     return (
         <main className="flex-1 bg-[color:var(--color-cream)] py-4 md:py-6">
-            {!orderResults && (
+            {!orderResult && (
                 <HeroSection
                     eventDate={eventConfig.event.date}
                     heroHeader={eventConfig.hero_header}
@@ -66,15 +67,15 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
                     <div className="flex items-center gap-4">
                         <div className="flex-1 h-px bg-[color:var(--color-border)]" />
                         <p className="text-xs font-semibold tracking-widest uppercase text-[color:var(--color-sage)]">
-                            {orderResults ? "Order Confirmed" : "Pre-Order Below"}
+                            {orderResult ? "Order Confirmed" : "Pre-Order Below"}
                         </p>
                         <div className="flex-1 h-px bg-[color:var(--color-border)]" />
                     </div>
                 </div>
             </div>
 
-            {orderResults ? (
-                <SuccessView results={orderResults} />
+            {orderResult ? (
+                <SuccessView result={orderResult} />
             ) : (
                 <OrderForm
                     items={eventConfig.items}

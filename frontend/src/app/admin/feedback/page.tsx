@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
+import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 
@@ -249,23 +250,55 @@ function Skeleton({ w = "100%", h = 16 }: { w?: string | number; h?: number }) {
 }
 
 // ---------------------------------------------------------------------------
-// ExpandedRow
+// Detail modal
 // ---------------------------------------------------------------------------
 
-function ExpandedRow({
+function DetailField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <p
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: "var(--color-muted)",
+          textTransform: "uppercase",
+          letterSpacing: "0.06em",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </p>
+      <div style={{ fontSize: 14, color: "var(--color-text)", lineHeight: 1.5, wordBreak: "break-word" }}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function FeedbackDetailsModal({
   item,
-  colSpan,
+  onClose,
   onStatusChange,
   onCommentSave,
 }: {
   item: FeedbackItem;
-  colSpan: number;
+  onClose: () => void;
   onStatusChange: (id: string, status: string) => Promise<void>;
   onCommentSave: (id: string, comment: string | null) => Promise<void>;
 }) {
   const [commentText, setCommentText] = useState(item.admin_comment ?? "");
   const [savingComment, setSavingComment] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+
+  useEffect(() => {
+    setCommentText(item.admin_comment ?? "");
+  }, [item.admin_comment, item.id]);
 
   async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
     setUpdatingStatus(true);
@@ -286,37 +319,53 @@ function ExpandedRow({
   }
 
   return (
-    <tr>
-      <td
-        colSpan={colSpan}
-        style={{
-          padding: "16px 20px",
-          background: "#fafaf9",
-          borderBottom: "1px solid var(--color-border)",
-        }}
-      >
-        <div style={{ display: "flex", gap: 24, flexWrap: "wrap", alignItems: "flex-start" }}>
-          {/* Status select */}
-          <div>
-            <label
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--color-muted)",
-                display: "block",
-                marginBottom: 6,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              Status
-            </label>
+    <Modal
+      isOpen
+      onClose={onClose}
+      title="Feedback details"
+      size="xl"
+      actions={
+        <button
+          onClick={onClose}
+          style={{
+            padding: "8px 14px",
+            borderRadius: 10,
+            border: "1px solid var(--color-border)",
+            background: "white",
+            color: "var(--color-text)",
+            fontSize: 13,
+            fontWeight: 500,
+            cursor: "pointer",
+          }}
+        >
+          Close
+        </button>
+      }
+    >
+      <div style={{ display: "grid", gap: 20 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+          <OriginBadge origin={item.origin} label={item.origin_label} />
+          <TypeBadge type={item.feedback_type} label={item.feedback_type_label} />
+          <StatusBadge status={item.status} />
+          {item.reason && item.reason_label && <ReasonBadge reason={item.reason} label={item.reason_label} />}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+          <DetailField label="Submitted">
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "baseline" }}>
+              <span style={{ fontWeight: 500 }}>{formatDate(item.created_at)}</span>
+              <span style={{ color: "var(--color-muted)" }}>{formatTime(item.created_at)}</span>
+            </div>
+          </DetailField>
+
+          <DetailField label="Status">
             <select
               value={item.status}
               onChange={handleStatusChange}
               disabled={updatingStatus}
               style={{
-                padding: "7px 12px",
+                width: "100%",
+                padding: "9px 12px",
                 borderRadius: 10,
                 border: "1px solid var(--color-border)",
                 fontSize: 13,
@@ -330,73 +379,172 @@ function ExpandedRow({
               <option value="in_progress">In Progress</option>
               <option value="resolved">Resolved</option>
             </select>
-          </div>
+          </DetailField>
 
-          {/* Admin comment */}
-          <div style={{ flex: 1, minWidth: 260 }}>
-            <label
+          <DetailField label="Name">
+            {item.name ? (
+              <span style={{ fontWeight: 500 }}>{item.name}</span>
+            ) : (
+              <span style={{ color: "var(--color-muted)", fontStyle: "italic" }}>Anonymous</span>
+            )}
+          </DetailField>
+
+          <DetailField label="Contact">
+            {item.contact ? (
+              <span>{item.contact}</span>
+            ) : (
+              <span style={{ color: "var(--color-muted)", fontStyle: "italic" }}>No contact provided</span>
+            )}
+          </DetailField>
+
+          <DetailField label="Order ID">
+            {item.order_id ? (
+              <span style={{ fontFamily: "monospace" }}>{item.order_id}</span>
+            ) : (
+              <span style={{ color: "var(--color-muted)", fontStyle: "italic" }}>Not linked to an order</span>
+            )}
+          </DetailField>
+
+          <DetailField label="Reason">
+            {item.reason && item.reason_label ? (
+              <ReasonBadge reason={item.reason} label={item.reason_label} />
+            ) : (
+              <span style={{ color: "var(--color-muted)", fontStyle: "italic" }}>No reason provided</span>
+            )}
+          </DetailField>
+
+          <DetailField label="Feedback ID">
+            <span style={{ fontFamily: "monospace" }}>{item.id}</span>
+          </DetailField>
+        </div>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--color-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            Message
+          </p>
+          <div
+            style={{
+              padding: 16,
+              borderRadius: 16,
+              border: "1px solid var(--color-border)",
+              background: "#fafaf9",
+            }}
+          >
+            {item.message ? (
+              <p style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--color-text)", lineHeight: 1.7 }}>
+                {item.message}
+              </p>
+            ) : (
+              <p style={{ margin: 0, color: "var(--color-muted)", fontStyle: "italic" }}>
+                No message provided.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: "var(--color-muted)",
+              textTransform: "uppercase",
+              letterSpacing: "0.06em",
+            }}
+          >
+            Other details
+          </p>
+          <div
+            style={{
+              padding: 16,
+              borderRadius: 16,
+              border: "1px solid var(--color-border)",
+              background: "#fafaf9",
+            }}
+          >
+            {item.other_details ? (
+              <p style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--color-text)", lineHeight: 1.7 }}>
+                {item.other_details}
+              </p>
+            ) : (
+              <p style={{ margin: 0, color: "var(--color-muted)", fontStyle: "italic" }}>
+                No additional details provided.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+            <p
               style={{
                 fontSize: 11,
                 fontWeight: 600,
                 color: "var(--color-muted)",
-                display: "block",
-                marginBottom: 6,
                 textTransform: "uppercase",
                 letterSpacing: "0.06em",
               }}
             >
-              Internal Note
-            </label>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <textarea
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Add an internal note..."
-                rows={2}
-                style={{
-                  flex: 1,
-                  padding: "8px 12px",
-                  borderRadius: 10,
-                  border: "1px solid var(--color-border)",
-                  fontSize: 13,
-                  color: "var(--color-text)",
-                  background: "white",
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  outline: "none",
-                }}
-              />
-              <button
-                onClick={handleSaveComment}
-                disabled={savingComment}
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: "var(--color-forest)",
-                  color: "white",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: savingComment ? "not-allowed" : "pointer",
-                  whiteSpace: "nowrap",
-                  opacity: savingComment ? 0.7 : 1,
-                }}
-              >
-                {savingComment ? "Saving..." : "Save note"}
-              </button>
-            </div>
+              Internal note
+            </p>
+            <span style={{ fontSize: 12, color: "var(--color-muted)" }}>Visible only to admins</span>
+          </div>
+          <textarea
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            placeholder="Add an internal note..."
+            rows={4}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid var(--color-border)",
+              fontSize: 13,
+              color: "var(--color-text)",
+              background: "white",
+              resize: "vertical",
+              fontFamily: "inherit",
+              outline: "none",
+              boxSizing: "border-box",
+            }}
+          />
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button
+              onClick={handleSaveComment}
+              disabled={savingComment}
+              style={{
+                padding: "8px 14px",
+                borderRadius: 10,
+                border: "none",
+                background: "var(--color-forest)",
+                color: "white",
+                fontSize: 13,
+                fontWeight: 600,
+                cursor: savingComment ? "not-allowed" : "pointer",
+                whiteSpace: "nowrap",
+                opacity: savingComment ? 0.7 : 1,
+              }}
+            >
+              {savingComment ? "Saving..." : "Save note"}
+            </button>
           </div>
         </div>
-      </td>
-    </tr>
+      </div>
+    </Modal>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
-
-const COL_COUNT = 10; // checkbox, date, origin, type, name, contact, reason, status, message, actions
 
 export default function AdminFeedbackPage() {
   const router = useRouter();
@@ -416,9 +564,9 @@ export default function AdminFeedbackPage() {
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 15;
 
-  // Selection / expansion
+  // Selection / details
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedFeedbackId, setSelectedFeedbackId] = useState<string | null>(null);
 
   // Modals
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
@@ -508,6 +656,10 @@ export default function AdminFeedbackPage() {
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const selectedFeedback = useMemo(
+    () => (selectedFeedbackId ? data?.items.find((item) => item.id === selectedFeedbackId) ?? null : null),
+    [data, selectedFeedbackId]
+  );
 
   useEffect(() => { setPage(1); }, [originFilter, typeFilter, preOrderReasonFilter, statusFilter, searchQuery]);
   useEffect(() => { setPage((prev) => Math.min(prev, totalPages)); }, [totalPages]);
@@ -664,7 +816,7 @@ export default function AdminFeedbackPage() {
         return rebuildFeedbackData(prev, nextItems);
       });
       setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-      if (expandedId === id) setExpandedId(null);
+      if (selectedFeedbackId === id) setSelectedFeedbackId(null);
       setDeleteTarget(null);
       showToast("Entry deleted", "success");
     } catch {
@@ -689,7 +841,7 @@ export default function AdminFeedbackPage() {
         return rebuildFeedbackData(prev, nextItems);
       });
       setSelectedIds(new Set());
-      if (expandedId && idSet.has(expandedId)) setExpandedId(null);
+      if (selectedFeedbackId && idSet.has(selectedFeedbackId)) setSelectedFeedbackId(null);
       setShowBulkDeleteModal(false);
       showToast(`${ids.length} entr${ids.length === 1 ? "y" : "ies"} deleted`, "success");
     } catch {
@@ -761,7 +913,7 @@ export default function AdminFeedbackPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div style={{ padding: "32px 32px 64px", maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ padding: "clamp(20px, 2vw, 32px) clamp(16px, 1.25vw, 24px) 56px", maxWidth: 1200, margin: "0 auto" }}>
 
       {/* Header */}
       <div style={{ marginBottom: 28 }}>
@@ -799,137 +951,194 @@ export default function AdminFeedbackPage() {
 
       {/* Top metric cards */}
       {loading ? (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 28 }}>
+        <CompactMetricRail>
           {[...Array(5)].map((_, i) => (
-            <div key={i} style={{ background: "white", border: "1px solid var(--color-border)", borderRadius: 20, padding: 20 }}>
-              <Skeleton w="60%" h={12} />
-              <div style={{ marginTop: 12 }}><Skeleton w="40%" h={28} /></div>
-            </div>
+            <CompactMetricCard key={i} variant={i === 0 ? "dark" : "light"}>
+              <Skeleton w="60%" h={10} />
+              <div style={{ marginTop: 12 }}>
+                <Skeleton w="40%" h={24} />
+              </div>
+            </CompactMetricCard>
           ))}
-        </div>
+        </CompactMetricRail>
       ) : data && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: 16, marginBottom: 28 }}>
-          {/* Total */}
-          <div style={{ background: "var(--color-forest)", borderRadius: 20, padding: 20 }}>
-            <p style={{ fontSize: 12, fontWeight: 600, color: "var(--color-sage)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>
+        <CompactMetricRail>
+          <CompactMetricCard variant="dark">
+            <p
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: "var(--color-sage)",
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                marginBottom: 8,
+              }}
+            >
               Total Responses
             </p>
-            <p style={{ fontSize: 32, fontWeight: 700, color: "var(--color-cream)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+            <p
+              style={{
+                fontSize: "clamp(24px, 2vw, 28px)",
+                fontWeight: 700,
+                color: "var(--color-cream)",
+                fontFamily: "var(--font-serif)",
+                lineHeight: 1,
+              }}
+            >
               {data.total}
             </p>
-          </div>
+          </CompactMetricCard>
 
-          {/* Contact Us */}
-          <div
-            style={{
-              background: "white",
-              border: `2px solid ${originFilter === "contact_us" ? "var(--color-sage)" : "var(--color-border)"}`,
-              borderRadius: 20,
-              padding: 20,
-              cursor: "pointer",
-              transition: "border-color 0.15s",
-            }}
+          <CompactMetricCard
             onClick={() => setOriginFilter(originFilter === "contact_us" ? "all" : "contact_us")}
+            selected={originFilter === "contact_us"}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--color-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
                 Contact Us
               </p>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
             </div>
-            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+            <p
+              style={{
+                fontSize: "clamp(24px, 2vw, 28px)",
+                fontWeight: 700,
+                color: "var(--color-forest)",
+                fontFamily: "var(--font-serif)",
+                lineHeight: 1,
+              }}
+            >
               {data.origin_counts.contact_us}
             </p>
-            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Messages and inquiries</p>
-          </div>
+            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
+              Messages and inquiries
+            </p>
+          </CompactMetricCard>
 
-          {/* Events Page (Non-customer) */}
-          <div
-            style={{
-              background: "white",
-              border: `2px solid ${originFilter === "events_page_non_customer" ? "var(--color-sage)" : "var(--color-border)"}`,
-              borderRadius: 20,
-              padding: 20,
-              cursor: "pointer",
-              transition: "border-color 0.15s",
-            }}
+          <CompactMetricCard
             onClick={() => setOriginFilter(originFilter === "events_page_non_customer" ? "all" : "events_page_non_customer")}
+            selected={originFilter === "events_page_non_customer"}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--color-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
                 Events Page
               </p>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
               </svg>
             </div>
-            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+            <p
+              style={{
+                fontSize: "clamp(24px, 2vw, 28px)",
+                fontWeight: 700,
+                color: "var(--color-forest)",
+                fontFamily: "var(--font-serif)",
+                lineHeight: 1,
+              }}
+            >
               {data.origin_counts.events_page_non_customer}
             </p>
-            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Pre-order feedback</p>
-          </div>
+            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
+              Pre-order feedback
+            </p>
+          </CompactMetricCard>
 
-          {/* Events Page (Customer) */}
-          <div
-            style={{
-              background: "white",
-              border: `2px solid ${originFilter === "events_page_customer" ? "var(--color-sage)" : "var(--color-border)"}`,
-              borderRadius: 20,
-              padding: 20,
-              cursor: "pointer",
-              transition: "border-color 0.15s",
-            }}
+          <CompactMetricCard
             onClick={() => setOriginFilter(originFilter === "events_page_customer" ? "all" : "events_page_customer")}
+            selected={originFilter === "events_page_customer"}
           >
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--color-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
                 Customers
               </p>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2d6a2d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
               </svg>
             </div>
-            <p style={{ fontSize: 28, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+            <p
+              style={{
+                fontSize: "clamp(24px, 2vw, 28px)",
+                fontWeight: 700,
+                color: "var(--color-forest)",
+                fontFamily: "var(--font-serif)",
+                lineHeight: 1,
+              }}
+            >
               {data.origin_counts.events_page_customer}
             </p>
-            <p style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 6 }}>Post-order feedback</p>
-          </div>
+            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
+              Post-order feedback
+            </p>
+          </CompactMetricCard>
 
-          {/* Top non-customer reason */}
           {sortedMetrics[0] && (() => {
             const m = sortedMetrics[0];
             const colors = REASON_COLORS[m.reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" };
             return (
-              <div
-                style={{
-                  background: "white",
-                  border: "1px solid var(--color-border)",
-                  borderRadius: 20,
-                  padding: 20,
-                  cursor: "pointer",
-                }}
+              <CompactMetricCard
                 onClick={() => setPreOrderReasonFilter(preOrderReasonFilter === m.reason ? "all" : m.reason)}
+                selected={preOrderReasonFilter === m.reason}
               >
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  <p
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      color: "var(--color-muted)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.08em",
+                    }}
+                  >
                     Top Reason
                   </p>
-                  <span style={{ fontSize: 11, fontWeight: 600, padding: "2px 7px", borderRadius: "999px", background: colors.bg, color: colors.text }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: "999px", background: colors.bg, color: colors.text }}>
                     {m.pct}%
                   </span>
                 </div>
-                <p style={{ fontSize: 14, fontWeight: 700, color: "var(--color-forest)", lineHeight: 1.3, marginBottom: 6 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, color: "var(--color-forest)", lineHeight: 1.3, marginBottom: 6 }}>
                   {m.label}
                 </p>
-                <p style={{ fontSize: 24, fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>
+                <p
+                  style={{
+                    fontSize: "clamp(22px, 1.8vw, 24px)",
+                    fontWeight: 700,
+                    color: "var(--color-forest)",
+                    fontFamily: "var(--font-serif)",
+                    lineHeight: 1,
+                  }}
+                >
                   {m.count}
                 </p>
-              </div>
+              </CompactMetricCard>
             );
           })()}
-        </div>
+        </CompactMetricRail>
       )}
 
       {/* Reason breakdown (non-customer only) */}
@@ -1201,15 +1410,13 @@ export default function AdminFeedbackPage() {
               </thead>
               <tbody>
                 {paginated.map((item, idx) => {
-                  const isExpanded = expandedId === item.id;
-                  const isLast = idx === paginated.length - 1;
                   return (
                     <Fragment key={item.id}>
                       <tr
-                        onClick={() => setExpandedId(isExpanded ? null : item.id)}
+                        onClick={() => setSelectedFeedbackId(item.id)}
                         style={{
-                          borderBottom: (!isExpanded && !isLast) ? "1px solid var(--color-border)" : isExpanded ? "none" : "none",
-                          background: isExpanded ? "#fafaf9" : "white",
+                          borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none",
+                          background: "white",
                           cursor: "pointer",
                           transition: "background 0.1s",
                         }}
@@ -1311,24 +1518,6 @@ export default function AdminFeedbackPage() {
                           </button>
                         </td>
                       </tr>
-
-                      {/* Expanded detail row */}
-                      {isExpanded && (
-                        <ExpandedRow
-                          key={`expanded-${item.id}`}
-                          item={item}
-                          colSpan={COL_COUNT}
-                          onStatusChange={handleStatusChange}
-                          onCommentSave={handleCommentSave}
-                        />
-                      )}
-
-                      {/* Row separator after expanded content */}
-                      {(isExpanded && !isLast) && (
-                        <tr key={`sep-${item.id}`}>
-                          <td colSpan={COL_COUNT} style={{ padding: 0, borderBottom: "1px solid var(--color-border)" }} />
-                        </tr>
-                      )}
                     </Fragment>
                   );
                 })}
@@ -1416,6 +1605,16 @@ export default function AdminFeedbackPage() {
         Mark {selectedIds.size} selected {selectedIds.size === 1 ? "entry" : "entries"} as{" "}
         <strong>{bulkStatusTarget === "in_progress" ? "In Progress" : bulkStatusTarget === "resolved" ? "Resolved" : "New"}</strong>?
       </Modal>
+
+      {/* Feedback details modal */}
+      {selectedFeedback && (
+        <FeedbackDetailsModal
+          item={selectedFeedback}
+          onClose={() => setSelectedFeedbackId(null)}
+          onStatusChange={handleStatusChange}
+          onCommentSave={handleCommentSave}
+        />
+      )}
 
       {/* Toast */}
       {toast && (

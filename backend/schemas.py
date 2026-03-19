@@ -3,6 +3,133 @@ from typing import Optional
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
 
+class ComboRequirementModel(BaseModel):
+    item_id: str
+    min_quantity: int
+
+    @field_validator("item_id")
+    @classmethod
+    def requirement_item_id_must_not_be_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("item_id cannot be empty")
+        return stripped
+
+    @field_validator("min_quantity")
+    @classmethod
+    def requirement_min_quantity_must_be_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("min_quantity must be at least 1")
+        return v
+
+
+class ComboDiscountModel(BaseModel):
+    type: str = "fixed_amount"
+    amount: float
+    applies_to: str
+    target_item_id: Optional[str] = None
+
+    @field_validator("type")
+    @classmethod
+    def combo_discount_type_must_be_supported(cls, v: str) -> str:
+        stripped = v.strip()
+        if stripped not in {"fixed_amount", "percentage"}:
+            raise ValueError("Only fixed_amount and percentage discounts are supported")
+        return stripped
+
+    @field_validator("amount")
+    @classmethod
+    def combo_discount_amount_must_be_positive(cls, v: float) -> float:
+        if v <= 0:
+            raise ValueError("Discount amount must be greater than 0")
+        return round(v, 2)
+
+    @field_validator("applies_to")
+    @classmethod
+    def combo_discount_applies_to_must_be_supported(cls, v: str) -> str:
+        stripped = v.strip()
+        if stripped not in {"combo_total", "item"}:
+            raise ValueError("applies_to must be combo_total or item")
+        return stripped
+
+    @field_validator("target_item_id", mode="before")
+    @classmethod
+    def normalize_target_item_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+
+class ComboDealModel(BaseModel):
+    id: str
+    name: str
+    enabled: bool = True
+    sort_order: int = 0
+    requirements: list[ComboRequirementModel] = Field(default_factory=list)
+    discount: ComboDiscountModel
+
+    @field_validator("id", "name")
+    @classmethod
+    def combo_text_fields_must_not_be_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped
+
+    @model_validator(mode="after")
+    def validate_combo_deal(self) -> "ComboDealModel":
+        if not self.requirements:
+            raise ValueError("Combo deal must include at least one requirement")
+        requirement_item_ids = [entry.item_id for entry in self.requirements]
+        if len(set(requirement_item_ids)) != len(requirement_item_ids):
+            raise ValueError("Combo deal cannot include the same item more than once")
+        if self.discount.applies_to == "item":
+            if not self.discount.target_item_id:
+                raise ValueError("target_item_id is required when applies_to is item")
+            if self.discount.target_item_id not in requirement_item_ids:
+                raise ValueError("target_item_id must be one of the combo requirements")
+        else:
+            self.discount.target_item_id = None
+        if self.discount.type == "percentage" and self.discount.amount > 100:
+            raise ValueError("Percentage discounts cannot exceed 100")
+        return self
+
+
+class CartLine(BaseModel):
+    item_id: str
+    quantity: int
+
+    @field_validator("item_id")
+    @classmethod
+    def cart_line_item_id_must_not_be_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("item_id cannot be empty")
+        return stripped
+
+    @field_validator("quantity")
+    @classmethod
+    def cart_line_quantity_must_be_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("Quantity must be at least 1")
+        return v
+
+
+def _validate_unique_cart_line_items(lines: list[CartLine]) -> list[CartLine]:
+    seen_item_ids: set[str] = set()
+    duplicate_item_ids: set[str] = set()
+    for line in lines:
+        if line.item_id in seen_item_ids:
+            duplicate_item_ids.add(line.item_id)
+            continue
+        seen_item_ids.add(line.item_id)
+    if duplicate_item_ids:
+        duplicates = ", ".join(sorted(duplicate_item_ids))
+        raise ValueError(f"Duplicate cart lines are not allowed: {duplicates}")
+    return lines
+
+
 class OrderCreate(BaseModel):
     name: str
     item_id: str
@@ -38,6 +165,92 @@ class OrderCreate(BaseModel):
 class OrderResponse(BaseModel):
     success: bool
     order_id: str
+    message: str
+    order: dict
+
+
+class OrderQuoteRequest(BaseModel):
+    lines: list[CartLine] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_quote_lines(self) -> "OrderQuoteRequest":
+        _validate_unique_cart_line_items(self.lines)
+        return self
+
+
+class OrderCheckoutCreate(BaseModel):
+    name: str
+    pickup_location: str
+    pickup_time_slot: str
+    phone_number: Optional[str] = None
+    email: EmailStr
+    lines: list[CartLine] = Field(default_factory=list)
+
+    @field_validator("name", "pickup_location", "pickup_time_slot")
+    @classmethod
+    def checkout_text_fields_must_not_be_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def normalize_checkout_phone(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def validate_checkout_lines(self) -> "OrderCheckoutCreate":
+        if not self.lines:
+            raise ValueError("At least one cart line is required")
+        _validate_unique_cart_line_items(self.lines)
+        return self
+
+
+class EventOrderLineResponse(BaseModel):
+    order_id: str
+    item_id: str
+    item_name: str
+    quantity: int
+    unit_price: float
+    base_total: float
+    discount_total: float
+    total_price: float
+
+
+class AppliedComboResponse(BaseModel):
+    combo_id: str
+    name: str
+    application_count: int
+    savings_total: float
+    preview_text: str
+
+
+class UpsellOpportunityResponse(BaseModel):
+    combo_id: str
+    name: str
+    preview_text: str
+    message: str
+    potential_savings: float
+    missing_requirements: list[dict]
+
+
+class CartPricingResponse(BaseModel):
+    currency: str
+    lines: list[dict]
+    subtotal: float
+    discount_total: float
+    grand_total: float
+    applied_combos: list[AppliedComboResponse]
+    upsell_opportunities: list[UpsellOpportunityResponse]
+
+
+class OrderCheckoutResponse(BaseModel):
+    success: bool
+    group_id: str
     message: str
     order: dict
 
@@ -118,6 +331,7 @@ class EventBase(BaseModel):
     etransfer_email: Optional[EmailStr] = None
     item_ids: list[str] = Field(default_factory=list)
     location_ids: list[str] = Field(default_factory=list)
+    combo_deals: list[ComboDealModel] = Field(default_factory=list)
 
     @field_validator("name", "event_date", "hero_header")
     @classmethod

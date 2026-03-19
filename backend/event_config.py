@@ -86,6 +86,7 @@ def _build_config_from_event(db: Session, event) -> dict:
         "etransfer_enabled": event.etransfer_enabled,
         "etransfer_email": event.etransfer_email,
         "is_active": bool(event.is_active),
+        "combo_deals": event.combo_deals or [],
         "items": [
             {
                 "id": item.id,

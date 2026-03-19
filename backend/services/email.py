@@ -5,6 +5,114 @@ from event_config import CURRENCY
 resend.api_key = settings.resend_api_key
 
 
+def _normalize_order_lines(order_data: dict) -> list[dict]:
+    raw_lines = order_data.get("items")
+    if isinstance(raw_lines, list) and raw_lines:
+        normalized = []
+        for raw_line in raw_lines:
+            if not isinstance(raw_line, dict):
+                continue
+            normalized.append(
+                {
+                    "item_name": raw_line.get("item_name", ""),
+                    "quantity": int(raw_line.get("quantity", 0) or 0),
+                    "base_total": float(raw_line.get("base_total", raw_line.get("total_price", 0)) or 0),
+                    "discount_total": float(raw_line.get("discount_total", 0) or 0),
+                    "total_price": float(raw_line.get("total_price", 0) or 0),
+                }
+            )
+        if normalized:
+            return normalized
+
+    quantity = int(order_data.get("quantity", 0) or 0)
+    total_price = float(order_data.get("total_price", 0) or 0)
+    return [
+        {
+            "item_name": order_data.get("item_name", ""),
+            "quantity": quantity,
+            "base_total": total_price,
+            "discount_total": 0.0,
+            "total_price": total_price,
+        }
+    ]
+
+
+def _build_order_summary_html(order_data: dict) -> str:
+    currency = order_data.get("currency") or CURRENCY
+    lines = _normalize_order_lines(order_data)
+    subtotal = float(order_data.get("subtotal", sum(line["base_total"] for line in lines)) or 0)
+    discount_total = float(order_data.get("discount_total", sum(line["discount_total"] for line in lines)) or 0)
+    grand_total = float(order_data.get("total_price", sum(line["total_price"] for line in lines)) or 0)
+    event_date = order_data.get("event_date", "")
+    pickup_location = order_data.get("pickup_location", "")
+    pickup_time_slot = order_data.get("pickup_time_slot", "")
+    address = order_data.get("address", "")
+
+    location_display = pickup_location
+    if address:
+        location_display = f"{pickup_location} - {address}"
+
+    item_rows_html = "".join(
+        f"""
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">{line['item_name']} x {line['quantity']}</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${line['total_price']:.2f}</td>
+                      </tr>
+"""
+        for line in lines
+    )
+
+    savings_row_html = ""
+    if discount_total > 0:
+        savings_row_html = f"""
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Combo savings</td>
+                        <td style="font-size:14px;color:#2d6a2d;font-weight:600;text-align:right;padding:6px 0;">-{currency} ${discount_total:.2f}</td>
+                      </tr>
+"""
+
+    return f"""
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-radius:12px;overflow:hidden;margin-bottom:28px;">
+                <tr>
+                  <td style="padding:20px 24px;border-bottom:1px solid #e8e4dc;">
+                    <p style="margin:0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#729152;font-weight:600;">Order Summary</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:20px 24px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+{item_rows_html}
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Subtotal</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${subtotal:.2f}</td>
+                      </tr>
+{savings_row_html}
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Date</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{event_date}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Location</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{location_display}</td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Time Slot</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{pickup_time_slot}</td>
+                      </tr>
+                      <tr>
+                        <td colspan="2" style="padding:12px 0 0;border-top:1px solid #d8d4cc;"></td>
+                      </tr>
+                      <tr>
+                        <td style="font-size:16px;color:#12270F;font-weight:700;padding:4px 0;">Total</td>
+                        <td style="font-size:16px;color:#12270F;font-weight:700;text-align:right;padding:4px 0;">{currency} ${grand_total:.2f}</td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+"""
+
+
 def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -> str:
     etransfer_enabled = bool(order_data.get("etransfer_enabled"))
     etransfer_email = str(order_data.get("etransfer_email") or "").strip()
@@ -44,21 +152,11 @@ def send_confirmation(order_data: dict) -> None:
         return
 
     name = order_data["name"]
-    item_name = order_data["item_name"]
-    quantity = order_data["quantity"]
-    pickup_location = order_data["pickup_location"]
-    pickup_time_slot = order_data["pickup_time_slot"]
-    total_price = order_data["total_price"]
-    price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency") or CURRENCY
     email = order_data["email"]
-    address = order_data.get("address", "")
-    event_date = order_data.get("event_date", "")
     etransfer_section_html = _build_etransfer_section_html(order_data)
-
-    location_display = pickup_location
-    if address:
-        location_display = f"{pickup_location} - {address}"
+    summary_html = _build_order_summary_html(order_data)
+    order_lines = _normalize_order_lines(order_data)
+    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Pre-Order"
 
     html_body = f"""
 <!DOCTYPE html>
@@ -90,48 +188,7 @@ def send_confirmation(order_data: dict) -> None:
                 Great news! Your Lamprais pre-order has been confirmed. We are so excited to cook this up for you.
                 Please see your order details and pickup information below.
               </p>
-
-              <!-- Order Summary -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-radius:12px;overflow:hidden;margin-bottom:28px;">
-                <tr>
-                  <td style="padding:20px 24px;border-bottom:1px solid #e8e4dc;">
-                    <p style="margin:0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#729152;font-weight:600;">Order Summary</p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:20px 24px;">
-                    <table width="100%" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Item</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{item_name} x {quantity}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Price per item</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${price_per_item:.2f}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Date</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{event_date}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Location</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{location_display}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Time Slot</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{pickup_time_slot}</td>
-                      </tr>
-                      <tr>
-                        <td colspan="2" style="padding:12px 0 0;border-top:1px solid #d8d4cc;"></td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:16px;color:#12270F;font-weight:700;padding:4px 0;">Total</td>
-                        <td style="font-size:16px;color:#12270F;font-weight:700;text-align:right;padding:4px 0;">{currency} ${total_price:.2f}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
+{summary_html}
 
 {etransfer_section_html}
 
@@ -159,7 +216,7 @@ def send_confirmation(order_data: dict) -> None:
     message_payload = {
         "from": f"Loku Caters <{settings.from_email}>",
         "to": [email],
-        "subject": f"Your {item_name} Pre-Order is Confirmed",
+        "subject": f"Your {subject_line_name} is Confirmed",
         "html": html_body,
     }
 
@@ -175,21 +232,17 @@ def send_reminder(order_data: dict) -> None:
         return
 
     name = order_data["name"]
-    item_name = order_data["item_name"]
-    quantity = order_data["quantity"]
-    pickup_location = order_data["pickup_location"]
-    pickup_time_slot = order_data["pickup_time_slot"]
-    total_price = order_data["total_price"]
-    price_per_item = order_data["price_per_item"]
-    currency = order_data.get("currency") or CURRENCY
     email = order_data["email"]
-    address = order_data.get("address", "")
     event_date = order_data.get("event_date", "")
     etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
-
+    summary_html = _build_order_summary_html(order_data)
+    pickup_location = order_data.get("pickup_location", "")
+    address = order_data.get("address", "")
     location_display = pickup_location
     if address:
         location_display = f"{pickup_location} - {address}"
+    order_lines = _normalize_order_lines(order_data)
+    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
 
     html_body = f"""
 <!DOCTYPE html>
@@ -221,48 +274,7 @@ def send_reminder(order_data: dict) -> None:
                 Just a friendly reminder that your Lamprais order will be ready for pickup on <strong>{event_date}</strong>
                 at <strong>{location_display}</strong> during your selected time slot. We look forward to seeing you soon!
               </p>
-
-              <!-- Order Summary -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-radius:12px;overflow:hidden;margin-bottom:28px;">
-                <tr>
-                  <td style="padding:20px 24px;border-bottom:1px solid #e8e4dc;">
-                    <p style="margin:0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#729152;font-weight:600;">Your Order</p>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:20px 24px;">
-                    <table width="100%" cellpadding="0" cellspacing="0">
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Item</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{item_name} x {quantity}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Price per item</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${price_per_item:.2f}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Date</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{event_date}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Location</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{location_display}</td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Time Slot</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{pickup_time_slot}</td>
-                      </tr>
-                      <tr>
-                        <td colspan="2" style="padding:12px 0 0;border-top:1px solid #d8d4cc;"></td>
-                      </tr>
-                      <tr>
-                        <td style="font-size:16px;color:#12270F;font-weight:700;padding:4px 0;">Total</td>
-                        <td style="font-size:16px;color:#12270F;font-weight:700;text-align:right;padding:4px 0;">{currency} ${total_price:.2f}</td>
-                      </tr>
-                    </table>
-                  </td>
-                </tr>
-              </table>
+{summary_html}
 
 {etransfer_section_html}
 
@@ -290,7 +302,7 @@ def send_reminder(order_data: dict) -> None:
     message_payload = {
         "from": f"Loku Caters <{settings.from_email}>",
         "to": [email],
-        "subject": f"Pickup Reminder - Your {item_name} Order",
+        "subject": f"Pickup Reminder - Your {subject_line_name}",
         "html": html_body,
     }
 
