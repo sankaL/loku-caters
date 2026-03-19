@@ -1,18 +1,40 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import OrderForm from "@/components/OrderForm";
 import SuccessView from "@/components/SuccessView";
 import NoEventPage from "@/components/NoEventPage";
 import HeroSection from "@/components/HeroSection";
-import FeedbackModal from "@/components/FeedbackModal";
+import FeedbackModal, { type FeedbackOrigin } from "@/components/FeedbackModal";
 import type { EventConfig } from "@/config/event";
 import type { CheckoutResult } from "@/components/OrderForm";
 import { captureEvent } from "@/lib/analytics";
 
+function FeedbackAutoOpen({
+    autoOpenedFeedback,
+    onAutoOpen,
+}: {
+    autoOpenedFeedback: boolean;
+    onAutoOpen: () => void;
+}) {
+    const searchParams = useSearchParams();
+
+    useEffect(() => {
+        if (autoOpenedFeedback) return;
+        if (searchParams.get("feedback") !== "event-reminder") return;
+
+        onAutoOpen();
+    }, [autoOpenedFeedback, onAutoOpen, searchParams]);
+
+    return null;
+}
+
 export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig | null }) {
     const [orderResult, setOrderResult] = useState<CheckoutResult | null>(null);
     const [feedbackOpen, setFeedbackOpen] = useState(false);
+    const [feedbackOrigin, setFeedbackOrigin] = useState<FeedbackOrigin>("events_page_non_customer");
+    const [autoOpenedFeedback, setAutoOpenedFeedback] = useState(false);
 
     if (!eventConfig) {
         return (
@@ -40,6 +62,21 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
 
     return (
         <main className="flex-1 bg-[color:var(--color-cream)] py-4 md:py-6">
+            <Suspense fallback={null}>
+                <FeedbackAutoOpen
+                    autoOpenedFeedback={autoOpenedFeedback}
+                    onAutoOpen={() => {
+                        captureEvent("feedback_modal_opened", {
+                            origin: "event_reminder_email",
+                            feedback_type: "feedback",
+                        });
+                        setFeedbackOrigin("event_reminder_email");
+                        setFeedbackOpen(true);
+                        setAutoOpenedFeedback(true);
+                    }}
+                />
+            </Suspense>
+
             {!orderResult && (
                 <HeroSection
                     eventDate={eventConfig.event.date}
@@ -57,6 +94,7 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
                             origin: "events_page_non_customer",
                             feedback_type: "feedback",
                         });
+                        setFeedbackOrigin("events_page_non_customer");
                         setFeedbackOpen(true);
                     }}
                 />
@@ -84,7 +122,11 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
                 />
             )}
 
-            <FeedbackModal isOpen={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+            <FeedbackModal
+                isOpen={feedbackOpen}
+                onClose={() => setFeedbackOpen(false)}
+                origin={feedbackOrigin}
+            />
         </main>
     );
 }

@@ -315,6 +315,38 @@ class LocationResponse(BaseModel):
     sort_order: int
 
 
+class CustomerUpdate(BaseModel):
+    name: str
+    email: EmailStr
+    phone_number: Optional[str] = None
+
+    @field_validator("name")
+    @classmethod
+    def customer_name_must_not_be_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped
+
+    @field_validator("email", mode="before")
+    @classmethod
+    def normalize_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped.lower()
+
+    @field_validator("phone_number", mode="before")
+    @classmethod
+    def normalize_phone_number(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+
 class EventBase(BaseModel):
     name: str
     event_date: str
@@ -416,12 +448,14 @@ FEEDBACK_ORIGINS = {
     "contact_us",
     "events_page_non_customer",
     "events_page_customer",
+    "event_reminder_email",
 }
 
 FEEDBACK_ORIGIN_LABELS = {
     "contact_us": "Contact Us",
     "events_page_non_customer": "Events Page (Non-customer)",
     "events_page_customer": "Events Page (Customer)",
+    "event_reminder_email": "Event Reminder Email",
 }
 
 FEEDBACK_TYPES = {
@@ -506,6 +540,19 @@ class FeedbackCommentUpdate(BaseModel):
     admin_comment: Optional[str] = None
 
 
+class CustomerEventReminderRequest(BaseModel):
+    location_ids: list[str]
+    item_ids: list[str]
+
+    @field_validator("location_ids", "item_ids")
+    @classmethod
+    def validate_id_list(cls, values: list[str]) -> list[str]:
+        cleaned = [str(value).strip() for value in values if str(value).strip()]
+        if not cleaned:
+            raise ValueError("At least one selection is required")
+        return list(dict.fromkeys(cleaned))
+
+
 def parse_legacy_contact_subject(message: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     if not message:
         return None, message
@@ -574,9 +621,9 @@ def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional
     if feedback_type not in FEEDBACK_TYPES:
         raise ValueError("Invalid feedback type")
 
-    if origin == "events_page_non_customer":
+    if origin in {"events_page_non_customer", "event_reminder_email"}:
         if feedback_type != "feedback":
-            raise ValueError("Events page non-customer feedback must use type 'feedback'")
+            raise ValueError("Batch feedback must use type 'feedback'")
         if reason is not None and reason not in FEEDBACK_REASONS:
             raise ValueError("Invalid feedback reason")
     else:

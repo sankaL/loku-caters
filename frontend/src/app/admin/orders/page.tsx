@@ -2024,12 +2024,27 @@ export default function AdminOrdersPage() {
                             <button
                               onClick={() => handleConfirm(order.id)}
                               disabled={isConfirming}
-                              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60 whitespace-nowrap"
+                              className="p-1.5 rounded-lg transition-all disabled:opacity-60"
                               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                              aria-label={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
+                              title={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
                             >
                               {isConfirming
-                                ? "Confirming..."
-                                : (order.exclude_email ? "Confirm (No Email)" : "Send Confirmation")
+                                ? (
+                                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                    <circle cx="12" cy="12" r="10" opacity="0.3" />
+                                    <path d="M12 2a10 10 0 0 1 10 10" />
+                                  </svg>
+                                ) : order.exclude_email ? (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M20 6L9 17l-5-5" />
+                                  </svg>
+                                ) : (
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M4 6h16v12H4z" />
+                                    <path d="m4 7 8 6 8-6" />
+                                  </svg>
+                                )
                               }
                             </button>
                           )}

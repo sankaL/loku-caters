@@ -12,6 +12,14 @@ from sqlalchemy.orm import Session
 from models import Customer
 
 
+class CustomerNotFoundError(Exception):
+    pass
+
+
+class CustomerEmailConflictError(Exception):
+    pass
+
+
 def normalize_customer_email(email: Optional[str]) -> Optional[str]:
     if email is None:
         return None
@@ -89,6 +97,52 @@ def _apply_customer_updates(
         customer.updated_at = current_time
 
     return changed
+
+
+def update_customer_from_admin(
+    db: Session,
+    *,
+    customer_id: str,
+    name: Optional[str],
+    email: Optional[str],
+    phone_number: Optional[str],
+    now: Optional[datetime] = None,
+) -> Customer:
+    normalized_name = normalize_customer_name(name)
+    normalized_email = normalize_customer_email(email)
+    normalized_phone = normalize_customer_phone(phone_number)
+    current_time = now or datetime.now(timezone.utc)
+
+    if not normalized_name:
+        raise ValueError("name cannot be empty")
+    if normalized_email is None:
+        raise ValueError("email cannot be empty")
+
+    customer = db.query(Customer).filter_by(id=customer_id).first()
+    if customer is None:
+        raise CustomerNotFoundError(customer_id)
+
+    changed = False
+
+    if normalized_email != customer.email:
+        duplicate_customer = db.query(Customer).filter_by(email=normalized_email).first()
+        if duplicate_customer is not None and duplicate_customer.id != customer.id:
+            raise CustomerEmailConflictError(normalized_email)
+        customer.email = normalized_email
+        changed = True
+
+    if normalized_name != customer.name:
+        customer.name = normalized_name
+        changed = True
+
+    if normalized_phone != customer.phone_number:
+        customer.phone_number = normalized_phone
+        changed = True
+
+    if changed:
+        customer.updated_at = current_time
+
+    return customer
 
 
 def sync_customer_from_contact(

@@ -1,8 +1,24 @@
+from html import escape
+
 import resend
 from config import settings
 from event_config import CURRENCY
 
 resend.api_key = settings.resend_api_key
+
+
+def _send_html_email(*, to_email: str, subject: str, html_body: str) -> None:
+    message_payload = {
+        "from": f"Loku Caters <{settings.from_email}>",
+        "to": [to_email],
+        "subject": subject,
+        "html": html_body,
+    }
+
+    if settings.reply_to_email:
+        message_payload["reply_to"] = settings.reply_to_email
+
+    resend.Emails.send(message_payload)
 
 
 def _normalize_order_lines(order_data: dict) -> list[dict]:
@@ -213,17 +229,11 @@ def send_confirmation(order_data: dict) -> None:
 </html>
 """
 
-    message_payload = {
-        "from": f"Loku Caters <{settings.from_email}>",
-        "to": [email],
-        "subject": f"Your {subject_line_name} is Confirmed",
-        "html": html_body,
-    }
-
-    if settings.reply_to_email:
-        message_payload["reply_to"] = settings.reply_to_email
-
-    resend.Emails.send(message_payload)
+    _send_html_email(
+        to_email=email,
+        subject=f"Your {subject_line_name} is Confirmed",
+        html_body=html_body,
+    )
 
 
 def send_reminder(order_data: dict) -> None:
@@ -299,14 +309,149 @@ def send_reminder(order_data: dict) -> None:
 </html>
 """
 
-    message_payload = {
-        "from": f"Loku Caters <{settings.from_email}>",
-        "to": [email],
-        "subject": f"Pickup Reminder - Your {subject_line_name}",
-        "html": html_body,
-    }
+    _send_html_email(
+        to_email=email,
+        subject=f"Pickup Reminder - Your {subject_line_name}",
+        html_body=html_body,
+    )
 
-    if settings.reply_to_email:
-        message_payload["reply_to"] = settings.reply_to_email
 
-    resend.Emails.send(message_payload)
+def _build_event_reminder_list_html(title: str, items: list[str]) -> str:
+    rows_html = "".join(
+        f"""
+                      <tr>
+                        <td style="font-size:14px;color:#1C1C1A;padding:4px 0 4px 18px;line-height:1.35;">&bull; {escape(item)}</td>
+                      </tr>
+"""
+        for item in items
+    )
+    return f"""
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-radius:12px;overflow:hidden;margin-bottom:20px;">
+                <tr>
+                  <td style="padding:18px 24px 8px;">
+                    <p style="margin:0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#729152;font-weight:600;">{escape(title)}</p>
+                  </td>
+                </tr>
+                <tr>
+                  <td style="padding:4px 24px 18px;">
+                    <table width="100%" cellpadding="0" cellspacing="0">
+{rows_html}
+                    </table>
+                  </td>
+                </tr>
+              </table>
+"""
+
+
+def _build_event_reminder_button_html(label: str, url: str, *, secondary: bool = False) -> str:
+    background = "#ffffff" if secondary else "#F2AF29"
+    color = "#12270F" if secondary else "#ffffff"
+    border = "1px solid #12270F" if secondary else "1px solid #F2AF29"
+    return (
+        f'<a href="{escape(url, quote=True)}" '
+        f'style="display:inline-block;padding:12px 22px;border-radius:999px;'
+        f'background:{background};color:{color};border:{border};font-size:14px;'
+        f'font-weight:700;text-decoration:none;">{escape(label)}</a>'
+    )
+
+
+def send_event_reminder_email(email_data: dict) -> None:
+    if not settings.email_enabled:
+        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
+        return
+
+    email = str(email_data.get("email") or "").strip()
+    if not email:
+        raise ValueError("email is required")
+
+    name = escape(str(email_data.get("name") or "there"))
+    event_date = escape(str(email_data.get("event_date") or ""))
+    order_url = str(email_data.get("order_url") or "").strip()
+    feedback_url = str(email_data.get("feedback_url") or "").strip()
+    location_names = [str(value).strip() for value in email_data.get("pickup_locations") or [] if str(value).strip()]
+    item_names = [str(value).strip() for value in email_data.get("items") or [] if str(value).strip()]
+
+    if not order_url:
+        raise ValueError("order_url is required")
+    if not feedback_url:
+        raise ValueError("feedback_url is required")
+    if not location_names:
+        raise ValueError("pickup_locations must contain at least one location")
+    if not item_names:
+        raise ValueError("items must contain at least one item")
+
+    locations_html = _build_event_reminder_list_html("Pickup Locations", location_names)
+    items_html = _build_event_reminder_list_html("Featured Items", item_names)
+    order_button_html = _build_event_reminder_button_html("Order This Batch", order_url)
+    feedback_button_html = _build_event_reminder_button_html("Cannot Make This Batch?", feedback_url, secondary=True)
+
+    html_body = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Event Reminder - Loku Caters</title>
+</head>
+<body style="margin:0;padding:0;background:#F7F5F0;font-family:'Inter',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(18,39,15,0.08);">
+          <tr>
+            <td style="background:#12270F;padding:36px 40px;text-align:center;">
+              <p style="margin:0;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#729152;font-weight:600;">Loku Caters</p>
+              <h1 style="margin:8px 0 0;font-size:26px;font-weight:700;color:#F7F5F0;font-family:Georgia,serif;">Event Reminder</h1>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:40px;">
+              <p style="margin:0 0 8px;font-size:16px;color:#1C1C1A;">Hi <strong>{name}</strong>,</p>
+              <p style="margin:0 0 18px;font-size:15px;color:#4a4a4a;line-height:1.7;">
+                We wanted to let you know that our next Loku Caters batch is coming up on <strong>{event_date}</strong>.
+                We would love to serve you again, so here is a quick look at the pickup options and featured items for this batch.
+              </p>
+
+{locations_html}
+
+{items_html}
+
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 28px;">
+                <tr>
+                  <td align="left" style="padding-right:10px;padding-bottom:10px;">
+                    {order_button_html}
+                  </td>
+                </tr>
+                <tr>
+                  <td align="left">
+                    {feedback_button_html}
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0;font-size:15px;color:#4a4a4a;line-height:1.7;">
+                If this batch does not work for you, you can share quick feedback from the link above.
+                We use that feedback to plan better dates, menus, and pickup options for future events.
+              </p>
+            </td>
+          </tr>
+
+          <tr>
+            <td style="background:#12270F;padding:24px 40px;text-align:center;">
+              <p style="margin:0;font-size:13px;color:#729152;">2026 Loku Caters - Authentic Sri Lankan Cuisine</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
+    _send_html_email(
+        to_email=email,
+        subject=f"Loku Caters Event Reminder - {event_date}",
+        html_body=html_body,
+    )

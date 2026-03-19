@@ -9,7 +9,13 @@ import { captureEvent } from "@/lib/analytics";
 interface FeedbackModalProps {
   isOpen: boolean;
   onClose: () => void;
+  origin?: FeedbackOrigin;
 }
+
+export type FeedbackOrigin =
+  | "events_page_non_customer"
+  | "events_page_customer"
+  | "event_reminder_email";
 
 const REASON_OPTIONS = [
   { value: "price_too_high", label: "Price too high" },
@@ -25,7 +31,11 @@ const REASON_OPTIONS = [
 const inputClass =
   "w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all";
 
-export default function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
+export default function FeedbackModal({
+  isOpen,
+  onClose,
+  origin = "events_page_non_customer",
+}: FeedbackModalProps) {
   const [name, setName] = useState("");
   const [contact, setContact] = useState("");
   const [reason, setReason] = useState("");
@@ -69,7 +79,7 @@ export default function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          origin: "events_page_non_customer",
+          origin,
           feedback_type: "feedback",
           name: name.trim() || null,
           contact: contact.trim() || null,
@@ -82,7 +92,7 @@ export default function FeedbackModal({ isOpen, onClose }: FeedbackModalProps) {
         return;
       }
       captureEvent("feedback_submitted", {
-        origin: "events_page_non_customer",
+        origin,
         feedback_type: "feedback",
         reason,
       });
