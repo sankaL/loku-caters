@@ -72,7 +72,10 @@ def _build_config_from_event(db: Session, event) -> dict:
     ) if location_ids else []
 
     return {
-        "event": {"date": event.event_date},
+        "event": {
+            "id": int(event.id),
+            "date": event.event_date,
+        },
         "currency": get_currency(),
         "hero_header": event.hero_header,
         "hero_header_sage": event.hero_header_sage,

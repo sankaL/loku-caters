@@ -662,9 +662,6 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                   <p className="text-xs uppercase tracking-[0.2em] font-semibold" style={{ color: "rgba(247,245,240,0.65)" }}>
                     Deals For Your Cart
                   </p>
-                  <h3 className="text-xl font-bold mt-2" style={{ fontFamily: "var(--font-serif)" }}>
-                    Dynamic combo savings
-                  </h3>
                 </div>
                 <div className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "rgba(255,255,255,0.12)", color: "var(--color-cream)" }}>
                   {quoteLoading ? "Checking deals..." : `${quote.applied_combos.length} applied`}
@@ -688,7 +685,7 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                             {combo.preview_text}
                           </p>
                         </div>
-                        <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "#d1fae5", color: "#065f46" }}>
+                        <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--color-bark)", color: "white" }}>
                           Saved {formatCurrency(combo.savings_total)}
                         </span>
                       </div>

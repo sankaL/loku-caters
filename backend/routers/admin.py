@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 import json
 import uuid
+from urllib.parse import urlencode
 from urllib.request import urlopen
 from typing import Any, Optional, Union
 from functools import lru_cache
@@ -9,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from jose import JWTError, jwt
 from pydantic import BaseModel, EmailStr, field_validator, model_validator
 from sqlalchemy import func, or_, case
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from config import settings
@@ -16,19 +18,26 @@ from constants import OrderStatus
 from database import get_db
 from event_config import (
     CURRENCY,
+    NoActiveEventError,
     EventNotFoundError,
+    get_config_from_db,
     get_config_for_event_id_from_db,
 )
 from event_images import get_event_image_catalog, validate_event_image_key
 from models import CateringRequest, CateringRequestComment, Customer, Event, Feedback, Item, Location, Order
 from schemas import (
-    EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
+    CustomerUpdate, EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
     CATERING_REQUEST_STATUSES, FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES,
     FEEDBACK_TYPE_LABELS, CateringRequestCommentCreate, CateringRequestStatusUpdate,
-    FeedbackStatusUpdate, FeedbackCommentUpdate,
+    CustomerEventReminderRequest, FeedbackStatusUpdate, FeedbackCommentUpdate,
 )
-from services.customers import sync_customer_from_contact
-from services.email import send_confirmation, send_reminder
+from services.customers import (
+    CustomerEmailConflictError,
+    CustomerNotFoundError,
+    sync_customer_from_contact,
+    update_customer_from_admin,
+)
+from services.email import send_confirmation, send_event_reminder_email, send_reminder
 from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -1579,6 +1588,118 @@ def admin_list_customers(
     return [_customer_dict(customer) for customer in customers]
 
 
+@router.put("/customers/{customer_id}")
+def admin_update_customer(
+    customer_id: str,
+    body: CustomerUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    try:
+        customer = update_customer_from_admin(
+            db,
+            customer_id=customer_id,
+            name=body.name,
+            email=str(body.email),
+            phone_number=body.phone_number,
+        )
+        db.commit()
+    except CustomerNotFoundError:
+        db.rollback()
+        raise HTTPException(status_code=404, detail="Customer not found")
+    except CustomerEmailConflictError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Customer email already exists")
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Customer email already exists")
+
+    db.refresh(customer)
+    return _customer_dict(customer)
+
+
+@router.post("/customers/{customer_id}/event-reminder")
+def admin_send_customer_event_reminder(
+    customer_id: str,
+    body: CustomerEventReminderRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    customer = db.query(Customer).filter(Customer.id == customer_id).first()
+    if customer is None:
+        raise HTTPException(status_code=404, detail="Customer not found")
+
+    email = (customer.email or "").strip()
+    if not email:
+        return {
+            "status": "skipped_missing_email",
+            "message": "Customer is missing an email address",
+        }
+
+    try:
+        active_config = get_config_from_db(db)
+    except NoActiveEventError:
+        raise HTTPException(status_code=400, detail="No active event")
+
+    locations_by_id = {
+        str(location.get("id")): location
+        for location in active_config.get("locations", [])
+        if isinstance(location, dict) and str(location.get("id") or "").strip()
+    }
+    items_by_id = {
+        str(item.get("id")): item
+        for item in active_config.get("items", [])
+        if isinstance(item, dict) and str(item.get("id") or "").strip()
+    }
+
+    invalid_location_ids = [location_id for location_id in body.location_ids if location_id not in locations_by_id]
+    if invalid_location_ids:
+        raise HTTPException(status_code=400, detail="Selected pickup locations are not part of the active event")
+
+    invalid_item_ids = [item_id for item_id in body.item_ids if item_id not in items_by_id]
+    if invalid_item_ids:
+        raise HTTPException(status_code=400, detail="Selected items are not part of the active event")
+
+    frontend_base_url = settings.frontend_url.rstrip("/")
+    event_id = active_config.get("event", {}).get("id")
+    order_query = {"event_id": event_id} if event_id is not None else {}
+    feedback_query = {**order_query, "feedback": "event-reminder"}
+    order_url = f"{frontend_base_url}/orders"
+    if order_query:
+        order_url = f"{order_url}?{urlencode(order_query)}"
+    feedback_url = f"{frontend_base_url}/orders?{urlencode(feedback_query)}"
+
+    email_data = {
+        "name": customer.name,
+        "email": email,
+        "event_date": str(active_config.get("event", {}).get("date") or ""),
+        "pickup_locations": [
+            str(locations_by_id[location_id].get("name") or location_id)
+            for location_id in body.location_ids
+        ],
+        "items": [
+            str(items_by_id[item_id].get("name") or item_id)
+            for item_id in body.item_ids
+        ],
+        "order_url": order_url,
+        "feedback_url": feedback_url,
+    }
+
+    try:
+        send_event_reminder_email(email_data)
+    except Exception as exc:
+        print(f"[email] Failed to send event reminder to {email}: {exc}")
+        return {
+            "status": "failed",
+            "message": "Failed to send event reminder",
+        }
+
+    return {
+        "status": "sent",
+        "message": "Event reminder sent",
+    }
+
+
 @router.post("/customers/bulk-delete")
 def admin_bulk_delete_customers(
     body: BulkCustomerDeleteRequest,
@@ -1816,12 +1937,12 @@ def admin_list_feedback(
 
     reason_counts: dict[str, int] = {}
     for row in all_rows:
-        if row.origin != "events_page_non_customer":
+        if row.origin not in {"events_page_non_customer", "event_reminder_email"}:
             continue
         if row.reason:
             reason_counts[row.reason] = reason_counts.get(row.reason, 0) + 1
 
-    pre_order_count = origin_counts["events_page_non_customer"]
+    pre_order_count = origin_counts["events_page_non_customer"] + origin_counts["event_reminder_email"]
     reason_metrics = [
         {
             "reason": r,

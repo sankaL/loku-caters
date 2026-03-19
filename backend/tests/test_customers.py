@@ -2,6 +2,7 @@ import os
 import sys
 import unittest
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 from sqlalchemy.exc import IntegrityError
 
@@ -11,10 +12,13 @@ os.environ.setdefault("RESEND_API_KEY", "test-key")
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from services.customers import (  # noqa: E402
+    CustomerEmailConflictError,
+    CustomerNotFoundError,
     build_customer_backfill_rows,
     merge_pickup_locations,
     normalize_customer_email,
     sync_customer_from_contact,
+    update_customer_from_admin,
 )
 
 
@@ -28,9 +32,8 @@ class FakeQuery:
         return self
 
     def first(self):
-        email = self.filters.get("email")
         for item in self.items:
-            if getattr(item, "email", None) == email:
+            if all(getattr(item, key, None) == value for key, value in self.filters.items()):
                 return item
         return None
 
@@ -59,6 +62,9 @@ class FakeSession:
     def flush(self):
         return None
 
+    def rollback(self):
+        return None
+
 
 class RaceSession(FakeSession):
     def __init__(self, conflicting_customer):
@@ -80,6 +86,19 @@ class RaceSession(FakeSession):
 
 
 class CustomerServiceTests(unittest.TestCase):
+    def make_customer(self, **overrides):
+        customer = {
+            "id": "customer-1",
+            "email": "test@example.com",
+            "name": "Test Customer",
+            "phone_number": "111-222-3333",
+            "pickup_locations": ["Markham"],
+            "created_at": datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc),
+            "updated_at": datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc),
+        }
+        customer.update(overrides)
+        return SimpleNamespace(**customer)
+
     def test_normalize_customer_email_trims_and_lowercases(self):
         self.assertEqual(normalize_customer_email("  Test@Example.COM "), "test@example.com")
         self.assertIsNone(normalize_customer_email("   "))
@@ -154,18 +173,15 @@ class CustomerServiceTests(unittest.TestCase):
     def test_sync_customer_from_contact_recovers_from_concurrent_insert(self):
         created_at = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
         updated_at = datetime(2026, 3, 19, 12, 0, tzinfo=timezone.utc)
-        conflicting_customer = type(
-            "ExistingCustomer",
-            (),
-            {
-                "email": "test@example.com",
-                "name": "Existing Name",
-                "phone_number": "111-222-3333",
-                "pickup_locations": ["Markham"],
-                "created_at": created_at,
-                "updated_at": created_at,
-            },
-        )()
+        conflicting_customer = SimpleNamespace(
+            id="customer-1",
+            email="test@example.com",
+            name="Existing Name",
+            phone_number="111-222-3333",
+            pickup_locations=["Markham"],
+            created_at=created_at,
+            updated_at=created_at,
+        )
         session = RaceSession(conflicting_customer)
 
         customer = sync_customer_from_contact(
@@ -184,6 +200,100 @@ class CustomerServiceTests(unittest.TestCase):
         self.assertEqual(customer.created_at, created_at)
         self.assertEqual(customer.updated_at, updated_at)
         self.assertEqual(session.customers, [conflicting_customer])
+
+    def test_update_customer_from_admin_updates_contact_fields(self):
+        session = FakeSession()
+        customer = self.make_customer()
+        session.customers = [customer]
+        updated_at = datetime(2026, 3, 20, 9, 30, tzinfo=timezone.utc)
+
+        result = update_customer_from_admin(
+            session,
+            customer_id="customer-1",
+            name="Updated Name",
+            email="UPDATED@example.com",
+            phone_number="222-333-4444",
+            now=updated_at,
+        )
+
+        self.assertIs(result, customer)
+        self.assertEqual(result.email, "updated@example.com")
+        self.assertEqual(result.name, "Updated Name")
+        self.assertEqual(result.phone_number, "222-333-4444")
+        self.assertEqual(result.pickup_locations, ["Markham"])
+        self.assertEqual(result.updated_at, updated_at)
+
+    def test_update_customer_from_admin_clears_phone_number(self):
+        session = FakeSession()
+        created_at = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
+        customer = self.make_customer(phone_number="111-222-3333", created_at=created_at, updated_at=created_at)
+        session.customers = [customer]
+        updated_at = datetime(2026, 3, 20, 9, 30, tzinfo=timezone.utc)
+
+        result = update_customer_from_admin(
+            session,
+            customer_id="customer-1",
+            name="Test Customer",
+            email="test@example.com",
+            phone_number=None,
+            now=updated_at,
+        )
+
+        self.assertIs(result, customer)
+        self.assertIsNone(result.phone_number)
+        self.assertEqual(result.updated_at, updated_at)
+
+    def test_update_customer_from_admin_keeps_updated_at_for_noop_save(self):
+        session = FakeSession()
+        created_at = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
+        customer = self.make_customer(created_at=created_at, updated_at=created_at)
+        session.customers = [customer]
+
+        result = update_customer_from_admin(
+            session,
+            customer_id="customer-1",
+            name="Test Customer",
+            email="test@example.com",
+            phone_number="111-222-3333",
+            now=datetime(2026, 3, 20, 9, 30, tzinfo=timezone.utc),
+        )
+
+        self.assertIs(result, customer)
+        self.assertEqual(result.updated_at, created_at)
+
+    def test_update_customer_from_admin_rejects_duplicate_email(self):
+        session = FakeSession()
+        customer = self.make_customer(id="customer-1", email="test@example.com")
+        conflicting = self.make_customer(
+            id="customer-2",
+            email="other@example.com",
+            name="Other Customer",
+            phone_number="999-999-9999",
+        )
+        session.customers = [customer, conflicting]
+
+        with self.assertRaises(CustomerEmailConflictError):
+            update_customer_from_admin(
+                session,
+                customer_id="customer-1",
+                name="Test Customer",
+                email="OTHER@example.com",
+                phone_number="111-222-3333",
+            )
+
+        self.assertEqual(customer.email, "test@example.com")
+
+    def test_update_customer_from_admin_raises_for_missing_customer(self):
+        session = FakeSession()
+
+        with self.assertRaises(CustomerNotFoundError):
+            update_customer_from_admin(
+                session,
+                customer_id="missing",
+                name="Test Customer",
+                email="test@example.com",
+                phone_number="111-222-3333",
+            )
 
     def test_build_customer_backfill_rows_groups_and_picks_latest_contact_data(self):
         rows = build_customer_backfill_rows(

@@ -18,7 +18,7 @@ interface FeedbackMetric {
   pct: number;
 }
 
-type FeedbackOrigin = "contact_us" | "events_page_non_customer" | "events_page_customer";
+type FeedbackOrigin = "contact_us" | "events_page_non_customer" | "events_page_customer" | "event_reminder_email";
 type FeedbackType = "general_question" | "feedback" | "collaboration" | "other";
 
 interface FeedbackItem {
@@ -93,6 +93,12 @@ const ORIGIN_STYLES: Record<FeedbackOrigin, { bg: string; color: string; border:
     border: "1px solid #c8ddb4",
     label: "Events Page (Customer)",
   },
+  event_reminder_email: {
+    bg: "#eef2ff",
+    color: "#4338ca",
+    border: "1px solid #c7d2fe",
+    label: "Event Reminder Email",
+  },
 };
 
 const TYPE_STYLES: Record<FeedbackType, { bg: string; color: string; border: string; label: string }> = {
@@ -127,6 +133,7 @@ function buildOriginCounts(items: FeedbackItem[]): Record<FeedbackOrigin, number
     contact_us: items.filter((item) => item.origin === "contact_us").length,
     events_page_non_customer: items.filter((item) => item.origin === "events_page_non_customer").length,
     events_page_customer: items.filter((item) => item.origin === "events_page_customer").length,
+    event_reminder_email: items.filter((item) => item.origin === "event_reminder_email").length,
   };
 }
 
@@ -676,15 +683,17 @@ export default function AdminFeedbackPage() {
     || !!searchQuery;
 
   function recomputeReasonMetrics(items: FeedbackItem[], template: FeedbackMetric[]): FeedbackMetric[] {
-    const nonCustomerCount = items.filter((i) => i.origin === "events_page_non_customer").length;
+    const batchFeedbackCount = items.filter(
+      (i) => i.origin === "events_page_non_customer" || i.origin === "event_reminder_email"
+    ).length;
     return template.map((metric) => {
       const count = items.filter(
-        (i) => i.origin === "events_page_non_customer" && i.reason === metric.reason
+        (i) => (i.origin === "events_page_non_customer" || i.origin === "event_reminder_email") && i.reason === metric.reason
       ).length;
       return {
         ...metric,
         count,
-        pct: nonCustomerCount > 0 ? Math.round((count / nonCustomerCount) * 100) : 0,
+        pct: batchFeedbackCount > 0 ? Math.round((count / batchFeedbackCount) * 100) : 0,
       };
     });
   }
@@ -1097,6 +1106,43 @@ export default function AdminFeedbackPage() {
             </p>
           </CompactMetricCard>
 
+          <CompactMetricCard
+            onClick={() => setOriginFilter(originFilter === "event_reminder_email" ? "all" : "event_reminder_email")}
+            selected={originFilter === "event_reminder_email"}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--color-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                Reminder Email
+              </p>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4338ca" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
+                <polyline points="22,6 12,13 2,6" />
+              </svg>
+            </div>
+            <p
+              style={{
+                fontSize: "clamp(24px, 2vw, 28px)",
+                fontWeight: 700,
+                color: "var(--color-forest)",
+                fontFamily: "var(--font-serif)",
+                lineHeight: 1,
+              }}
+            >
+              {data.origin_counts.event_reminder_email}
+            </p>
+            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
+              Event reminder responses
+            </p>
+          </CompactMetricCard>
+
           {sortedMetrics[0] && (() => {
             const m = sortedMetrics[0];
             const colors = REASON_COLORS[m.reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" };
@@ -1142,7 +1188,7 @@ export default function AdminFeedbackPage() {
       )}
 
       {/* Reason breakdown (non-customer only) */}
-      {!loading && data && data.origin_counts.events_page_non_customer > 0 && (
+      {!loading && data && (data.origin_counts.events_page_non_customer + data.origin_counts.event_reminder_email) > 0 && (
         <div
           style={{
             background: "white",
@@ -1153,7 +1199,7 @@ export default function AdminFeedbackPage() {
           }}
         >
           <p style={{ fontSize: 12, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16 }}>
-            Pre-order Reason Breakdown
+            Batch Feedback Reason Breakdown
           </p>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {sortedMetrics.map((m) => {
@@ -1231,6 +1277,7 @@ export default function AdminFeedbackPage() {
           <option value="contact_us">Contact Us</option>
           <option value="events_page_non_customer">Events Page (Non-customer)</option>
           <option value="events_page_customer">Events Page (Customer)</option>
+          <option value="event_reminder_email">Event Reminder Email</option>
         </select>
 
         <select

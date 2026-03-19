@@ -41,7 +41,10 @@ export interface Location {
 }
 
 export interface EventConfig {
-  event: { date: string };
+  event: {
+    id?: number | null;
+    date: string;
+  };
   currency: string;
   hero_header: string;
   hero_header_sage: string;
@@ -60,8 +63,14 @@ export interface EventConfig {
   locations: Location[];
 }
 
-export async function fetchEventConfig(): Promise<EventConfig | null> {
-  const res = await fetch(`${API_URL}/api/config`, { cache: "no-store" });
+export async function fetchEventConfig(eventId?: number | null): Promise<EventConfig | null> {
+  const params = new URLSearchParams();
+  if (typeof eventId === "number" && Number.isFinite(eventId)) {
+    params.set("event_id", String(eventId));
+  }
+
+  const query = params.size > 0 ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_URL}/api/config${query}`, { cache: "no-store" });
   if (res.status === 404) return null;
   if (!res.ok) throw new Error("Failed to load event configuration");
   return res.json();
