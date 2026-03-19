@@ -789,6 +789,63 @@ def _customer_dict(customer: Customer) -> dict:
     }
 
 
+def _normalize_group_text(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    stripped = str(value).strip()
+    return stripped or None
+
+
+def _normalize_group_email(value: Optional[str]) -> Optional[str]:
+    normalized = _normalize_group_text(value)
+    return normalized.lower() if normalized is not None else None
+
+
+def _validate_group_order_payload(existing_group_orders: list[Order], body: AdminOrderCreate) -> None:
+    if not existing_group_orders:
+        return
+
+    first_order = existing_group_orders[0]
+    mismatched_fields: list[str] = []
+    shared_fields = (
+        ("name", _normalize_group_text(first_order.name), _normalize_group_text(body.name)),
+        ("email", _normalize_group_email(first_order.email), _normalize_group_email(str(body.email) if body.email is not None else None)),
+        ("phone_number", _normalize_group_text(first_order.phone_number), _normalize_group_text(body.phone_number)),
+        ("pickup_location", _normalize_group_text(first_order.pickup_location), _normalize_group_text(body.pickup_location)),
+        ("pickup_time_slot", _normalize_group_text(first_order.pickup_time_slot), _normalize_group_text(body.pickup_time_slot)),
+        ("exclude_email", bool(first_order.exclude_email), bool(body.exclude_email)),
+    )
+    for field_name, existing_value, incoming_value in shared_fields:
+        if existing_value != incoming_value:
+            mismatched_fields.append(field_name)
+
+    if mismatched_fields:
+        raise HTTPException(
+            status_code=400,
+            detail=f"group_id must reuse the same bundle details: {', '.join(mismatched_fields)}",
+        )
+
+
+def _reset_group_payment_state(orders: list[Order]) -> None:
+    for order in orders:
+        order.paid = False
+        order.payment_method = None
+        order.payment_method_other = None
+
+
+def _already_confirmed_response(order: Order, group_orders: list[Order]) -> Optional[dict[str, Any]]:
+    if not group_orders or not all(group_order.status == OrderStatus.CONFIRMED for group_order in group_orders):
+        return None
+
+    return {
+        "success": True,
+        "order_id": order.id,
+        "status": order.status,
+        "email_sent": False,
+        "email_suppressed": any(group_order.exclude_email for group_order in group_orders),
+    }
+
+
 def _reminder_result(order: Order, *, status: str, message: str) -> dict:
     email = None
     if order.email and str(order.email).strip():
@@ -1109,10 +1166,11 @@ def admin_create_order(
         if body.group_id
         else []
     )
+    _validate_group_order_payload(existing_group_orders, body)
     inherited_status = existing_group_orders[0].status if existing_group_orders else OrderStatus.PENDING
-    inherited_paid = bool(existing_group_orders[0].paid) if existing_group_orders else False
-    inherited_payment_method = existing_group_orders[0].payment_method if existing_group_orders else None
-    inherited_payment_method_other = existing_group_orders[0].payment_method_other if existing_group_orders else None
+    inherited_paid = False
+    inherited_payment_method = None
+    inherited_payment_method_other = None
 
     order = Order(
         id=str(uuid.uuid4()),
@@ -1144,6 +1202,7 @@ def admin_create_order(
         group_orders = db.query(Order).filter(Order.group_id == order.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
         if any(int(group_order.event_id) != int(event.id) for group_order in group_orders):
             raise HTTPException(status_code=400, detail="group_id cannot span multiple events")
+        _reset_group_payment_state(group_orders)
         _reprice_order_group(db=db, event=event, orders=group_orders)
     else:
         pricing = _quote_event_lines(
@@ -1363,8 +1422,9 @@ def admin_confirm_order(
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
     group_orders = _get_order_group_rows(db, order)
-    if all(group_order.status == OrderStatus.CONFIRMED for group_order in group_orders):
-        raise HTTPException(status_code=409, detail="Order already confirmed")
+    already_confirmed = _already_confirmed_response(order, group_orders)
+    if already_confirmed is not None:
+        return already_confirmed
     if any(group_order.status not in {OrderStatus.PENDING, OrderStatus.CONFIRMED} for group_order in group_orders):
         raise HTTPException(status_code=409, detail="Only pending orders can be confirmed")
 

@@ -578,9 +578,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
       const existingRows = [...(editScopeOrders.length > 0 ? editScopeOrders : [order])];
       const targetStatus = order.status;
-      const targetPaid = !!order.paid;
-      const targetPaymentMethod = order.payment_method;
-      const targetPaymentMethodOther = order.payment_method_other;
       const lockedItemIds = new Set(editLegacyItems.map((item) => item.id));
       const lockedExistingRows = existingRows.filter((row) => lockedItemIds.has(row.item_id));
 
@@ -700,28 +697,6 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           });
           if (!statusRes.ok) {
             throw new Error(await getApiErrorMessage(statusRes, "Failed to inherit order status"));
-          }
-        }
-
-        if (targetPaid && targetStatus !== "pending" && targetPaymentMethod) {
-          const paymentPayload: {
-            paid: boolean;
-            payment_method: "cash" | "etransfer" | "other";
-            payment_method_other?: string;
-          } = {
-            paid: true,
-            payment_method: targetPaymentMethod as "cash" | "etransfer" | "other",
-          };
-          if (targetPaymentMethod === "other" && targetPaymentMethodOther) {
-            paymentPayload.payment_method_other = targetPaymentMethodOther;
-          }
-          const paymentRes = await fetch(`${API_URL}/api/admin/orders/${createdRow.id}/payment`, {
-            method: "PATCH",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify(paymentPayload),
-          });
-          if (!paymentRes.ok) {
-            throw new Error(await getApiErrorMessage(paymentRes, "Failed to inherit payment state"));
           }
         }
 
