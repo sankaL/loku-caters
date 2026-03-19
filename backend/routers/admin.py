@@ -1661,8 +1661,13 @@ def admin_send_customer_event_reminder(
         raise HTTPException(status_code=400, detail="Selected items are not part of the active event")
 
     frontend_base_url = settings.frontend_url.rstrip("/")
+    event_id = active_config.get("event", {}).get("id")
+    order_query = {"event_id": event_id} if event_id is not None else {}
+    feedback_query = {**order_query, "feedback": "event-reminder"}
     order_url = f"{frontend_base_url}/orders"
-    feedback_url = f"{order_url}?{urlencode({'feedback': 'event-reminder'})}"
+    if order_query:
+        order_url = f"{order_url}?{urlencode(order_query)}"
+    feedback_url = f"{frontend_base_url}/orders?{urlencode(feedback_query)}"
 
     email_data = {
         "name": customer.name,

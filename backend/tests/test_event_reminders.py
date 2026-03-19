@@ -93,7 +93,7 @@ class EventReminderTests(unittest.TestCase):
         db = FakeSession(SimpleNamespace(id="customer-1", name="A", email="a@example.com"))
         body = CustomerEventReminderRequest(location_ids=["loc-1"], item_ids=["item-1"])
         active_config = {
-            "event": {"date": "April 2, 2026"},
+            "event": {"id": 42, "date": "April 2, 2026"},
             "locations": [{"id": "loc-1", "name": "Markham"}],
             "items": [{"id": "item-1", "name": "Lamprais"}],
         }
@@ -109,8 +109,9 @@ class EventReminderTests(unittest.TestCase):
         self.assertEqual(payload["event_date"], "April 2, 2026")
         self.assertEqual(payload["pickup_locations"], ["Markham"])
         self.assertEqual(payload["items"], ["Lamprais"])
-        self.assertTrue(payload["order_url"].endswith("/orders"))
+        self.assertIn("event_id=42", payload["order_url"])
         self.assertIn("feedback=event-reminder", payload["feedback_url"])
+        self.assertIn("event_id=42", payload["feedback_url"])
 
     def test_event_reminder_mailer_uses_resend_send(self):
         email_data = {

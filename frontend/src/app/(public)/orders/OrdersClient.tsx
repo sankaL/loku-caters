@@ -35,14 +35,7 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
     const [feedbackOpen, setFeedbackOpen] = useState(false);
     const [feedbackOrigin, setFeedbackOrigin] = useState<FeedbackOrigin>("events_page_non_customer");
     const [autoOpenedFeedback, setAutoOpenedFeedback] = useState(false);
-
-    if (!eventConfig) {
-        return (
-            <main className="flex-1 bg-[color:var(--color-cream)]">
-                <NoEventPage />
-            </main>
-        );
-    }
+    const orderingAvailable = Boolean(eventConfig?.is_active);
 
     function handleOrderSuccess(result: CheckoutResult) {
         result.order.lines.forEach((line) => {
@@ -77,18 +70,18 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
                 />
             </Suspense>
 
-            {!orderResult && (
+            {orderingAvailable && !orderResult && (
                 <HeroSection
-                    eventDate={eventConfig.event.date}
-                    heroHeader={eventConfig.hero_header}
-                    heroHeaderSage={eventConfig.hero_header_sage}
-                    heroSubheader={eventConfig.hero_subheader}
-                    promoDetails={eventConfig.promo_details}
-                    tooltipEnabled={eventConfig.tooltip_enabled}
-                    tooltipHeader={eventConfig.tooltip_header}
-                    tooltipBody={eventConfig.tooltip_body}
-                    tooltipImagePath={eventConfig.tooltip_image_path}
-                    heroSideImagePath={eventConfig.hero_side_image_path}
+                    eventDate={eventConfig?.event.date ?? ""}
+                    heroHeader={eventConfig?.hero_header ?? ""}
+                    heroHeaderSage={eventConfig?.hero_header_sage ?? ""}
+                    heroSubheader={eventConfig?.hero_subheader ?? ""}
+                    promoDetails={eventConfig?.promo_details ?? null}
+                    tooltipEnabled={eventConfig?.tooltip_enabled ?? false}
+                    tooltipHeader={eventConfig?.tooltip_header ?? null}
+                    tooltipBody={eventConfig?.tooltip_body ?? null}
+                    tooltipImagePath={eventConfig?.tooltip_image_path ?? null}
+                    heroSideImagePath={eventConfig?.hero_side_image_path ?? null}
                     onFeedbackClick={() => {
                         captureEvent("feedback_modal_opened", {
                             origin: "events_page_non_customer",
@@ -100,24 +93,28 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
                 />
             )}
 
-            <div className="max-w-2xl mx-auto px-6 mb-8">
-                <div className="text-center mb-10 animate-fade-up">
-                    <div className="flex items-center gap-4">
-                        <div className="flex-1 h-px bg-[color:var(--color-border)]" />
-                        <p className="text-xs font-semibold tracking-widest uppercase text-[color:var(--color-sage)]">
-                            {orderResult ? "Order Confirmed" : "Pre-Order Below"}
-                        </p>
-                        <div className="flex-1 h-px bg-[color:var(--color-border)]" />
+            {orderingAvailable ? (
+                <div className="max-w-2xl mx-auto px-6 mb-8">
+                    <div className="text-center mb-10 animate-fade-up">
+                        <div className="flex items-center gap-4">
+                            <div className="flex-1 h-px bg-[color:var(--color-border)]" />
+                            <p className="text-xs font-semibold tracking-widest uppercase text-[color:var(--color-sage)]">
+                                {orderResult ? "Order Confirmed" : "Pre-Order Below"}
+                            </p>
+                            <div className="flex-1 h-px bg-[color:var(--color-border)]" />
+                        </div>
                     </div>
                 </div>
-            </div>
+            ) : null}
 
-            {orderResult ? (
+            {!orderingAvailable ? (
+                <NoEventPage />
+            ) : orderResult ? (
                 <SuccessView result={orderResult} />
             ) : (
                 <OrderForm
-                    items={eventConfig.items}
-                    locations={eventConfig.locations}
+                    items={eventConfig?.items ?? []}
+                    locations={eventConfig?.locations ?? []}
                     onSuccess={handleOrderSuccess}
                 />
             )}
