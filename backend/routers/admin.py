@@ -37,7 +37,7 @@ from services.customers import (
     sync_customer_from_contact,
     update_customer_from_admin,
 )
-from services.email import send_confirmation, send_event_reminder_email, send_reminder
+from services.email import send_confirmation, send_event_reminder_email, send_payment_reminder, send_reminder
 from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -966,6 +966,99 @@ def _send_order_reminder(
     )
 
 
+def _prepare_payment_reminder_order_data(
+    order: Order,
+    db: Session,
+    *,
+    events_by_id: dict[int, Event],
+    active_event_date: str,
+    active_etransfer: dict,
+) -> tuple[Optional[dict], Optional[dict], list[Order]]:
+    group_orders = _get_order_group_rows(db, order)
+
+    if any(group_order.status != OrderStatus.CONFIRMED for group_order in group_orders):
+        return _reminder_result(
+            order,
+            status="skipped_not_confirmed",
+            message="Only confirmed unpaid orders can be reminded",
+        ), None, group_orders
+
+    if all(group_order.paid for group_order in group_orders):
+        return _reminder_result(
+            order,
+            status="skipped_paid",
+            message="Order is already marked paid",
+        ), None, group_orders
+
+    if any(group_order.exclude_email for group_order in group_orders):
+        return _reminder_result(
+            order,
+            status="skipped_excluded",
+            message="Excluded from email",
+        ), None, group_orders
+
+    if not order.email or not str(order.email).strip():
+        return _reminder_result(
+            order,
+            status="skipped_missing_email",
+            message="Missing email",
+        ), None, group_orders
+
+    location = db.query(Location).filter(
+        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
+    ).first()
+    address = location.address if location else ""
+
+    event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
+    event_date = event.event_date if event else active_event_date
+    etransfer = {
+        "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
+        "email": event.etransfer_email if event else active_etransfer["email"],
+    }
+
+    order_data = _group_email_order_data(orders=group_orders, event=event, address=address)
+    order_data["event_date"] = event_date
+    order_data["etransfer_enabled"] = etransfer["enabled"]
+    order_data["etransfer_email"] = etransfer["email"]
+
+    return None, order_data, group_orders
+
+
+def _send_order_payment_reminder(
+    order: Order,
+    db: Session,
+    *,
+    events_by_id: dict[int, Event],
+    active_event_date: str,
+    active_etransfer: dict,
+) -> dict:
+    skipped_result, order_data, _group_orders = _prepare_payment_reminder_order_data(
+        order,
+        db,
+        events_by_id=events_by_id,
+        active_event_date=active_event_date,
+        active_etransfer=active_etransfer,
+    )
+    if skipped_result is not None:
+        return skipped_result
+
+    try:
+        send_payment_reminder(order_data)
+    except Exception as exc:
+        print(f"[email] Failed to send payment reminder to {order.email}: {exc}")
+        return _reminder_result(
+            order,
+            status="failed",
+            message="Failed to send payment reminder",
+        )
+
+    return _reminder_result(
+        order,
+        status="sent",
+        message="Payment reminder sent",
+    )
+
+
 def _event_items_for_pricing(db: Session, event: Event) -> list[Item]:
     item_ids = event.item_ids or []
     if not item_ids:
@@ -1340,6 +1433,26 @@ def admin_send_single_reminder(
     if result["status"] == "sent":
         db.commit()
     return result
+
+
+@router.post("/orders/{order_id}/payment-remind")
+def admin_send_single_payment_reminder(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, [order])
+    return _send_order_payment_reminder(
+        order,
+        db,
+        events_by_id=events_by_id,
+        active_event_date=active_event_date,
+        active_etransfer=active_etransfer,
+    )
 
 
 @router.get("/orders/{order_id}")

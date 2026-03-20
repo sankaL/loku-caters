@@ -316,6 +316,85 @@ def send_reminder(order_data: dict) -> None:
     )
 
 
+def send_payment_reminder(order_data: dict) -> None:
+    if not settings.email_enabled:
+        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
+        return
+
+    name = order_data["name"]
+    email = order_data["email"]
+    event_date = order_data.get("event_date", "")
+    etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
+    summary_html = _build_order_summary_html(order_data)
+    order_lines = _normalize_order_lines(order_data)
+    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
+
+    html_body = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Payment Reminder - Loku Caters</title>
+</head>
+<body style="margin:0;padding:0;background:#F7F5F0;font-family:'Inter',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;padding:40px 0;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(18,39,15,0.08);">
+
+          <!-- Header -->
+          <tr>
+            <td style="background:#12270F;padding:36px 40px;text-align:center;">
+              <p style="margin:0;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#729152;font-weight:600;">Loku Caters</p>
+              <h1 style="margin:8px 0 0;font-size:26px;font-weight:700;color:#F7F5F0;font-family:Georgia,serif;">Payment Reminder</h1>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="padding:40px;">
+              <p style="margin:0 0 8px;font-size:16px;color:#1C1C1A;">Hello <strong>{name}</strong>,</p>
+              <p style="margin:0 0 14px;font-size:15px;color:#4a4a4a;line-height:1.6;">
+                This is an automated reminder that we have a Loku Caters order on file that is currently marked as unpaid.
+                Please review the order details below.
+              </p>
+              <p style="margin:0 0 28px;font-size:15px;color:#4a4a4a;line-height:1.6;">
+                If you have already sent payment or otherwise resolved this order, please disregard this message.
+                {f' Your scheduled pickup is on <strong>{event_date}</strong>.' if event_date else ''}
+              </p>
+{summary_html}
+
+{etransfer_section_html}
+
+              <p style="margin:0;font-size:15px;color:#4a4a4a;line-height:1.6;">
+                If you have any questions, simply reply to this email.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background:#12270F;padding:24px 40px;text-align:center;">
+              <p style="margin:0;font-size:13px;color:#729152;">2026 Loku Caters - Authentic Sri Lankan Cuisine</p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+
+    _send_html_email(
+        to_email=email,
+        subject=f"Payment Reminder - Your {subject_line_name}",
+        html_body=html_body,
+    )
+
+
 def _build_event_reminder_list_html(title: str, items: list[str]) -> str:
     rows_html = "".join(
         f"""
