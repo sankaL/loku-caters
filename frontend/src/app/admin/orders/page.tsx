@@ -17,6 +17,7 @@ import {
 interface Order {
   id: string;
   event_id: number;
+  group_id: string | null;
   name: string;
   email: string | null;
   phone_number: string | null;
@@ -156,6 +157,13 @@ const OtherPayIcon = () => (
   </svg>
 );
 
+const BellIcon = ({ width = 16, height = 16 }: { width?: number; height?: number }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+    <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </svg>
+);
+
 interface AddOrderForm {
   name: string;
   email: string;
@@ -203,6 +211,24 @@ interface ReminderSendResponse {
   reminded: boolean;
 }
 
+type PaymentReminderApiStatus =
+  | "sent"
+  | "failed"
+  | "skipped_not_confirmed"
+  | "skipped_paid"
+  | "skipped_excluded"
+  | "skipped_missing_email";
+
+interface PaymentReminderSendResponse {
+  success: boolean;
+  order_id: string;
+  status: PaymentReminderApiStatus;
+  message: string;
+  email: string | null;
+  name: string;
+  reminded: boolean;
+}
+
 type ReminderQueueStatus = "queued" | "sending" | "retrying" | "sent" | "failed" | "skipped";
 
 interface ReminderQueueItem {
@@ -228,6 +254,15 @@ interface ReminderRunState {
   items: ReminderQueueItem[];
 }
 
+interface PaymentReminderRecipient {
+  recipientKey: string;
+  orderId: string;
+  name: string;
+  email: string;
+  pickupLabel: string;
+  disabledReason: string | null;
+}
+
 const EMPTY_REMINDER_RUN: ReminderRunState = {
   isRunning: false,
   isComplete: false,
@@ -241,7 +276,14 @@ const EMPTY_REMINDER_RUN: ReminderRunState = {
 };
 
 const REMINDER_SEND_INTERVAL_MS = 1000;
+const PAYMENT_REMINDER_SEND_INTERVAL_MS = 500;
 const REMINDER_RETRY_BACKOFF_MS = [1000, 2000] as const;
+
+type QueueAttemptResult = {
+  outcome: "sent" | "skipped" | "retryable_failed" | "failed";
+  message: string;
+  resultCode: string | null;
+};
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -319,6 +361,18 @@ function getReminderStatusBadge(item: ReminderQueueItem): { label: string; bg: s
         border: "var(--color-border)",
       };
   }
+}
+
+function getPaymentReminderUnavailableReason(order: Order): string | null {
+  if (order.paid) return "Payment reminder is only available for unpaid orders";
+  if (order.status !== "confirmed") return "Only confirmed unpaid orders can be reminded";
+  if (order.exclude_email) return "Email is excluded for this order";
+  if (!(order.email ?? "").trim()) return "Customer is missing an email address";
+  return null;
+}
+
+function getPaymentReminderRecipientKey(order: Pick<Order, "id" | "group_id">): string {
+  return order.group_id ? `group:${order.group_id}` : `order:${order.id}`;
 }
 
 function normalizeCsvHeader(value: string): string {
@@ -406,6 +460,14 @@ export default function AdminOrdersPage() {
   const [reminderRun, setReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
   const [remindSearch, setRemindSearch] = useState("");
   const remindLoading = reminderRun.isRunning;
+
+  // Payment reminder modal
+  const [showPaymentRemindModal, setShowPaymentRemindModal] = useState(false);
+  const [paymentRemindSelections, setPaymentRemindSelections] = useState<Set<string>>(new Set());
+  const [paymentReminderRun, setPaymentReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
+  const [paymentRemindSearch, setPaymentRemindSearch] = useState("");
+  const [paymentReminderTarget, setPaymentReminderTarget] = useState<Order | null>(null);
+  const paymentReminderLoading = paymentReminderRun.isRunning;
 
   // Reset selection when filter/orders change
   useEffect(() => { setSelectedIds(new Set()); }, [filter, paymentFilter, eventFilter, locationFilter, orders]);
@@ -648,6 +710,31 @@ export default function AdminOrdersPage() {
     [confirmedOrders]
   );
   const ineligibleReminderCount = confirmedOrders.length - eligibleReminderOrders.length;
+  const paymentReminderRecipients = useMemo<PaymentReminderRecipient[]>(() => {
+    const seenRecipientKeys = new Set<string>();
+    const recipients: PaymentReminderRecipient[] = [];
+
+    for (const order of orders) {
+      const recipientKey = getPaymentReminderRecipientKey(order);
+      if (seenRecipientKeys.has(recipientKey)) continue;
+      seenRecipientKeys.add(recipientKey);
+      recipients.push({
+        recipientKey,
+        orderId: order.id,
+        name: order.name,
+        email: (order.email ?? "").trim(),
+        pickupLabel: `${order.pickup_location} - ${order.pickup_time_slot}`,
+        disabledReason: getPaymentReminderUnavailableReason(order),
+      });
+    }
+
+    return recipients;
+  }, [orders]);
+  const eligiblePaymentReminderRecipients = useMemo(
+    () => paymentReminderRecipients.filter((recipient) => !recipient.disabledReason),
+    [paymentReminderRecipients]
+  );
+  const ineligiblePaymentReminderCount = paymentReminderRecipients.length - eligiblePaymentReminderRecipients.length;
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -869,6 +956,21 @@ export default function AdminOrdersPage() {
     setShowRemindModal(true);
   }
 
+  function closePaymentRemindModal() {
+    if (paymentReminderLoading) return;
+    setShowPaymentRemindModal(false);
+    setPaymentRemindSearch("");
+    setPaymentRemindSelections(new Set());
+    setPaymentReminderRun(EMPTY_REMINDER_RUN);
+  }
+
+  function openPaymentRemindModal() {
+    setPaymentRemindSelections(new Set(eligiblePaymentReminderRecipients.map((recipient) => recipient.orderId)));
+    setPaymentRemindSearch("");
+    setPaymentReminderRun(EMPTY_REMINDER_RUN);
+    setShowPaymentRemindModal(true);
+  }
+
   function buildReminderItems(orderIds: string[]): ReminderQueueItem[] {
     const ordersById = new Map(orders.map((order) => [order.id, order]));
 
@@ -889,10 +991,41 @@ export default function AdminOrdersPage() {
     });
   }
 
+  function buildPaymentReminderItems(orderIds: string[]): ReminderQueueItem[] {
+    const ordersById = new Map(orders.map((order) => [order.id, order]));
+    const recipientsByKey = new Map(
+      paymentReminderRecipients.map((recipient) => [recipient.recipientKey, recipient])
+    );
+    const queuedRecipientKeys = new Set<string>();
+
+    return orderIds.flatMap((orderId) => {
+      const order = ordersById.get(orderId);
+      if (!order) return [];
+
+      const recipientKey = getPaymentReminderRecipientKey(order);
+      if (queuedRecipientKeys.has(recipientKey)) return [];
+      queuedRecipientKeys.add(recipientKey);
+
+      const recipient = recipientsByKey.get(recipientKey);
+      if (!recipient || recipient.disabledReason) return [];
+
+      return [{
+        orderId: order.id,
+        name: recipient.name,
+        email: recipient.email,
+        pickupLabel: recipient.pickupLabel,
+        status: "queued",
+        attempts: 0,
+        message: "",
+        lastResultCode: null,
+      }];
+    });
+  }
+
   async function sendReminderAttempt(
     orderId: string,
     token: string
-  ): Promise<{ outcome: "sent" | "skipped" | "retryable_failed" | "failed"; message: string; resultCode: string | null }> {
+  ): Promise<QueueAttemptResult> {
     try {
       const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/remind`, {
         method: "POST",
@@ -946,8 +1079,68 @@ export default function AdminOrdersPage() {
     }
   }
 
-  function buildReminderSummary(runState: ReminderRunState): { message: string; type: "success" | "error" } {
-    let message = `Sent ${runState.sent} reminder${runState.sent !== 1 ? "s" : ""}`;
+  async function sendPaymentReminderAttempt(
+    orderId: string,
+    token: string
+  ): Promise<QueueAttemptResult> {
+    try {
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/payment-remind`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      if (res.status === 404) {
+        return {
+          outcome: "failed",
+          message: await getApiErrorMessage(res, "Order not found"),
+          resultCode: null,
+        };
+      }
+
+      if (!res.ok) {
+        const message = await getApiErrorMessage(res, "Failed to send payment reminder");
+        const retryable = res.status >= 500 || res.status === 429;
+        return {
+          outcome: retryable ? "retryable_failed" : "failed",
+          message,
+          resultCode: null,
+        };
+      }
+
+      const data = await res.json() as PaymentReminderSendResponse;
+      if (data.status === "sent") {
+        return {
+          outcome: "sent",
+          message: data.message || "Payment reminder sent",
+          resultCode: data.status,
+        };
+      }
+      if (data.status === "failed") {
+        return {
+          outcome: "retryable_failed",
+          message: data.message || "Failed to send payment reminder",
+          resultCode: data.status,
+        };
+      }
+      return {
+        outcome: "skipped",
+        message: data.message || "Payment reminder skipped",
+        resultCode: data.status,
+      };
+    } catch (err) {
+      return {
+        outcome: "retryable_failed",
+        message: err instanceof Error ? err.message : "Failed to send payment reminder",
+        resultCode: null,
+      };
+    }
+  }
+
+  function buildQueueSummary(
+    runState: ReminderRunState,
+    noun: string
+  ): { message: string; type: "success" | "error" } {
+    let message = `Sent ${runState.sent} ${noun}${runState.sent !== 1 ? "s" : ""}`;
     if (runState.skipped > 0) {
       message += `, skipped ${runState.skipped}`;
     }
@@ -960,133 +1153,141 @@ export default function AdminOrdersPage() {
     };
   }
 
-	  async function executeReminderQueue(itemsToTrack: ReminderQueueItem[], orderIdsToProcess: string[]) {
-	    if (orderIdsToProcess.length === 0) return;
+  async function executeQueueRun(options: {
+    itemsToTrack: ReminderQueueItem[];
+    orderIdsToProcess: string[];
+    setRun: (nextRun: ReminderRunState) => void;
+    sendAttempt: (orderId: string, token: string) => Promise<QueueAttemptResult>;
+    intervalMs: number;
+    noun: string;
+  }) {
+    const { itemsToTrack, orderIdsToProcess, setRun, sendAttempt, intervalMs, noun } = options;
+    if (orderIdsToProcess.length === 0) return;
 
-	    const token = await getAdminToken();
-	    if (!token) return;
+    const token = await getAdminToken();
+    if (!token) return;
 
-	    let items = itemsToTrack.map((item) => ({ ...item }));
-	    setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
+    let items = itemsToTrack.map((item) => ({ ...item }));
+    setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
 
-	    for (let orderIdx = 0; orderIdx < orderIdsToProcess.length; orderIdx += 1) {
-	      const orderId = orderIdsToProcess[orderIdx];
-	      const itemIndex = items.findIndex((item) => item.orderId === orderId);
-	      if (itemIndex < 0) continue;
+    for (let orderIdx = 0; orderIdx < orderIdsToProcess.length; orderIdx += 1) {
+      const orderId = orderIdsToProcess[orderIdx];
+      const itemIndex = items.findIndex((item) => item.orderId === orderId);
+      if (itemIndex < 0) continue;
 
-	      let itemCompleted = false;
+      let itemCompleted = false;
 
-	      for (let attempt = 1; attempt <= 3; attempt += 1) {
-	        items = items.map((item, idx) => (idx === itemIndex
-	          ? {
-	            ...item,
-	            status: "sending",
-	            attempts: attempt,
-	            message: "",
-	          }
-	          : item
-	        ));
-	        setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: orderId }));
+      for (let attempt = 1; attempt <= 3; attempt += 1) {
+        items = items.map((item, idx) => (idx === itemIndex
+          ? {
+            ...item,
+            status: "sending",
+            attempts: attempt,
+            message: "",
+          }
+          : item
+        ));
+        setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: orderId }));
 
-	        const result = await sendReminderAttempt(orderId, token);
+        const result = await sendAttempt(orderId, token);
 
-	        if (result.outcome === "sent") {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "sent",
-	              message: result.message,
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	          itemCompleted = true;
-	          break;
-	        }
+        if (result.outcome === "sent") {
+          items = items.map((item, idx) => (idx === itemIndex
+            ? {
+              ...item,
+              status: "sent",
+              message: result.message,
+              lastResultCode: result.resultCode,
+            }
+            : item
+          ));
+          setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
+          itemCompleted = true;
+          break;
+        }
 
-	        if (result.outcome === "skipped") {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "skipped",
-	              message: result.message,
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	          itemCompleted = true;
-	          break;
-	        }
+        if (result.outcome === "skipped") {
+          items = items.map((item, idx) => (idx === itemIndex
+            ? {
+              ...item,
+              status: "skipped",
+              message: result.message,
+              lastResultCode: result.resultCode,
+            }
+            : item
+          ));
+          setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
+          itemCompleted = true;
+          break;
+        }
 
-	        if (result.outcome === "failed") {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "failed",
-	              message: result.message,
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	          itemCompleted = true;
-	          break;
-	        }
+        if (result.outcome === "failed") {
+          items = items.map((item, idx) => (idx === itemIndex
+            ? {
+              ...item,
+              status: "failed",
+              message: result.message,
+              lastResultCode: result.resultCode,
+            }
+            : item
+          ));
+          setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
+          itemCompleted = true;
+          break;
+        }
 
-	        if (attempt < 3) {
-	          items = items.map((item, idx) => (idx === itemIndex
-	            ? {
-	              ...item,
-	              status: "retrying",
-	              message: "Retrying after send failure",
-	              lastResultCode: result.resultCode,
-	            }
-	            : item
-	          ));
-	          setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: orderId }));
-	          await wait(REMINDER_RETRY_BACKOFF_MS[attempt - 1]);
-	          continue;
-	        }
+        if (attempt < 3) {
+          items = items.map((item, idx) => (idx === itemIndex
+            ? {
+              ...item,
+              status: "retrying",
+              message: "Retrying after send failure",
+              lastResultCode: result.resultCode,
+            }
+            : item
+          ));
+          setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: orderId }));
+          await wait(REMINDER_RETRY_BACKOFF_MS[attempt - 1]);
+          continue;
+        }
 
-	        items = items.map((item, idx) => (idx === itemIndex
-	          ? {
-	            ...item,
-	            status: "failed",
-	            message: "Send failed after 3 attempts",
-	            lastResultCode: result.resultCode,
-	          }
-	          : item
-	        ));
-	        setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	        itemCompleted = true;
-	      }
+        items = items.map((item, idx) => (idx === itemIndex
+          ? {
+            ...item,
+            status: "failed",
+            message: "Send failed after 3 attempts",
+            lastResultCode: result.resultCode,
+          }
+          : item
+        ));
+        setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
+        itemCompleted = true;
+      }
 
-	      if (!itemCompleted) {
-	        items = items.map((item, idx) => (idx === itemIndex
-	          ? {
-	            ...item,
-	            status: "failed",
-	            message: "Send failed after 3 attempts",
-	          }
-	          : item
-	        ));
-	        setReminderRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
-	      }
+      if (!itemCompleted) {
+        items = items.map((item, idx) => (idx === itemIndex
+          ? {
+            ...item,
+            status: "failed",
+            message: "Send failed after 3 attempts",
+          }
+          : item
+        ));
+        setRun(buildReminderRunState(items, { isRunning: true, isComplete: false, activeOrderId: null }));
+      }
 
       if (orderIdx < orderIdsToProcess.length - 1) {
-        await wait(REMINDER_SEND_INTERVAL_MS);
+        await wait(intervalMs);
       }
     }
 
     const completedRun = buildReminderRunState(items, { isRunning: false, isComplete: true, activeOrderId: null });
-    setReminderRun(completedRun);
+    setRun(completedRun);
 
     const refreshed = await fetchOrders({ suppressErrorToast: true });
-    const summary = buildReminderSummary(completedRun);
+    const summary = buildQueueSummary(completedRun, noun);
     if (!refreshed) {
-      showToast("Reminders finished, but orders could not be refreshed", "error");
+      showToast("Emails finished, but orders could not be refreshed", "error");
       setTimeout(() => {
         showToast(summary.message, summary.type);
       }, 900);
@@ -1105,7 +1306,14 @@ export default function AdminOrdersPage() {
       return;
     }
 
-    await executeReminderQueue(items, items.map((item) => item.orderId));
+    await executeQueueRun({
+      itemsToTrack: items,
+      orderIdsToProcess: items.map((item) => item.orderId),
+      setRun: setReminderRun,
+      sendAttempt: sendReminderAttempt,
+      intervalMs: REMINDER_SEND_INTERVAL_MS,
+      noun: "reminder",
+    });
   }
 
   async function handleRetryFailedReminders() {
@@ -1128,7 +1336,91 @@ export default function AdminOrdersPage() {
         : { ...item }
     ));
 
-    await executeReminderQueue(nextItems, retryOrderIds);
+    await executeQueueRun({
+      itemsToTrack: nextItems,
+      orderIdsToProcess: retryOrderIds,
+      setRun: setReminderRun,
+      sendAttempt: sendReminderAttempt,
+      intervalMs: REMINDER_SEND_INTERVAL_MS,
+      noun: "reminder",
+    });
+  }
+
+  async function handleSendPaymentReminders() {
+    const ids = Array.from(paymentRemindSelections);
+    if (ids.length === 0) return;
+
+    const items = buildPaymentReminderItems(ids);
+    if (items.length === 0) {
+      showToast("No payment reminder recipients available", "error");
+      return;
+    }
+
+    await executeQueueRun({
+      itemsToTrack: items,
+      orderIdsToProcess: items.map((item) => item.orderId),
+      setRun: setPaymentReminderRun,
+      sendAttempt: sendPaymentReminderAttempt,
+      intervalMs: PAYMENT_REMINDER_SEND_INTERVAL_MS,
+      noun: "payment reminder",
+    });
+  }
+
+  async function handleRetryFailedPaymentReminders() {
+    if (paymentReminderLoading) return;
+
+    const retryOrderIds = paymentReminderRun.items
+      .filter((item) => item.status === "failed")
+      .map((item) => item.orderId);
+    if (retryOrderIds.length === 0) return;
+
+    const nextItems: ReminderQueueItem[] = paymentReminderRun.items.map((item): ReminderQueueItem => (
+      item.status === "failed"
+        ? {
+          ...item,
+          status: "queued",
+          attempts: 0,
+          message: "",
+          lastResultCode: null,
+        }
+        : { ...item }
+    ));
+
+    await executeQueueRun({
+      itemsToTrack: nextItems,
+      orderIdsToProcess: retryOrderIds,
+      setRun: setPaymentReminderRun,
+      sendAttempt: sendPaymentReminderAttempt,
+      intervalMs: PAYMENT_REMINDER_SEND_INTERVAL_MS,
+      noun: "payment reminder",
+    });
+  }
+
+  async function handleConfirmSinglePaymentReminder() {
+    const target = paymentReminderTarget;
+    if (!target) return;
+
+    const items = buildPaymentReminderItems([target.id]);
+    if (items.length === 0) {
+      showToast("Payment reminder is not available for this order", "error");
+      setPaymentReminderTarget(null);
+      return;
+    }
+
+    setPaymentReminderTarget(null);
+    setPaymentRemindSearch("");
+    setPaymentRemindSelections(new Set());
+    setPaymentReminderRun(EMPTY_REMINDER_RUN);
+    setShowPaymentRemindModal(true);
+
+    await executeQueueRun({
+      itemsToTrack: items,
+      orderIdsToProcess: items.map((item) => item.orderId),
+      setRun: setPaymentReminderRun,
+      sendAttempt: sendPaymentReminderAttempt,
+      intervalMs: PAYMENT_REMINDER_SEND_INTERVAL_MS,
+      noun: "payment reminder",
+    });
   }
 
   async function handleAddOrder(e: React.FormEvent) {
@@ -1502,6 +1794,11 @@ export default function AdminOrdersPage() {
   const reminderProgressPercent = reminderRun.total > 0
     ? Math.round((reminderRun.completed / reminderRun.total) * 100)
     : 0;
+  const isPaymentReminderProgressMode = paymentReminderRun.total > 0;
+  const failedPaymentReminderItems = paymentReminderRun.items.filter((item) => item.status === "failed");
+  const paymentReminderProgressPercent = paymentReminderRun.total > 0
+    ? Math.round((paymentReminderRun.completed / paymentReminderRun.total) * 100)
+    : 0;
 
   return (
     <div className="p-4 sm:p-8">
@@ -1533,6 +1830,14 @@ export default function AdminOrdersPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={openPaymentRemindModal}
+            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
+            style={{ background: "white", color: "var(--color-bark)", border: "1px solid var(--color-border)" }}
+          >
+            <BellIcon width={14} height={14} />
+            Payment Reminder
+          </button>
           <button
             onClick={openRemindModal}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
@@ -1851,6 +2156,11 @@ export default function AdminOrdersPage() {
                   const isUpdatingPayment = updatingPayment === order.id;
                   const isDeleting = deleting === order.id;
                   const isSelected = selectedIds.has(order.id);
+                  const paymentReminderDisabledReason = getPaymentReminderUnavailableReason(order);
+                  const canSendPaymentReminder = !paymentReminderDisabledReason;
+                  const paymentReminderTitle = order.paid
+                    ? "Payment reminder is only available for unpaid orders"
+                    : paymentReminderDisabledReason ?? "Send payment reminder";
                   return (
                     <tr
                       key={order.id}
@@ -1940,6 +2250,22 @@ export default function AdminOrdersPage() {
                       </td>
                       <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
+                          {!order.paid && (
+                            <button
+                              onClick={() => setPaymentReminderTarget(order)}
+                              disabled={isUpdatingPayment || !canSendPaymentReminder}
+                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                              style={{
+                                background: canSendPaymentReminder ? "var(--color-cream)" : "#f3f4f6",
+                                color: canSendPaymentReminder ? "var(--color-bark)" : "#9ca3af",
+                                border: "1px solid var(--color-border)",
+                              }}
+                              aria-label="Send payment reminder"
+                              title={paymentReminderTitle}
+                            >
+                              <BellIcon width={15} height={15} />
+                            </button>
+                          )}
                           <span
                             className="text-[10px] py-0.5 rounded-full font-semibold text-center inline-block"
                             style={{
@@ -2350,6 +2676,37 @@ export default function AdminOrdersPage() {
         This will set paid to false and clear the payment method.
       </Modal>
 
+      <Modal
+        isOpen={!!paymentReminderTarget}
+        onClose={() => {
+          if (paymentReminderLoading) return;
+          setPaymentReminderTarget(null);
+        }}
+        title="Send Payment Reminder"
+        actions={
+          <>
+            <button
+              onClick={() => setPaymentReminderTarget(null)}
+              disabled={paymentReminderLoading}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => { void handleConfirmSinglePaymentReminder(); }}
+              disabled={paymentReminderLoading}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-bark)", color: "var(--color-cream)" }}
+            >
+              Send reminder
+            </button>
+          </>
+        }
+      >
+        This will send an automated payment reminder email to {paymentReminderTarget?.name ?? "this customer"} for the selected unpaid order bundle. If payment has already been resolved, the email copy will instruct them to ignore it.
+      </Modal>
+
       {/* Add Order Modal */}
         {showAddOrderModal && (
           <div
@@ -2716,6 +3073,308 @@ export default function AdminOrdersPage() {
           </div>
         </div>
       )}
+
+      {/* Payment Reminder Modal */}
+      {showPaymentRemindModal && (() => {
+        const searchLower = paymentRemindSearch.trim().toLowerCase();
+        const filteredPaymentReminderRecipients = searchLower
+          ? eligiblePaymentReminderRecipients.filter(
+              (recipient) =>
+                recipient.name.toLowerCase().includes(searchLower) ||
+                recipient.email.toLowerCase().includes(searchLower)
+            )
+          : eligiblePaymentReminderRecipients;
+
+        return (
+          <div
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+            onMouseDown={(e) => {
+              if (!paymentReminderLoading && e.target === e.currentTarget) {
+                closePaymentRemindModal();
+              }
+            }}
+          >
+            <div
+              style={{ background: "white", borderRadius: "1.5rem", padding: "2rem", width: "100%", maxWidth: "620px", maxHeight: "85vh", display: "flex", flexDirection: "column", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+              onMouseDown={(e) => e.stopPropagation()}
+            >
+              <h2 className="text-xl font-bold mb-1" style={{ color: "var(--color-bark)", fontFamily: "var(--font-serif)" }}>
+                Send Payment Reminders
+              </h2>
+              <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
+                {isPaymentReminderProgressMode
+                  ? "Progress updates appear here while payment reminder emails are sent two per second."
+                  : "Payment reminder emails will be sent to selected confirmed unpaid order bundles only."}
+              </p>
+
+              {!isPaymentReminderProgressMode && ineligiblePaymentReminderCount > 0 && (
+                <div
+                  className="rounded-xl px-4 py-3 text-xs mb-4"
+                  style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+                >
+                  {ineligiblePaymentReminderCount} order bundle{ineligiblePaymentReminderCount !== 1 ? "s are" : " is"} not eligible (not confirmed, already paid, excluded, or missing email).
+                </div>
+              )}
+
+              {!isPaymentReminderProgressMode && eligiblePaymentReminderRecipients.length === 0 ? (
+                <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
+                  No confirmed unpaid orders are currently eligible for payment reminders.
+                </p>
+              ) : !isPaymentReminderProgressMode ? (
+                <>
+                  <div className="relative mb-3">
+                    <svg
+                      width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      style={{ position: "absolute", left: "0.75rem", top: "50%", transform: "translateY(-50%)", pointerEvents: "none" }}
+                    >
+                      <circle cx="11" cy="11" r="8"/>
+                      <path d="m21 21-4.35-4.35"/>
+                    </svg>
+                    <input
+                      type="text"
+                      placeholder="Search by name or email..."
+                      value={paymentRemindSearch}
+                      onChange={(e) => setPaymentRemindSearch(e.target.value)}
+                      className="w-full pl-9 pr-3 py-2 rounded-xl text-sm"
+                      style={{ border: "1px solid var(--color-border)", background: "var(--color-cream)", color: "var(--color-text)", outline: "none" }}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      {filteredPaymentReminderRecipients.length} of {eligiblePaymentReminderRecipients.length} shown &middot; {paymentRemindSelections.size} selected
+                    </span>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setPaymentRemindSelections((prev) => {
+                            const next = new Set(prev);
+                            for (const recipient of filteredPaymentReminderRecipients) next.add(recipient.orderId);
+                            return next;
+                          });
+                        }}
+                        className="text-xs font-medium px-2 py-1 rounded-lg transition-opacity hover:opacity-70"
+                        style={{ color: "var(--color-forest)" }}
+                      >
+                        Select all
+                      </button>
+                      <button
+                        onClick={() => {
+                          setPaymentRemindSelections((prev) => {
+                            const next = new Set(prev);
+                            for (const recipient of filteredPaymentReminderRecipients) next.delete(recipient.orderId);
+                            return next;
+                          });
+                        }}
+                        className="text-xs font-medium px-2 py-1 rounded-lg transition-opacity hover:opacity-70"
+                        style={{ color: "var(--color-muted)" }}
+                      >
+                        Unselect all
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ overflowY: "auto", maxHeight: "320px", marginBottom: "1.25rem", border: "1px solid var(--color-border)", borderRadius: "0.75rem" }}>
+                    {filteredPaymentReminderRecipients.length === 0 ? (
+                      <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
+                        No unpaid recipients match your search.
+                      </p>
+                    ) : (
+                      filteredPaymentReminderRecipients.map((recipient) => (
+                        <label
+                          key={recipient.recipientKey}
+                          style={{
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "0.75rem",
+                            padding: "0.875rem 1rem",
+                            borderBottom: "1px solid var(--color-border)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={paymentRemindSelections.has(recipient.orderId)}
+                            onChange={(e) => {
+                              setPaymentRemindSelections((prev) => {
+                                const next = new Set(prev);
+                                if (e.target.checked) next.add(recipient.orderId);
+                                else next.delete(recipient.orderId);
+                                return next;
+                              });
+                            }}
+                            style={{ marginTop: "2px", accentColor: "var(--color-bark)", width: "15px", height: "15px", flexShrink: 0 }}
+                          />
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{recipient.name}</p>
+                            <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{recipient.email || "-"}</p>
+                            <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{recipient.pickupLabel}</p>
+                          </div>
+                        </label>
+                      ))
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div
+                    className="rounded-2xl p-4 mb-4"
+                    style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
+                  >
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+                        {paymentReminderRun.completed} of {paymentReminderRun.total} processed
+                      </p>
+                      <span className="text-xs font-medium" style={{ color: "var(--color-muted)" }}>
+                        {paymentReminderProgressPercent}% complete
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        width: "100%",
+                        height: "12px",
+                        borderRadius: "999px",
+                        background: "var(--color-cream)",
+                        border: "1px solid var(--color-border)",
+                        overflow: "hidden",
+                        marginBottom: "0.875rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${paymentReminderProgressPercent}%`,
+                          background: "var(--color-bark)",
+                          transition: "width 200ms ease",
+                        }}
+                      />
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+                        gap: "0.75rem",
+                      }}
+                    >
+                      <div>
+                        <p className="text-[11px] uppercase font-semibold" style={{ color: "var(--color-muted)", margin: 0 }}>Sent</p>
+                        <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: "0.2rem 0 0" }}>{paymentReminderRun.sent}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase font-semibold" style={{ color: "var(--color-muted)", margin: 0 }}>Failed</p>
+                        <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: "0.2rem 0 0" }}>{paymentReminderRun.failed}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase font-semibold" style={{ color: "var(--color-muted)", margin: 0 }}>Skipped</p>
+                        <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: "0.2rem 0 0" }}>{paymentReminderRun.skipped}</p>
+                      </div>
+                      <div>
+                        <p className="text-[11px] uppercase font-semibold" style={{ color: "var(--color-muted)", margin: 0 }}>Remaining</p>
+                        <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: "0.2rem 0 0" }}>{Math.max(paymentReminderRun.total - paymentReminderRun.completed, 0)}</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <p className="text-xs mb-3" style={{ color: "var(--color-muted)" }}>
+                    Please keep this window open until sending finishes.
+                  </p>
+
+                  <div
+                    style={{
+                      overflowY: "auto",
+                      maxHeight: "320px",
+                      marginBottom: "1.25rem",
+                      border: "1px solid var(--color-border)",
+                      borderRadius: "0.75rem",
+                    }}
+                  >
+                    {paymentReminderRun.items.map((item, idx) => {
+                      const badge = getReminderStatusBadge(item);
+                      return (
+                        <div
+                          key={item.orderId}
+                          style={{
+                            padding: "0.875rem 1rem",
+                            borderBottom: idx === paymentReminderRun.items.length - 1 ? "none" : "1px solid var(--color-border)",
+                            background: item.orderId === paymentReminderRun.activeOrderId ? "var(--color-cream)" : "white",
+                          }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{item.name}</p>
+                              <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{item.email || "-"}</p>
+                              <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{item.pickupLabel}</p>
+                              {item.message && (
+                                <p className="text-xs" style={{ color: "var(--color-text)", margin: "0.45rem 0 0" }}>
+                                  {item.message}
+                                </p>
+                              )}
+                              {item.attempts > 0 && (
+                                <p className="text-[11px]" style={{ color: "var(--color-muted)", margin: "0.3rem 0 0" }}>
+                                  Attempt {item.attempts} of 3
+                                </p>
+                              )}
+                            </div>
+                            <span
+                              className="text-xs font-semibold px-2.5 py-1 rounded-full"
+                              style={{ background: badge.bg, color: badge.color, border: `1px solid ${badge.border}`, flexShrink: 0 }}
+                            >
+                              {badge.label}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
+
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.75rem" }}>
+                {isPaymentReminderProgressMode ? (
+                  <>
+                    {failedPaymentReminderItems.length > 0 && (
+                      <button
+                        onClick={handleRetryFailedPaymentReminders}
+                        disabled={paymentReminderLoading}
+                        className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                        style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                      >
+                        Retry Failed ({failedPaymentReminderItems.length})
+                      </button>
+                    )}
+                    <button
+                      onClick={closePaymentRemindModal}
+                      disabled={paymentReminderLoading}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+                    >
+                      {paymentReminderLoading ? "Sending..." : "Done"}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={closePaymentRemindModal}
+                      className="px-4 py-2 rounded-xl text-sm font-medium"
+                      style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={() => { void handleSendPaymentReminders(); }}
+                      disabled={paymentReminderLoading || paymentRemindSelections.size === 0}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+                      style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+                    >
+                      {paymentReminderLoading ? "Sending..." : `Send Payment Reminder${paymentRemindSelections.size !== 1 ? "s" : ""} (${paymentRemindSelections.size})`}
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Remind Modal */}
       {showRemindModal && (() => {
