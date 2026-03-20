@@ -365,7 +365,7 @@ function getReminderStatusBadge(item: ReminderQueueItem): { label: string; bg: s
 
 function getPaymentReminderUnavailableReason(order: Order): string | null {
   if (order.paid) return "Payment reminder is only available for unpaid orders";
-  if (order.status !== "confirmed") return "Only confirmed unpaid orders can be reminded";
+  if (!["confirmed", "picked_up"].includes(order.status)) return "Only confirmed or picked up unpaid orders can be reminded";
   if (order.exclude_email) return "Email is excluded for this order";
   if (!(order.email ?? "").trim()) return "Customer is missing an email address";
   return null;
@@ -3104,7 +3104,7 @@ export default function AdminOrdersPage() {
               <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
                 {isPaymentReminderProgressMode
                   ? "Progress updates appear here while payment reminder emails are sent two per second."
-                  : "Payment reminder emails will be sent to selected confirmed unpaid order bundles only."}
+                  : "Payment reminder emails will be sent to selected unpaid order bundles that are confirmed or picked up."}
               </p>
 
               {!isPaymentReminderProgressMode && ineligiblePaymentReminderCount > 0 && (
@@ -3118,7 +3118,7 @@ export default function AdminOrdersPage() {
 
               {!isPaymentReminderProgressMode && eligiblePaymentReminderRecipients.length === 0 ? (
                 <p className="text-sm py-6 text-center" style={{ color: "var(--color-muted)" }}>
-                  No confirmed unpaid orders are currently eligible for payment reminders.
+                  No unpaid confirmed or picked up orders are currently eligible for payment reminders.
                 </p>
               ) : !isPaymentReminderProgressMode ? (
                 <>

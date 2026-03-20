@@ -112,6 +112,25 @@ class PaymentReminderTests(unittest.TestCase):
         self.assertEqual(payload["items"][0]["item_name"], "Lamprais")
         self.assertEqual(payload["items"][1]["item_name"], "Fish Cutlet")
 
+    def test_payment_reminder_allows_picked_up_unpaid_orders(self):
+        order = make_order(status=OrderStatus.PICKED_UP)
+        db = FakeSession(order=order, location=SimpleNamespace(address="123 Main St"))
+
+        with patch("routers.admin._get_order_group_rows", return_value=[order]):
+            with patch("routers.admin.send_payment_reminder") as mock_send:
+                result = _send_order_payment_reminder(
+                    order,
+                    db,
+                    events_by_id={},
+                    active_event_date="April 2, 2026",
+                    active_etransfer={"enabled": False, "email": None},
+                )
+
+        self.assertEqual(result["status"], "sent")
+        mock_send.assert_called_once()
+        payload = mock_send.call_args.args[0]
+        self.assertTrue(payload["pickup_completed"])
+
     def test_payment_reminder_skips_paid_bundle(self):
         order = make_order(paid=True)
         db = FakeSession(order=order)
@@ -142,7 +161,7 @@ class PaymentReminderTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "skipped_not_confirmed")
-        self.assertEqual(result["message"], "Only confirmed unpaid orders can be reminded")
+        self.assertEqual(result["message"], "Only confirmed or picked up unpaid orders can be reminded")
 
     def test_payment_reminder_skips_missing_email(self):
         order = make_order(email="   ")
@@ -226,6 +245,38 @@ class PaymentReminderTests(unittest.TestCase):
         self.assertIn("Payment Reminder", payload["subject"])
         self.assertIn("automated reminder", payload["html"])
         self.assertIn("please disregard this message", payload["html"])
+
+    def test_payment_reminder_mailer_omits_pre_pickup_copy_for_picked_up_orders(self):
+        email_data = {
+            "name": "Alex",
+            "email": "alex@example.com",
+            "event_date": "April 2, 2026",
+            "pickup_location": "Markham",
+            "pickup_time_slot": "10:00 AM - 11:00 AM",
+            "address": "123 Main St",
+            "total_price": 24.0,
+            "subtotal": 24.0,
+            "discount_total": 0.0,
+            "etransfer_enabled": True,
+            "etransfer_email": "payments@example.com",
+            "pickup_completed": True,
+            "items": [
+                {
+                    "item_name": "Lamprais",
+                    "quantity": 1,
+                    "base_total": 24.0,
+                    "discount_total": 0.0,
+                    "total_price": 24.0,
+                }
+            ],
+        }
+
+        with patch("services.email.resend.Emails.send") as mock_send:
+            send_payment_reminder(email_data)
+
+        payload = mock_send.call_args.args[0]
+        self.assertIn("scheduled for pickup", payload["html"])
+        self.assertNotIn("before your pickup", payload["html"])
 
 
 if __name__ == "__main__":
