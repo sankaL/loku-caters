@@ -132,16 +132,24 @@ def _build_order_summary_html(order_data: dict) -> str:
 def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -> str:
     etransfer_enabled = bool(order_data.get("etransfer_enabled"))
     etransfer_email = str(order_data.get("etransfer_email") or "").strip()
+    pickup_completed = bool(order_data.get("pickup_completed"))
     if not etransfer_enabled or not etransfer_email:
         return ""
 
     if reminder:
-        payment_copy_html = (
-            "If you have not yet sent your e-Transfer payment, you are welcome to do so at any time "
-            "before your pickup by sending to "
-            f"<strong>{etransfer_email}</strong>. If you have already sent your payment, "
-            "please disregard this notice."
-        )
+        if pickup_completed:
+            payment_copy_html = (
+                "If you have not yet sent your e-Transfer payment, you are welcome to send it to "
+                f"<strong>{etransfer_email}</strong> at your convenience. If you have already sent your payment, "
+                "please disregard this notice."
+            )
+        else:
+            payment_copy_html = (
+                "If you have not yet sent your e-Transfer payment, you are welcome to do so at any time "
+                "before your pickup by sending to "
+                f"<strong>{etransfer_email}</strong>. If you have already sent your payment, "
+                "please disregard this notice."
+            )
     else:
         payment_copy_html = (
             "If you would like to pay by e-Transfer, you are welcome to send your payment to "
@@ -324,6 +332,7 @@ def send_payment_reminder(order_data: dict) -> None:
     name = order_data["name"]
     email = order_data["email"]
     event_date = order_data.get("event_date", "")
+    pickup_completed = bool(order_data.get("pickup_completed"))
     etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
     summary_html = _build_order_summary_html(order_data)
     order_lines = _normalize_order_lines(order_data)
@@ -361,7 +370,8 @@ def send_payment_reminder(order_data: dict) -> None:
               </p>
               <p style="margin:0 0 28px;font-size:15px;color:#4a4a4a;line-height:1.6;">
                 If you have already sent payment or otherwise resolved this order, please disregard this message.
-                {f' Your scheduled pickup is on <strong>{event_date}</strong>.' if event_date else ''}
+                {f' This order was scheduled for pickup on <strong>{event_date}</strong>.' if event_date and pickup_completed else ''}
+                {f' Your scheduled pickup is on <strong>{event_date}</strong>.' if event_date and not pickup_completed else ''}
               </p>
 {summary_html}
 

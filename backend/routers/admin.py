@@ -976,11 +976,11 @@ def _prepare_payment_reminder_order_data(
 ) -> tuple[Optional[dict], Optional[dict], list[Order]]:
     group_orders = _get_order_group_rows(db, order)
 
-    if any(group_order.status != OrderStatus.CONFIRMED for group_order in group_orders):
+    if any(group_order.status not in {OrderStatus.CONFIRMED, OrderStatus.PICKED_UP} for group_order in group_orders):
         return _reminder_result(
             order,
             status="skipped_not_confirmed",
-            message="Only confirmed unpaid orders can be reminded",
+            message="Only confirmed or picked up unpaid orders can be reminded",
         ), None, group_orders
 
     if all(group_order.paid for group_order in group_orders):
@@ -1020,6 +1020,7 @@ def _prepare_payment_reminder_order_data(
     order_data["event_date"] = event_date
     order_data["etransfer_enabled"] = etransfer["enabled"]
     order_data["etransfer_email"] = etransfer["email"]
+    order_data["pickup_completed"] = all(group_order.status == OrderStatus.PICKED_UP for group_order in group_orders)
 
     return None, order_data, group_orders
 
