@@ -38,7 +38,7 @@ from services.customers import (
     update_customer_from_admin,
 )
 from services.email import send_confirmation, send_event_reminder_email, send_payment_reminder, send_reminder
-from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart
+from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart, serialize_combo_deals
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 
@@ -349,6 +349,7 @@ class CateringRequestBulkStatusRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 0) -> dict:
+    normalized_combo_deals = serialize_combo_deals(normalize_combo_deals(event.combo_deals or []))
     return {
         "id": event.id,
         "name": event.name,
@@ -367,7 +368,7 @@ def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 
         "is_active": event.is_active,
         "item_ids": event.item_ids or [],
         "location_ids": event.location_ids or [],
-        "combo_deals": event.combo_deals or [],
+        "combo_deals": normalized_combo_deals,
         "updated_at": event.updated_at.isoformat() if event.updated_at else None,
         "total_revenue": total_revenue,
         "order_count": order_count,
@@ -386,8 +387,8 @@ def _validate_event_images(payload: Union[EventCreate, EventUpdate]) -> tuple[Op
 def _validate_event_combo_deals(payload: Union[EventCreate, EventUpdate]) -> list[dict[str, Any]]:
     try:
         combo_payload = [entry.model_dump(mode="json") for entry in payload.combo_deals]
-        normalize_combo_deals(combo_payload, allowed_item_ids=set(payload.item_ids))
-        return combo_payload
+        normalized = normalize_combo_deals(combo_payload, allowed_item_ids=set(payload.item_ids))
+        return serialize_combo_deals(normalized)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

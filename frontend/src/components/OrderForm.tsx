@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
-import { API_URL, CURRENCY, type Item, type Location } from "@/config/event";
+import { API_URL, CURRENCY, type ComboDeal, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
 import DescriptionPopover from "@/components/ui/DescriptionPopover";
 import Modal from "@/components/ui/Modal";
+import { effectiveMinimumOrderQuantityForItem } from "@/lib/comboDealUtils";
 
 export interface AppliedComboSummary {
   combo_id: string;
@@ -13,6 +14,9 @@ export interface AppliedComboSummary {
   application_count: number;
   savings_total: number;
   preview_text: string;
+  discount_type: "fixed_amount" | "percentage";
+  discount_amount: number;
+  discount_scope_label: string;
 }
 
 export interface CheckoutLineResult {
@@ -95,6 +99,7 @@ interface ContactForm {
 interface OrderFormProps {
   items: Item[];
   locations: Location[];
+  comboDeals: ComboDeal[];
   onSuccess: (result: CheckoutResult) => void;
 }
 
@@ -108,14 +113,6 @@ const EMPTY_QUOTE: QuoteResult = {
   upsell_opportunities: [],
 };
 
-function getMinimumOrderQuantity(item: Item | undefined): number {
-  const value = Number(item?.minimum_order_quantity ?? 1);
-  if (!Number.isFinite(value)) {
-    return 1;
-  }
-  return Math.max(1, Math.ceil(value));
-}
-
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-CA", {
     style: "currency",
@@ -125,7 +122,23 @@ function formatCurrency(amount: number): string {
   }).format(amount);
 }
 
-export default function OrderForm({ items, locations, onSuccess }: OrderFormProps) {
+function formatComboDiscountLabel(combo: AppliedComboSummary): string {
+  if (combo.discount_type === "percentage") {
+    const amount = combo.discount_amount.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+    return `${amount}% off ${combo.discount_scope_label.toLowerCase()}`;
+  }
+  return `${formatCurrency(combo.discount_amount)} off ${combo.discount_scope_label.toLowerCase()}`;
+}
+
+function formatComboPrimaryBadge(combo: AppliedComboSummary): string {
+  if (combo.discount_type === "percentage") {
+    const amount = combo.discount_amount.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+    return `${amount}% off`;
+  }
+  return `Save ${formatCurrency(combo.savings_total)}`;
+}
+
+export default function OrderForm({ items, locations, comboDeals, onSuccess }: OrderFormProps) {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const [form, setForm] = useState<ContactForm>({
     name: "",
@@ -149,6 +162,11 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
   const timeSlots = form.pickup_location
     ? (locations.find((location) => location.name === form.pickup_location)?.timeSlots ?? [])
     : [];
+
+  function getMinimumOrderQuantity(item: Item | undefined): number {
+    if (!item) return 1;
+    return effectiveMinimumOrderQuantityForItem(item.id, item.minimum_order_quantity, comboDeals);
+  }
 
   const selectedLines = useMemo(
     () =>
@@ -655,80 +673,6 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
             {errors.items && <p className="mt-1.5 text-xs text-red-500">{errors.items}</p>}
           </div>
 
-          {selectedLines.length > 0 && (
-            <div className="rounded-3xl p-5 md:p-6" style={{ background: "linear-gradient(135deg, #12270F 0%, #203b19 100%)", color: "white" }}>
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] font-semibold" style={{ color: "rgba(247,245,240,0.65)" }}>
-                    Deals For Your Cart
-                  </p>
-                </div>
-                <div className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "rgba(255,255,255,0.12)", color: "var(--color-cream)" }}>
-                  {quoteLoading ? "Checking deals..." : `${quote.applied_combos.length} applied`}
-                </div>
-              </div>
-
-              {quoteError && (
-                <p className="text-sm mb-3" style={{ color: "#fbd5d5" }}>
-                  {quoteError}
-                </p>
-              )}
-
-              {quote.applied_combos.length > 0 && (
-                <div className="space-y-3 mb-4">
-                  {quote.applied_combos.map((combo) => (
-                    <div key={combo.combo_id} className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.12)" }}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold">{combo.name}</p>
-                          <p className="text-xs mt-1" style={{ color: "rgba(247,245,240,0.72)" }}>
-                            {combo.preview_text}
-                          </p>
-                        </div>
-                        <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--color-bark)", color: "white" }}>
-                          Saved {formatCurrency(combo.savings_total)}
-                        </span>
-                      </div>
-                      {combo.application_count > 1 && (
-                        <p className="text-xs mt-2" style={{ color: "rgba(247,245,240,0.72)" }}>
-                          Applied {combo.application_count} times
-                        </p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {quote.upsell_opportunities.length > 0 ? (
-                <div className="space-y-3">
-                  {quote.upsell_opportunities.map((opportunity) => (
-                    <div key={opportunity.combo_id} className="rounded-2xl p-4" style={{ background: "#F7F5F0", color: "var(--color-text)" }}>
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{opportunity.name}</p>
-                          <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>{opportunity.preview_text}</p>
-                          <p className="text-sm mt-2" style={{ color: "var(--color-text)" }}>{opportunity.message}</p>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => addMissingRequirements(opportunity)}
-                          className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition-all"
-                          style={{ background: "var(--color-sage)", color: "white" }}
-                        >
-                          Add and Save
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : quote.applied_combos.length === 0 && !quoteLoading ? (
-                <p className="text-sm" style={{ color: "rgba(247,245,240,0.72)" }}>
-                  Add more qualifying items to unlock combo savings when available.
-                </p>
-              ) : null}
-            </div>
-          )}
-
           <div>
             <label className="block text-sm font-medium mb-1.5" style={{ color: "var(--color-text)" }}>
               Pickup Location
@@ -829,8 +773,13 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
                 {quote.applied_combos.length > 0 && (
                   <div className="pt-2 mt-2 border-t space-y-1" style={{ borderColor: "var(--color-border)" }}>
                     {quote.applied_combos.map((combo) => (
-                      <div key={combo.combo_id} className="flex justify-between text-sm">
-                        <span style={{ color: "var(--color-muted)" }}>{combo.name}</span>
+                      <div key={combo.combo_id} className="flex justify-between gap-3 text-sm">
+                        <div>
+                          <div style={{ color: "var(--color-muted)" }}>{combo.name}</div>
+                          <div className="text-xs mt-0.5" style={{ color: "var(--color-muted)" }}>
+                            {formatComboDiscountLabel(combo)}
+                          </div>
+                        </div>
                         <span style={{ color: "#2d6a2d", fontWeight: 600 }}>-{formatCurrency(combo.savings_total)}</span>
                       </div>
                     ))}
@@ -867,6 +816,81 @@ export default function OrderForm({ items, locations, onSuccess }: OrderFormProp
           >
             {submitting ? "Submitting..." : quoteLoading ? "Refreshing Deals..." : "Submit Pre-Order"}
           </button>
+
+          {selectedLines.length > 0 && (
+            <div className="rounded-3xl p-5 md:p-6" style={{ background: "linear-gradient(135deg, #12270F 0%, #203b19 100%)", color: "white" }}>
+              <div className="flex items-start justify-between gap-4 mb-4">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.2em] font-semibold" style={{ color: "rgba(247,245,240,0.65)" }}>
+                    Deals For Your Cart
+                  </p>
+                </div>
+                <div className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "rgba(255,255,255,0.12)", color: "var(--color-cream)" }}>
+                  {quoteLoading ? "Checking deals..." : `${quote.applied_combos.length} applied`}
+                </div>
+              </div>
+
+              {quoteError && (
+                <p className="text-sm mb-3" style={{ color: "#fbd5d5" }}>
+                  {quoteError}
+                </p>
+              )}
+
+              {quote.applied_combos.length > 0 && (
+                <div className="space-y-3 mb-4">
+                  {quote.applied_combos.map((combo) => (
+                    <div key={combo.combo_id} className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.12)" }}>
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold">{combo.name}</p>
+                          <p className="text-xs mt-1" style={{ color: "rgba(247,245,240,0.9)" }}>
+                            {formatComboDiscountLabel(combo)}
+                          </p>
+                          <p className="text-xs mt-1" style={{ color: "rgba(247,245,240,0.72)" }}>
+                            {combo.preview_text}
+                          </p>
+                        </div>
+                        <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--color-bark)", color: "white" }}>
+                          {formatComboPrimaryBadge(combo)}
+                        </span>
+                      </div>
+                      <div className="text-xs mt-2" style={{ color: "rgba(247,245,240,0.72)" }}>
+                        Saved {formatCurrency(combo.savings_total)}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {quote.upsell_opportunities.length > 0 ? (
+                <div className="space-y-3">
+                  {quote.upsell_opportunities.map((opportunity) => (
+                    <div key={opportunity.combo_id} className="rounded-2xl p-4" style={{ background: "#F7F5F0", color: "var(--color-text)" }}>
+                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div>
+                          <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{opportunity.name}</p>
+                          <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>{opportunity.preview_text}</p>
+                          <p className="text-sm mt-2" style={{ color: "var(--color-text)" }}>{opportunity.message}</p>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => addMissingRequirements(opportunity)}
+                          className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition-all"
+                          style={{ background: "var(--color-sage)", color: "white" }}
+                        >
+                          Add and Save
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : quote.applied_combos.length === 0 && !quoteLoading ? (
+                <p className="text-sm" style={{ color: "rgba(247,245,240,0.72)" }}>
+                  Add more qualifying items to unlock combo savings when available.
+                </p>
+              ) : null}
+            </div>
+          )}
         </form>
       </div>
 

@@ -5,6 +5,7 @@ from typing import Optional, TYPE_CHECKING
 from sqlalchemy.orm import Session
 
 from event_images import resolve_event_image_path
+from services.pricing import normalize_combo_deals, serialize_combo_deals
 
 _config_path = Path(__file__).parent / "event-config.json"
 with open(_config_path) as f:
@@ -71,6 +72,8 @@ def _build_config_from_event(db: Session, event) -> dict:
         .all()
     ) if location_ids else []
 
+    normalized_combo_deals = serialize_combo_deals(normalize_combo_deals(event.combo_deals or []))
+
     return {
         "event": {
             "id": int(event.id),
@@ -89,7 +92,7 @@ def _build_config_from_event(db: Session, event) -> dict:
         "etransfer_enabled": event.etransfer_enabled,
         "etransfer_email": event.etransfer_email,
         "is_active": bool(event.is_active),
-        "combo_deals": event.combo_deals or [],
+        "combo_deals": normalized_combo_deals,
         "items": [
             {
                 "id": item.id,

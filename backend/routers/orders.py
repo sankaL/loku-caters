@@ -15,7 +15,7 @@ from schemas import (
     OrderResponse,
 )
 from services.customers import sync_customer_from_contact
-from services.pricing import PricingLineInput, quote_cart
+from services.pricing import PricingLineInput, effective_minimum_order_quantity, normalize_combo_deals, quote_cart
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -66,13 +66,19 @@ def _validate_cart_lines(
     *,
     requested_lines: list[PricingLineInput],
     event_items: list[Item],
+    combo_deals,
 ) -> None:
     item_lookup = {item.id: item for item in event_items}
     for line in requested_lines:
         item = item_lookup.get(line.item_id)
         if item is None:
             raise HTTPException(status_code=400, detail=f"Unknown item: {line.item_id}")
-        minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+        base_minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+        minimum_order_quantity = effective_minimum_order_quantity(
+            item.id,
+            base_minimum_order_quantity,
+            combo_deals,
+        )
         if line.quantity < minimum_order_quantity:
             raise HTTPException(
                 status_code=400,
@@ -182,12 +188,16 @@ def quote_order_cart(order_in: OrderQuoteRequest, db: Session = Depends(get_db))
 
     event_items = _get_event_items(db, event)
     pricing_lines = _pricing_lines_from_cart_lines(order_in.lines)
-    _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items)
 
     try:
+        normalized_combo_deals = normalize_combo_deals(
+            event.combo_deals or [],
+            allowed_item_ids={item.id for item in event_items},
+        )
+        _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items, combo_deals=normalized_combo_deals)
         pricing = quote_cart(
             items=_event_items_as_dict(event_items),
-            combo_deals=event.combo_deals or [],
+            combo_deals=normalized_combo_deals,
             lines=pricing_lines,
             currency=CURRENCY,
         )
@@ -206,15 +216,19 @@ def checkout_order(order_in: OrderCheckoutCreate, db: Session = Depends(get_db))
 
     event_items = _get_event_items(db, event)
     pricing_lines = _pricing_lines_from_cart_lines(order_in.lines)
-    _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items)
 
     event_locations = _get_event_locations(db, event)
     location = _validate_location(event, event_locations, order_in.pickup_location, order_in.pickup_time_slot)
 
     try:
+        normalized_combo_deals = normalize_combo_deals(
+            event.combo_deals or [],
+            allowed_item_ids={item.id for item in event_items},
+        )
+        _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items, combo_deals=normalized_combo_deals)
         pricing = quote_cart(
             items=_event_items_as_dict(event_items),
-            combo_deals=event.combo_deals or [],
+            combo_deals=normalized_combo_deals,
             lines=pricing_lines,
             currency=CURRENCY,
         )

@@ -390,7 +390,7 @@ export default function EventDetailPage() {
             Events
           </button>
           <button
-            onClick={() => router.push(`/admin/config?edit=${id}`)}
+            onClick={() => router.push(`/admin/events/${id}/edit`)}
             style={{
               fontSize: 13,
               fontWeight: 600,
