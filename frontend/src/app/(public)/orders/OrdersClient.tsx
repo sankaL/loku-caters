@@ -115,6 +115,7 @@ export default function OrdersClient({ eventConfig }: { eventConfig: EventConfig
                 <OrderForm
                     items={eventConfig?.items ?? []}
                     locations={eventConfig?.locations ?? []}
+                    comboDeals={eventConfig?.combo_deals ?? []}
                     onSuccess={handleOrderSuccess}
                 />
             )}

@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 
 from database import SessionLocal
+from event_config import RANDOM_REQUESTS_EVENT_KIND
 from models import Event, Order
 
 
@@ -97,7 +98,7 @@ ORDERS = [
 def seed():
     db = SessionLocal()
     try:
-        active_event = db.query(Event).filter(Event.is_active == True).first()
+        active_event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
         if active_event is None:
             raise RuntimeError("No active event found. Create and activate an event before seeding orders.")
 

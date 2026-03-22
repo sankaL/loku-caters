@@ -1,29 +1,20 @@
 "use client";
-/* eslint-disable @next/next/no-img-element */
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
-import { getApiErrorMessage } from "@/lib/apiError";
 
-type EventImageType = "tooltip" | "hero_side";
+interface ComboDeal {
+  id: string;
+  name: string;
+}
 
 interface EventItem {
   id: number;
   name: string;
   event_date: string;
-  hero_header: string;
-  hero_header_sage: string;
-  hero_subheader: string;
-  promo_details: string | null;
-  tooltip_enabled: boolean;
-  tooltip_header: string | null;
-  tooltip_body: string | null;
-  tooltip_image_key: string | null;
-  hero_side_image_key: string | null;
-  etransfer_enabled: boolean;
-  etransfer_email: string | null;
+  kind?: string;
   is_active: boolean;
   item_ids: string[];
   location_ids: string[];
@@ -31,188 +22,6 @@ interface EventItem {
   updated_at: string | null;
   total_revenue?: number;
   order_count?: number;
-}
-
-interface AdminItem {
-  id: string;
-  name: string;
-  price: number;
-  discounted_price: number | null;
-}
-
-interface AdminLocation {
-  id: string;
-  name: string;
-}
-
-interface EventImage {
-  key: string;
-  type: EventImageType;
-  label: string;
-  path: string;
-  alt: string;
-}
-
-interface EventImageCatalog {
-  helper: {
-    tooltip_target_dir: string;
-    hero_side_target_dir: string;
-  };
-  images: EventImage[];
-}
-
-interface EventForm {
-  name: string;
-  event_date: string;
-  hero_header: string;
-  hero_header_sage: string;
-  hero_subheader: string;
-  promo_details: string;
-  tooltip_enabled: boolean;
-  tooltip_header: string;
-  tooltip_body: string;
-  tooltip_image_key: string | null;
-  hero_side_image_key: string | null;
-  etransfer_enabled: boolean;
-  etransfer_email: string;
-  item_ids: string[];
-  location_ids: string[];
-  combo_deals: ComboDeal[];
-}
-
-interface ComboRequirement {
-  item_id: string;
-  min_quantity: number;
-}
-
-interface ComboDiscount {
-  type: "fixed_amount" | "percentage";
-  amount: number;
-  applies_to: "combo_total" | "item";
-  target_item_id: string | null;
-}
-
-interface ComboDeal {
-  id: string;
-  name: string;
-  enabled: boolean;
-  sort_order: number;
-  requirements: ComboRequirement[];
-  discount: ComboDiscount;
-}
-
-const EMPTY_FORM: EventForm = {
-  name: "",
-  event_date: "",
-  hero_header: "",
-  hero_header_sage: "",
-  hero_subheader: "",
-  promo_details: "",
-  tooltip_enabled: false,
-  tooltip_header: "",
-  tooltip_body: "",
-  tooltip_image_key: null,
-  hero_side_image_key: null,
-  etransfer_enabled: false,
-  etransfer_email: "",
-  item_ids: [],
-  location_ids: [],
-  combo_deals: [],
-};
-
-const EMPTY_IMAGE_CATALOG: EventImageCatalog = {
-  helper: {
-    tooltip_target_dir: "frontend/public/assets/img/tooltip",
-    hero_side_target_dir: "frontend/public/assets/img/hero-side",
-  },
-  images: [],
-};
-
-function normalizeImageCatalog(data: unknown): EventImageCatalog {
-  if (!data || typeof data !== "object") return EMPTY_IMAGE_CATALOG;
-  const raw = data as { helper?: Record<string, unknown>; images?: unknown[] };
-  const helper = raw.helper ?? {};
-  const images = Array.isArray(raw.images) ? raw.images : [];
-  const normalizedImages: EventImage[] = images
-    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
-    .map((entry) => {
-      const type: EventImageType = entry.type === "hero_side" ? "hero_side" : "tooltip";
-      return {
-        key: typeof entry.key === "string" ? entry.key : "",
-        type,
-        label: typeof entry.label === "string" ? entry.label : "",
-        path: typeof entry.path === "string" ? entry.path : "",
-        alt: typeof entry.alt === "string" ? entry.alt : "",
-      };
-    })
-    .filter((entry) => Boolean(entry.key) && Boolean(entry.path) && Boolean(entry.label));
-
-  return {
-    helper: {
-      tooltip_target_dir:
-        typeof helper.tooltip_target_dir === "string"
-          ? helper.tooltip_target_dir
-          : EMPTY_IMAGE_CATALOG.helper.tooltip_target_dir,
-      hero_side_target_dir:
-        typeof helper.hero_side_target_dir === "string"
-          ? helper.hero_side_target_dir
-          : EMPTY_IMAGE_CATALOG.helper.hero_side_target_dir,
-    },
-    images: normalizedImages,
-  };
-}
-
-function createEmptyComboDeal(sortOrder: number): ComboDeal {
-  return {
-    id: crypto.randomUUID(),
-    name: "",
-    enabled: true,
-    sort_order: sortOrder,
-    requirements: [{ item_id: "", min_quantity: 1 }],
-    discount: {
-      type: "fixed_amount",
-      amount: 0,
-      applies_to: "combo_total",
-      target_item_id: null,
-    },
-  };
-}
-
-function normalizeComboDeals(comboDeals: ComboDeal[]): ComboDeal[] {
-  return comboDeals.map((combo, index) => ({
-    ...combo,
-    sort_order: index,
-    requirements: combo.requirements.map((requirement) => ({
-      item_id: requirement.item_id,
-      min_quantity: Math.max(1, Number(requirement.min_quantity || 1)),
-    })),
-    discount: {
-      ...combo.discount,
-      amount: Number(combo.discount.amount || 0),
-      target_item_id: combo.discount.applies_to === "item" ? (combo.discount.target_item_id ?? null) : null,
-    },
-  }));
-}
-
-function comboPreviewText(
-  combo: ComboDeal,
-  itemsById: Map<string, AdminItem>,
-  currency: string
-): string {
-  const requirementCopy = combo.requirements
-    .map((requirement) => {
-      const label = itemsById.get(requirement.item_id)?.name ?? "item";
-      return `${requirement.min_quantity} x ${label}`;
-    })
-    .join(", ");
-  const amountCopy = combo.discount.type === "percentage"
-    ? `${combo.discount.amount.toFixed(2).replace(/\.00$/, "")}%`
-    : `${currency} $${combo.discount.amount.toFixed(2)}`;
-  if (combo.discount.applies_to === "combo_total") {
-    return `Buy ${requirementCopy} and save ${amountCopy} on the combo.`;
-  }
-  const targetLabel = itemsById.get(combo.discount.target_item_id ?? "")?.name ?? "selected item";
-  return `Buy ${requirementCopy} and save ${amountCopy} on ${targetLabel}.`;
 }
 
 function Spinner() {
@@ -224,484 +33,79 @@ function Spinner() {
   );
 }
 
-interface SelectorSectionProps {
-  title: string;
-  open: boolean;
-  onToggle: () => void;
-  allItems: { id: string; label: string; sublabel?: string }[];
-  selectedIds: string[];
-  onSelect: (id: string) => void;
-  onDeselect: (id: string) => void;
-  search: string;
-  onSearchChange: (q: string) => void;
-  searchPlaceholder?: string;
-  emptyLabel?: string;
-}
-
-function SelectorSection({
-  title,
-  open,
-  onToggle,
-  allItems,
-  selectedIds,
-  onSelect,
-  onDeselect,
-  search,
-  onSearchChange,
-  searchPlaceholder = "Search...",
-  emptyLabel = "Nothing selected yet.",
-}: SelectorSectionProps) {
-  const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-
-  const selectedItems = useMemo(() => {
-    return allItems.filter((item) => selectedSet.has(item.id));
-  }, [allItems, selectedSet]);
-
-  const unselectedItems = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    const unselected = allItems.filter((item) => !selectedSet.has(item.id));
-    if (!q) return unselected;
-    return unselected.filter((item) => item.label.toLowerCase().includes(q));
-  }, [allItems, selectedSet, search]);
-
-  const allSelected = allItems.length > 0 && allItems.every((item) => selectedSet.has(item.id));
-
-  return (
-    <div className="rounded-2xl border" style={{ borderColor: "var(--color-border)", background: "white" }}>
-      <button
-        type="button"
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-4 py-3 text-left"
-      >
-        <div>
-          <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>{title}</p>
-          <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-            {selectedItems.length} selected of {allItems.length}
-          </p>
-        </div>
-        <span className="text-sm" style={{ color: "var(--color-muted)" }}>{open ? "Hide" : "Show"}</span>
-      </button>
-
-      {selectedItems.length > 0 ? (
-        <div className="px-4 pb-3 flex flex-wrap gap-2">
-          {selectedItems.map((item) => (
-            <span
-              key={item.id}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold"
-              style={{ background: "#f0fdf4", border: "1px solid var(--color-sage)", color: "var(--color-forest)" }}
-            >
-              {item.label}
-              {item.sublabel && (
-                <span style={{ color: "var(--color-sage)", fontWeight: 400 }}>{item.sublabel}</span>
-              )}
-              <button
-                type="button"
-                onClick={() => onDeselect(item.id)}
-                aria-label={`Remove ${item.label}`}
-                className="ml-0.5 w-4 h-4 flex items-center justify-center rounded-full hover:bg-green-200 transition-all text-xs leading-none"
-                style={{ color: "var(--color-forest)" }}
-              >
-                x
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : (
-        !open && (
-          <div className="px-4 pb-3">
-            <p className="text-xs" style={{ color: "var(--color-muted)" }}>{emptyLabel}</p>
-          </div>
-        )
-      )}
-
-      {open && (
-        <div className="px-4 pb-4 border-t" style={{ borderColor: "var(--color-border)" }}>
-          {allItems.length === 0 ? (
-            <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>No items found.</p>
-          ) : allSelected ? (
-            <p className="text-sm py-3" style={{ color: "var(--color-muted)" }}>All items selected.</p>
-          ) : (
-            <div className="space-y-3 pt-3">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => onSearchChange(e.target.value)}
-                placeholder={searchPlaceholder}
-                className="w-full px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
-                style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
-              />
-              <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-                {unselectedItems.length === 0 ? (
-                  <p className="text-sm py-2" style={{ color: "var(--color-muted)" }}>No matching items.</p>
-                ) : (
-                  unselectedItems.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => onSelect(item.id)}
-                      className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left cursor-pointer transition-all hover:bg-gray-50"
-                      style={{ border: "1px solid var(--color-border)", background: "white" }}
-                    >
-                      <span className="flex-1 text-sm font-medium" style={{ color: "var(--color-text)" }}>
-                        {item.label}
-                      </span>
-                      {item.sublabel && (
-                        <span className="text-sm" style={{ color: "var(--color-muted)" }}>{item.sublabel}</span>
-                      )}
-                    </button>
-                  ))
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function AdminEventsPageInner() {
+export default function AdminEventsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-
   const [events, setEvents] = useState<EventItem[]>([]);
-  const [allItems, setAllItems] = useState<AdminItem[]>([]);
-  const [allLocations, setAllLocations] = useState<AdminLocation[]>([]);
-  const [imageCatalog, setImageCatalog] = useState<EventImageCatalog>(EMPTY_IMAGE_CATALOG);
-
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [activating, setActivating] = useState<number | null>(null);
-  const [deleting, setDeleting] = useState<number | null>(null);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  const [pendingToggle, setPendingToggle] = useState<{ eventId: number; eventName: string; willActivate: boolean } | null>(null);
-
   const [searchQuery, setSearchQuery] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [activating, setActivating] = useState<number | null>(null);
+  const [deleting, setDeleting] = useState<number | null>(null);
+  const [pendingToggle, setPendingToggle] = useState<{ eventId: number; eventName: string; willActivate: boolean } | null>(null);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const PAGE_SIZE = 10;
 
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<EventItem | null>(null);
-  const [form, setForm] = useState<EventForm>({ ...EMPTY_FORM });
-
-  const [itemsOpen, setItemsOpen] = useState(false);
-  const [locationsOpen, setLocationsOpen] = useState(false);
-  const [tooltipOpen, setTooltipOpen] = useState(false);
-  const [comboDealsOpen, setComboDealsOpen] = useState(false);
-  const [itemsSearch, setItemsSearch] = useState("");
-  const [locationsSearch, setLocationsSearch] = useState("");
-  const showToast = (message: string, type: "success" | "error") => {
+  const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  };
-
-  const tooltipImageOptions = useMemo(
-    () => imageCatalog.images.filter((image) => image.type === "tooltip"),
-    [imageCatalog.images]
-  );
-  const heroSideImageOptions = useMemo(
-    () => imageCatalog.images.filter((image) => image.type === "hero_side"),
-    [imageCatalog.images]
-  );
-
-  const selectedTooltipImage = useMemo(
-    () => tooltipImageOptions.find((image) => image.key === form.tooltip_image_key) ?? null,
-    [tooltipImageOptions, form.tooltip_image_key]
-  );
-  const selectedHeroSideImage = useMemo(
-    () => heroSideImageOptions.find((image) => image.key === form.hero_side_image_key) ?? null,
-    [heroSideImageOptions, form.hero_side_image_key]
-  );
-  const itemsById = useMemo(
-    () => new Map(allItems.map((item) => [item.id, item] as const)),
-    [allItems]
-  );
-
-  const filteredEvents = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
-    return q ? events.filter((e) => e.name.toLowerCase().includes(q)) : events;
-  }, [events, searchQuery]);
-
-  const totalPages = Math.ceil(filteredEvents.length / PAGE_SIZE);
-  const pagedEvents = filteredEvents.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-
-  const resetSelectorState = useCallback(() => {
-    setItemsOpen(false);
-    setLocationsOpen(false);
-    setItemsSearch("");
-    setLocationsSearch("");
-    setTooltipOpen(false);
-    setComboDealsOpen(false);
+    window.setTimeout(() => setToast(null), 4000);
   }, []);
 
-  const loadData = useCallback(async () => {
+  const loadEvents = useCallback(async () => {
     const token = await getAdminToken();
     if (!token) return;
-    const headers = { Authorization: `Bearer ${token}` };
-    const [eventsRes, itemsRes, locsRes, imagesRes] = await Promise.all([
-      fetch(`${API_URL}/api/admin/events`, { headers }),
-      fetch(`${API_URL}/api/admin/items`, { headers }),
-      fetch(`${API_URL}/api/admin/locations`, { headers }),
-      fetch(`${API_URL}/api/admin/event-images`, { headers }),
-    ]);
-    if (!eventsRes.ok || !itemsRes.ok || !locsRes.ok || !imagesRes.ok) {
-      throw new Error("Failed to load data");
+    const res = await fetch(`${API_URL}/api/admin/events`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      throw new Error("Failed to load events");
     }
-
-    const [eventsData, itemsData, locationsData, imageCatalogData] = await Promise.all([
-      eventsRes.json() as Promise<EventItem[]>,
-      itemsRes.json() as Promise<AdminItem[]>,
-      locsRes.json() as Promise<AdminLocation[]>,
-      imagesRes.json() as Promise<unknown>,
-    ]);
-
-    setEvents(eventsData);
-    setAllItems(itemsData);
-    setAllLocations(locationsData);
-    setImageCatalog(normalizeImageCatalog(imageCatalogData));
+    const data = (await res.json()) as EventItem[];
+    setEvents(data);
   }, []);
 
   useEffect(() => {
     setLoading(true);
-    loadData()
+    loadEvents()
       .catch(() => showToast("Failed to load events", "error"))
       .finally(() => setLoading(false));
-  }, [loadData]);
+  }, [loadEvents, showToast]);
+
+  const filteredEvents = useMemo(() => {
+    const query = searchQuery.trim().toLowerCase();
+    return query ? events.filter((event) => event.name.toLowerCase().includes(query)) : events;
+  }, [events, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredEvents.length / PAGE_SIZE));
+  const pagedEvents = filteredEvents.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery]);
 
   useEffect(() => {
-    if (totalPages === 0) {
-      setCurrentPage(1);
-      return;
-    }
-    setCurrentPage((p) => (p > totalPages ? totalPages : p));
+    setCurrentPage((page) => Math.min(page, totalPages));
   }, [totalPages]);
 
-  const openAdd = useCallback(() => {
-    setEditingEvent(null);
-    setForm({ ...EMPTY_FORM });
-    resetSelectorState();
-    setModalOpen(true);
-  }, [resetSelectorState]);
-
-  const openEdit = useCallback(
-    (event: EventItem) => {
-      setEditingEvent(event);
-      setForm({
-        name: event.name,
-        event_date: event.event_date,
-        hero_header: event.hero_header,
-        hero_header_sage: event.hero_header_sage ?? "",
-        hero_subheader: event.hero_subheader,
-        promo_details: event.promo_details ?? "",
-        tooltip_enabled: event.tooltip_enabled,
-        tooltip_header: event.tooltip_header ?? "",
-        tooltip_body: event.tooltip_body ?? "",
-        tooltip_image_key: event.tooltip_image_key,
-        hero_side_image_key: event.hero_side_image_key,
-        etransfer_enabled: event.etransfer_enabled,
-        etransfer_email: event.etransfer_email ?? "",
-        item_ids: [...event.item_ids],
-        location_ids: [...event.location_ids],
-        combo_deals: normalizeComboDeals(event.combo_deals ?? []),
-      });
-      resetSelectorState();
-      setModalOpen(true);
-    },
-    [resetSelectorState]
-  );
-
-  useEffect(() => {
-    if (events.length === 0) return;
-    const editId = searchParams.get("edit");
-    if (!editId) return;
-    const match = events.find((e) => String(e.id) === editId);
-    if (!match) return;
-    openEdit(match);
-    router.replace("/admin/config");
-  }, [events, searchParams, router, openEdit]);
-
-  function toggleCheckbox(field: "item_ids" | "location_ids", id: string) {
-    setForm((prev) => {
-      const current = prev[field];
-      return {
-        ...prev,
-        [field]: current.includes(id) ? current.filter((x) => x !== id) : [...current, id],
-      };
-    });
-  }
-
-  function addComboDeal() {
-    setForm((prev) => ({
-      ...prev,
-      combo_deals: [...prev.combo_deals, createEmptyComboDeal(prev.combo_deals.length)],
-    }));
-    setComboDealsOpen(true);
-  }
-
-  function updateComboDeal(comboId: string, updater: (combo: ComboDeal) => ComboDeal) {
-    setForm((prev) => ({
-      ...prev,
-      combo_deals: prev.combo_deals.map((combo) =>
-        combo.id === comboId ? updater(combo) : combo
-      ),
-    }));
-  }
-
-  function deleteComboDeal(comboId: string) {
-    setForm((prev) => ({
-      ...prev,
-      combo_deals: normalizeComboDeals(prev.combo_deals.filter((combo) => combo.id !== comboId)),
-    }));
-  }
-
-  function moveComboDeal(comboId: string, direction: -1 | 1) {
-    setForm((prev) => {
-      const index = prev.combo_deals.findIndex((combo) => combo.id === comboId);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= prev.combo_deals.length) {
-        return prev;
-      }
-      const nextCombos = [...prev.combo_deals];
-      const [moved] = nextCombos.splice(index, 1);
-      nextCombos.splice(nextIndex, 0, moved);
-      return {
-        ...prev,
-        combo_deals: normalizeComboDeals(nextCombos),
-      };
-    });
-  }
-
-  async function handleSave() {
-    if (!form.name.trim() || !form.event_date.trim() || !form.hero_header.trim()) {
-      showToast("Event Name, Event Date, and Hero Header (White) are required", "error");
-      return;
-    }
-    if (form.tooltip_enabled && (!form.tooltip_header.trim() || !form.tooltip_body.trim())) {
-      showToast("Tooltip Header and Tooltip Body are required when tooltip is enabled", "error");
-      return;
-    }
-    if (form.etransfer_enabled && !form.etransfer_email.trim()) {
-      showToast("E-transfer email is required when e-transfer is enabled", "error");
-      return;
-    }
-
-    const selectedItemIds = new Set(form.item_ids);
-    for (const combo of form.combo_deals) {
-      if (!combo.name.trim()) {
-        showToast("Each combo deal needs a name", "error");
-        return;
-      }
-      if (combo.requirements.length === 0) {
-        showToast(`Combo "${combo.name || "Untitled combo"}" needs at least one requirement`, "error");
-        return;
-      }
-      const requirementItemIds = combo.requirements.map((requirement) => requirement.item_id).filter(Boolean);
-      if (requirementItemIds.length !== combo.requirements.length) {
-        showToast(`Combo "${combo.name}" has a requirement without an item`, "error");
-        return;
-      }
-      if (new Set(requirementItemIds).size !== requirementItemIds.length) {
-        showToast(`Combo "${combo.name}" references the same item more than once`, "error");
-        return;
-      }
-      for (const requirement of combo.requirements) {
-        if (!selectedItemIds.has(requirement.item_id)) {
-          showToast(`Combo "${combo.name}" references an item that is not selected for the event`, "error");
-          return;
-        }
-        if (requirement.min_quantity < 1) {
-          showToast(`Combo "${combo.name}" has an invalid minimum quantity`, "error");
-          return;
-        }
-      }
-      if (combo.discount.amount <= 0) {
-        showToast(`Combo "${combo.name}" needs a discount amount greater than 0`, "error");
-        return;
-      }
-      if (combo.discount.type === "percentage" && combo.discount.amount > 100) {
-        showToast(`Combo "${combo.name}" percentage discounts cannot exceed 100`, "error");
-        return;
-      }
-      if (combo.discount.applies_to === "item") {
-        if (!combo.discount.target_item_id) {
-          showToast(`Combo "${combo.name}" needs a target item`, "error");
-          return;
-        }
-        if (!requirementItemIds.includes(combo.discount.target_item_id)) {
-          showToast(`Combo "${combo.name}" target item must be one of its requirements`, "error");
-          return;
-        }
-      }
-    }
-
-    setSaving(true);
+  async function handleDelete(event: EventItem) {
+    if (!confirm(`Delete "${event.name}"? This cannot be undone.`)) return;
+    setDeleting(event.id);
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const body = {
-        name: form.name.trim(),
-        event_date: form.event_date.trim(),
-        hero_header: form.hero_header.trim(),
-        hero_header_sage: form.hero_header_sage.trim(),
-        hero_subheader: form.hero_subheader.trim(),
-        promo_details: form.promo_details.trim() || null,
-        tooltip_enabled: form.tooltip_enabled,
-        tooltip_header: form.tooltip_enabled ? form.tooltip_header.trim() : null,
-        tooltip_body: form.tooltip_enabled ? form.tooltip_body.trim() : null,
-        tooltip_image_key: form.tooltip_enabled ? (form.tooltip_image_key || null) : null,
-        hero_side_image_key: form.hero_side_image_key || null,
-        etransfer_enabled: form.etransfer_enabled,
-        etransfer_email: form.etransfer_enabled ? form.etransfer_email.trim() : null,
-        item_ids: form.item_ids,
-        location_ids: form.location_ids,
-        combo_deals: normalizeComboDeals(form.combo_deals).map((combo, index) => ({
-          ...combo,
-          name: combo.name.trim(),
-          sort_order: index,
-          requirements: combo.requirements.map((requirement) => ({
-            item_id: requirement.item_id,
-            min_quantity: Math.max(1, Number(requirement.min_quantity || 1)),
-          })),
-          discount: {
-            ...combo.discount,
-            amount: Number(combo.discount.amount || 0),
-            target_item_id: combo.discount.applies_to === "item" ? combo.discount.target_item_id : null,
-          },
-        })),
-      };
-
-      const url = editingEvent
-        ? `${API_URL}/api/admin/events/${editingEvent.id}`
-        : `${API_URL}/api/admin/events`;
-      const method = editingEvent ? "PUT" : "POST";
-
-      const res = await fetch(url, {
-        method,
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-        body: JSON.stringify(body),
+      const res = await fetch(`${API_URL}/api/admin/events/${event.id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
       });
-
       if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to save event"));
+        throw new Error("Delete failed");
       }
-
-      setModalOpen(false);
-      await loadData();
-      showToast(editingEvent ? "Event updated." : "Event created.", "success");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Failed to save event";
-      showToast(message, "error");
+      await loadEvents();
+      showToast("Event deleted.", "success");
+    } catch {
+      showToast("Failed to delete event", "error");
     } finally {
-      setSaving(false);
+      setDeleting(null);
     }
-  }
-
-  function requestToggle(event: EventItem) {
-    setPendingToggle({ eventId: event.id, eventName: event.name, willActivate: !event.is_active });
   }
 
   async function handleToggleConfirm() {
@@ -717,39 +121,17 @@ function AdminEventsPageInner() {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (!res.ok) throw new Error(`${willActivate ? "Activate" : "Deactivate"} failed`);
-      await loadData();
-      showToast(willActivate ? "Event is now active." : "Event deactivated.", "success");
+      if (!res.ok) {
+        throw new Error("Toggle failed");
+      }
+      await loadEvents();
+      showToast(willActivate ? "Event is now live." : "Event deactivated.", "success");
     } catch {
       showToast(`Failed to ${willActivate ? "activate" : "deactivate"} event`, "error");
     } finally {
       setActivating(null);
     }
   }
-
-  async function handleDelete(event: EventItem) {
-    if (!confirm(`Delete "${event.name}"? This cannot be undone.`)) return;
-    setDeleting(event.id);
-    try {
-      const token = await getAdminToken();
-      if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/events/${event.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Delete failed");
-      await loadData();
-      showToast("Event deleted.", "success");
-    } catch {
-      showToast("Failed to delete event", "error");
-    } finally {
-      setDeleting(null);
-    }
-  }
-
-  const labelClass = "block text-sm font-medium mb-1.5";
-  const inputClass =
-    "w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]";
 
   if (loading) {
     return (
@@ -776,37 +158,27 @@ function AdminEventsPageInner() {
 
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1
-            className="text-2xl font-bold mb-1"
-            style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
-          >
+          <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
             Events
           </h1>
           <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            Manage events and set which one is live on the order page.
+            Manage events and open dedicated event editors for setup.
           </p>
         </div>
         <button
-          onClick={openAdd}
+          onClick={() => router.push("/admin/events/new")}
           className="px-5 py-2.5 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98] shrink-0"
           style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-          onMouseEnter={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
-          }}
-          onMouseLeave={(e) => {
-            (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)";
-          }}
         >
           + Add Event
         </button>
       </div>
 
-      {/* Search */}
       <div className="mb-4">
         <input
           type="text"
           value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
+          onChange={(event) => setSearchQuery(event.target.value)}
           placeholder="Search events by name..."
           className="w-full sm:w-80 px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
           style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
@@ -814,10 +186,7 @@ function AdminEventsPageInner() {
       </div>
 
       {filteredEvents.length === 0 ? (
-        <div
-          className="rounded-2xl p-12 text-center"
-          style={{ background: "white", border: "1px solid var(--color-border)" }}
-        >
+        <div className="rounded-2xl p-12 text-center" style={{ background: "white", border: "1px solid var(--color-border)" }}>
           <p className="text-sm" style={{ color: "var(--color-muted)" }}>
             {events.length === 0 ? "No events yet. Create one to get started." : "No events match your search."}
           </p>
@@ -825,7 +194,13 @@ function AdminEventsPageInner() {
       ) : (
         <div className="space-y-2">
           {pagedEvents.map((event) => {
-            const rev = new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(event.total_revenue ?? 0);
+            const isRandomRequests = event.kind === "random_requests";
+            const revenue = new Intl.NumberFormat("en-CA", {
+              style: "currency",
+              currency: CURRENCY,
+              maximumFractionDigits: 0,
+            }).format(event.total_revenue ?? 0);
+
             return (
               <div
                 key={event.id}
@@ -834,7 +209,6 @@ function AdminEventsPageInner() {
                 onClick={() => router.push(`/admin/events/${event.id}`)}
               >
                 <div className="px-5 py-4 flex items-center gap-4">
-                  {/* Name + badge + date stacked */}
                   <div className="flex flex-col gap-0.5 flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <h2 className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>
@@ -842,109 +216,108 @@ function AdminEventsPageInner() {
                       </h2>
                       <span
                         className="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold"
-                        style={
-                          event.is_active
-                            ? { background: "#d1fae5", color: "#065f46" }
-                            : { background: "#f3f4f6", color: "#6b7280" }
-                        }
+                        style={event.is_active ? { background: "#d1fae5", color: "#065f46" } : { background: "#f3f4f6", color: "#6b7280" }}
                       >
                         {event.is_active ? "ACTIVE" : "INACTIVE"}
                       </span>
+                      {isRandomRequests && (
+                        <span
+                          className="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold"
+                          style={{ background: "#f0f7ea", color: "var(--color-forest)" }}
+                        >
+                          SYSTEM
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs" style={{ color: "var(--color-muted)" }}>
                       {event.event_date}
                     </span>
+                    <span className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      {event.combo_deals.length} combo{event.combo_deals.length === 1 ? "" : "s"} configured
+                    </span>
                   </div>
 
-                  {/* Revenue + Orders */}
-                  <div className="flex items-center gap-5 shrink-0">
-                    <div className="hidden md:flex items-center gap-2">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <rect x="2" y="6" width="20" height="12" rx="2" />
-                        <circle cx="12" cy="12" r="2" />
-                        <path d="M6 12h.01M18 12h.01" />
-                      </svg>
-                      <div>
-                        <p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{rev}</p>
-                        <p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>revenue</p>
-                      </div>
+                  <div className="hidden md:flex items-center gap-5 shrink-0">
+                    <div>
+                      <p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{revenue}</p>
+                      <p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>revenue</p>
                     </div>
-                    <div className="hidden md:flex items-center gap-2">
-                      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M6 2L3 6v14a2 2 0 002 2h14a2 2 0 002-2V6l-3-4z" />
-                        <line x1="3" y1="6" x2="21" y2="6" />
-                        <path d="M16 10a4 4 0 01-8 0" />
-                      </svg>
-                      <div>
-                        <p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{event.order_count ?? 0}</p>
-                        <p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>orders</p>
-                      </div>
+                    <div>
+                      <p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{event.order_count ?? 0}</p>
+                      <p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>orders</p>
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 shrink-0">
-                    <button
-                      onClick={(e) => { e.stopPropagation(); openEdit(event); }}
-                      className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
-                      style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
-                      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--color-cream)"; }}
-                      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "white"; }}
-                    >
-                      Edit
-                    </button>
-                    {!event.is_active && (
+                  <div className="flex items-center gap-2 shrink-0" onClick={(eventValue) => eventValue.stopPropagation()}>
+                    {isRandomRequests ? (
+                      <span
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium"
+                        style={{ border: "1px solid var(--color-border)", color: "var(--color-muted)", background: "var(--color-cream)" }}
+                      >
+                        Reserved bucket
+                      </span>
+                    ) : (
                       <button
-                        onClick={(e) => { e.stopPropagation(); handleDelete(event); }}
+                        onClick={() => router.push(`/admin/events/${event.id}/edit`)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                        style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {!event.is_active && !isRandomRequests && (
+                      <button
+                        onClick={() => handleDelete(event)}
                         disabled={deleting === event.id}
                         className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all disabled:opacity-60"
                         style={{ background: "#fee2e2", color: "#991b1b" }}
-                        onMouseEnter={(e) => { if (deleting !== event.id) (e.currentTarget as HTMLButtonElement).style.background = "#fecaca"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#fee2e2"; }}
                       >
                         {deleting === event.id ? "..." : "Delete"}
                       </button>
                     )}
-                    {/* Active toggle */}
-                    <div className="flex flex-col items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        role="switch"
-                        aria-checked={event.is_active}
-                        onClick={() => requestToggle(event)}
-                        disabled={activating === event.id}
-                        title={event.is_active ? "Deactivate event" : "Activate event"}
-                        style={{
-                          width: "44px",
-                          height: "24px",
-                          borderRadius: "12px",
-                          background: event.is_active ? "var(--color-forest)" : "var(--color-border)",
-                          border: "none",
-                          cursor: activating === event.id ? "not-allowed" : "pointer",
-                          position: "relative",
-                          transition: "background 0.2s",
-                          flexShrink: 0,
-                          opacity: activating === event.id ? 0.5 : 1,
-                          padding: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            position: "absolute",
-                            top: "2px",
-                            left: event.is_active ? "22px" : "2px",
-                            width: "20px",
-                            height: "20px",
-                            borderRadius: "50%",
-                            background: "var(--color-cream)",
-                            transition: "left 0.2s",
-                            boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
-                          }}
-                        />
-                      </button>
-                      <span style={{ fontSize: "10px", color: event.is_active ? "var(--color-forest)" : "var(--color-muted)", fontWeight: 600 }}>
-                        {activating === event.id ? "..." : (event.is_active ? "Live" : "Off")}
+                    {isRandomRequests ? (
+                      <span style={{ fontSize: "10px", color: "var(--color-muted)", fontWeight: 600 }}>
+                        System only
                       </span>
-                    </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <button
+                          role="switch"
+                          aria-checked={event.is_active}
+                          onClick={() => setPendingToggle({ eventId: event.id, eventName: event.name, willActivate: !event.is_active })}
+                          disabled={activating === event.id}
+                          title={event.is_active ? "Deactivate event" : "Activate event"}
+                          style={{
+                            width: "44px",
+                            height: "24px",
+                            borderRadius: "12px",
+                            background: event.is_active ? "var(--color-forest)" : "var(--color-border)",
+                            border: "none",
+                            cursor: activating === event.id ? "not-allowed" : "pointer",
+                            position: "relative",
+                            opacity: activating === event.id ? 0.5 : 1,
+                            padding: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              position: "absolute",
+                              top: "2px",
+                              left: event.is_active ? "22px" : "2px",
+                              width: "20px",
+                              height: "20px",
+                              borderRadius: "50%",
+                              background: "var(--color-cream)",
+                              transition: "left 0.2s",
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+                            }}
+                          />
+                        </button>
+                        <span style={{ fontSize: "10px", color: event.is_active ? "var(--color-forest)" : "var(--color-muted)", fontWeight: 600 }}>
+                          {activating === event.id ? "..." : event.is_active ? "Live" : "Off"}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -953,11 +326,10 @@ function AdminEventsPageInner() {
         </div>
       )}
 
-      {/* Pagination */}
-      {totalPages > 1 && (
+      {filteredEvents.length > PAGE_SIZE && (
         <div className="mt-4 flex items-center justify-center gap-3">
           <button
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+            onClick={() => setCurrentPage((page) => Math.max(1, page - 1))}
             disabled={currentPage === 1}
             className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-40"
             style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
@@ -968,7 +340,7 @@ function AdminEventsPageInner() {
             Page {currentPage} of {totalPages}
           </span>
           <button
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => setCurrentPage((page) => Math.min(totalPages, page + 1))}
             disabled={currentPage === totalPages}
             className="px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-40"
             style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
@@ -978,16 +350,9 @@ function AdminEventsPageInner() {
         </div>
       )}
 
-      {/* Activate / Deactivate confirmation dialog */}
       {pendingToggle && (
-        <div
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.5)" }}
-        >
-          <div
-            className="w-full max-w-sm rounded-3xl shadow-2xl p-8"
-            style={{ background: "white" }}
-          >
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.5)" }}>
+          <div className="w-full max-w-sm rounded-3xl shadow-2xl p-8" style={{ background: "white" }}>
             <h3
               style={{
                 fontFamily: "var(--font-serif)",
@@ -1001,9 +366,8 @@ function AdminEventsPageInner() {
             </h3>
             <p style={{ color: "var(--color-muted)", fontSize: "14px", lineHeight: 1.65, marginBottom: "28px" }}>
               {pendingToggle.willActivate
-                ? <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will go live immediately and become the active event on the order page. Any currently active event will be taken offline.</>
-                : <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will be taken offline immediately. The order page will show the no-events placeholder until another event is activated.</>
-              }
+                ? <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will go live immediately and replace the current active event.</>
+                : <><strong style={{ color: "var(--color-text)" }}>{pendingToggle.eventName}</strong> will be taken offline immediately.</>}
             </p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", alignItems: "center" }}>
               <button
@@ -1035,690 +399,6 @@ function AdminEventsPageInner() {
           </div>
         </div>
       )}
-
-      {modalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ background: "rgba(0,0,0,0.45)" }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) setModalOpen(false);
-          }}
-        >
-          <div
-            className="w-full max-w-3xl rounded-3xl shadow-2xl overflow-y-auto"
-            style={{ background: "white", maxHeight: "90vh" }}
-          >
-            <div className="px-8 py-6 border-b" style={{ borderColor: "var(--color-border)" }}>
-              <h2 className="text-lg font-semibold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
-                {editingEvent ? "Edit Event" : "New Event"}
-              </h2>
-            </div>
-
-            <div className="px-8 py-6 space-y-5">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                    Event Name <span style={{ color: "#dc2626" }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.name}
-                    onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
-                    placeholder="e.g. February 2026 Batch"
-                    className={inputClass}
-                    style={{ color: "var(--color-text)" }}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                    Event Date <span style={{ color: "#dc2626" }}>*</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.event_date}
-                    onChange={(e) => setForm((p) => ({ ...p, event_date: e.target.value }))}
-                    placeholder="e.g. February 28th, 2026"
-                    className={inputClass}
-                    style={{ color: "var(--color-text)" }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                  Hero Header (White) <span style={{ color: "#dc2626" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  value={form.hero_header}
-                  onChange={(e) => setForm((p) => ({ ...p, hero_header: e.target.value }))}
-                  placeholder="e.g. We're Making"
-                  className={inputClass}
-                  style={{ color: "var(--color-text)" }}
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                    Hero Header (Sage) <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.hero_header_sage}
-                    onChange={(e) => setForm((p) => ({ ...p, hero_header_sage: e.target.value }))}
-                    placeholder="e.g. Lamprais"
-                    className={inputClass}
-                    style={{ color: "var(--color-text)" }}
-                  />
-                </div>
-
-                <div>
-                  <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                    Hero Subheader <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={form.hero_subheader}
-                    onChange={(e) => setForm((p) => ({ ...p, hero_subheader: e.target.value }))}
-                    placeholder="e.g. A fresh batch, made with love."
-                    className={inputClass}
-                    style={{ color: "var(--color-text)" }}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                  Promo Details <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
-                </label>
-                <textarea
-                  value={form.promo_details}
-                  onChange={(e) => setForm((p) => ({ ...p, promo_details: e.target.value }))}
-                  placeholder="e.g. Special launch price for this batch."
-                  rows={2}
-                  className={inputClass}
-                  style={{ color: "var(--color-text)", resize: "vertical" }}
-                />
-              </div>
-
-              <div className="rounded-2xl border" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
-                <button
-                  type="button"
-                  onClick={() => setTooltipOpen((v) => !v)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-left"
-                >
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Tooltip</p>
-                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                      {form.tooltip_enabled ? "Enabled" : "Disabled"} -- expand to configure
-                    </p>
-                  </div>
-                  <span className="text-sm" style={{ color: "var(--color-muted)" }}>{tooltipOpen ? "Hide" : "Show"}</span>
-                </button>
-
-                {tooltipOpen && (
-                  <div className="px-4 pb-4 border-t" style={{ borderColor: "var(--color-border)" }}>
-                    <div className="flex items-center justify-end pt-3 mb-3">
-                      <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
-                        <input
-                          type="checkbox"
-                          checked={form.tooltip_enabled}
-                          onChange={(e) => setForm((p) => ({
-                            ...p,
-                            tooltip_enabled: e.target.checked,
-                            tooltip_header: e.target.checked ? p.tooltip_header : "",
-                            tooltip_body: e.target.checked ? p.tooltip_body : "",
-                            tooltip_image_key: e.target.checked ? p.tooltip_image_key : null,
-                          }))}
-                          style={{ accentColor: "var(--color-sage)" }}
-                        />
-                        Enable Tooltip
-                      </label>
-                    </div>
-
-                    {form.tooltip_enabled ? (
-                      <div className="space-y-4">
-                        <div>
-                          <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                            Tooltip Header <span style={{ color: "#dc2626" }}>*</span>
-                          </label>
-                          <input
-                            type="text"
-                            value={form.tooltip_header}
-                            onChange={(e) => setForm((p) => ({ ...p, tooltip_header: e.target.value }))}
-                            placeholder="e.g. What is Lamprais?"
-                            className={inputClass}
-                            style={{ color: "var(--color-text)", background: "white" }}
-                          />
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                            Tooltip Body <span style={{ color: "#dc2626" }}>*</span>
-                          </label>
-                          <textarea
-                            value={form.tooltip_body}
-                            onChange={(e) => setForm((p) => ({ ...p, tooltip_body: e.target.value }))}
-                            placeholder="Describe what customers should know for this event."
-                            rows={3}
-                            className={inputClass}
-                            style={{ color: "var(--color-text)", background: "white", resize: "vertical" }}
-                          />
-                        </div>
-                        <div>
-                          <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                            Tooltip Image <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
-                          </label>
-                          <select
-                            value={form.tooltip_image_key ?? ""}
-                            onChange={(e) => setForm((p) => ({ ...p, tooltip_image_key: e.target.value || null }))}
-                            className={inputClass}
-                            style={{ color: "var(--color-text)", background: "white" }}
-                          >
-                            <option value="">None</option>
-                            {tooltipImageOptions.map((image) => (
-                              <option key={image.key} value={image.key}>
-                                {image.label}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
-
-                        {selectedTooltipImage && (
-                          <div className="rounded-xl overflow-hidden border" style={{ borderColor: "var(--color-border)", background: "white" }}>
-                            <img src={selectedTooltipImage.path} alt={selectedTooltipImage.alt} className="w-full h-auto" />
-                            <p className="px-3 py-2 text-xs" style={{ color: "var(--color-muted)" }}>
-                              {selectedTooltipImage.path}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                        Tooltip fields stay hidden until this toggle is enabled.
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "white" }}>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                  Hero Side Image <span className="font-normal text-xs" style={{ color: "var(--color-muted)" }}>(optional)</span>
-                </label>
-                <select
-                  value={form.hero_side_image_key ?? ""}
-                  onChange={(e) => setForm((p) => ({ ...p, hero_side_image_key: e.target.value || null }))}
-                  className={inputClass}
-                  style={{ color: "var(--color-text)" }}
-                >
-                  <option value="">None</option>
-                  {heroSideImageOptions.map((image) => (
-                    <option key={image.key} value={image.key}>
-                      {image.label}
-                    </option>
-                  ))}
-                </select>
-                {selectedHeroSideImage && (
-                  <div className="mt-3 rounded-xl overflow-hidden border" style={{ borderColor: "var(--color-border)" }}>
-                    <img src={selectedHeroSideImage.path} alt={selectedHeroSideImage.alt} className="w-full h-auto" />
-                    <p className="px-3 py-2 text-xs" style={{ color: "var(--color-muted)" }}>
-                      {selectedHeroSideImage.path}
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>E-transfer</p>
-                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                      When enabled, this payment section appears after submit and in confirmation emails.
-                    </p>
-                  </div>
-                  <label className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--color-text)" }}>
-                    <input
-                      type="checkbox"
-                      checked={form.etransfer_enabled}
-                      onChange={(e) => setForm((p) => ({
-                        ...p,
-                        etransfer_enabled: e.target.checked,
-                        etransfer_email: e.target.checked ? p.etransfer_email : "",
-                      }))}
-                      style={{ accentColor: "var(--color-sage)" }}
-                    />
-                    Enable E-transfer
-                  </label>
-                </div>
-                {form.etransfer_enabled ? (
-                  <div className="mt-3">
-                    <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                      E-transfer Email <span style={{ color: "#dc2626" }}>*</span>
-                    </label>
-                    <input
-                      type="email"
-                      value={form.etransfer_email}
-                      onChange={(e) => setForm((p) => ({ ...p, etransfer_email: e.target.value }))}
-                      placeholder="payments@example.com"
-                      className={inputClass}
-                      style={{ color: "var(--color-text)", background: "white" }}
-                    />
-                  </div>
-                ) : (
-                  <p className="text-xs mt-3" style={{ color: "var(--color-muted)" }}>
-                    E-transfer fields stay hidden until this toggle is enabled.
-                  </p>
-                )}
-              </div>
-
-              <div className="rounded-2xl border p-4" style={{ borderColor: "var(--color-border)", background: "white" }}>
-                <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-text)" }}>Image Helper</p>
-                <p className="text-xs mb-2" style={{ color: "var(--color-muted)" }}>
-                  Place files in these folders, then add an entry to <code>config/event-images.json</code> and run <code>make sync-config</code>.
-                </p>
-                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                  Tooltip images folder: <code>{imageCatalog.helper.tooltip_target_dir}</code>
-                </p>
-                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                  Hero side images folder: <code>{imageCatalog.helper.hero_side_target_dir}</code>
-                </p>
-              </div>
-
-              <SelectorSection
-                title="Items"
-                open={itemsOpen}
-                onToggle={() => setItemsOpen((v) => !v)}
-                allItems={allItems.map((item) => ({
-                  id: item.id,
-                  label: item.name,
-                  sublabel: `${CURRENCY} $${(item.discounted_price ?? item.price).toFixed(2)}`,
-                }))}
-                selectedIds={form.item_ids}
-                onSelect={(id) => toggleCheckbox("item_ids", id)}
-                onDeselect={(id) => toggleCheckbox("item_ids", id)}
-                search={itemsSearch}
-                onSearchChange={setItemsSearch}
-                searchPlaceholder="Search items by name..."
-                emptyLabel="No items selected yet."
-              />
-
-              <div className="rounded-2xl border" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)" }}>
-                <button
-                  type="button"
-                  onClick={() => setComboDealsOpen((v) => !v)}
-                  className="w-full flex items-center justify-between px-4 py-3 text-left"
-                >
-                  <div>
-                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Combo Deals</p>
-                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                      {form.combo_deals.length} configured combo{form.combo_deals.length !== 1 ? "s" : ""}
-                    </p>
-                  </div>
-                  <span className="text-sm" style={{ color: "var(--color-muted)" }}>{comboDealsOpen ? "Hide" : "Show"}</span>
-                </button>
-
-                {form.combo_deals.length > 0 && !comboDealsOpen && (
-                  <div className="px-4 pb-4">
-                    <div className="space-y-2">
-                      {form.combo_deals.map((combo) => (
-                        <div key={combo.id} className="rounded-xl px-3 py-2" style={{ background: "white", border: "1px solid var(--color-border)" }}>
-                          <div className="flex items-center justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{combo.name || "Untitled combo"}</p>
-                              <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
-                                {comboPreviewText(combo, itemsById, CURRENCY)}
-                              </p>
-                            </div>
-                            <span className="text-[11px] font-semibold rounded-full px-2 py-1" style={{ background: combo.enabled ? "#d1fae5" : "#f3f4f6", color: combo.enabled ? "#065f46" : "#6b7280" }}>
-                              {combo.enabled ? "Enabled" : "Disabled"}
-                            </span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {comboDealsOpen && (
-                  <div className="px-4 pb-4 border-t space-y-4" style={{ borderColor: "var(--color-border)" }}>
-                    <div className="pt-4 flex items-center justify-between gap-3">
-                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                        Build event-specific combos that the public order page can price and upsell dynamically.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={addComboDeal}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0"
-                        style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                      >
-                        + Add Combo
-                      </button>
-                    </div>
-
-                    {form.item_ids.length === 0 ? (
-                      <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                        Select event items first. Combo deals can only reference items included in this event.
-                      </p>
-                    ) : form.combo_deals.length === 0 ? (
-                      <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-                        No combo deals yet.
-                      </p>
-                    ) : (
-                      form.combo_deals.map((combo, comboIndex) => {
-                        const selectedEventItems = form.item_ids
-                          .map((itemId) => itemsById.get(itemId))
-                          .filter((item): item is AdminItem => Boolean(item));
-                        return (
-                          <div key={combo.id} className="rounded-2xl p-4 space-y-4" style={{ background: "white", border: "1px solid var(--color-border)" }}>
-                            <div className="flex items-start justify-between gap-4">
-                              <div className="flex-1">
-                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                  Combo Name
-                                </label>
-                                <input
-                                  type="text"
-                                  value={combo.name}
-                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({ ...current, name: event.target.value }))}
-                                  placeholder="e.g. Lamprais + Rolls Deal"
-                                  className={inputClass}
-                                  style={{ color: "var(--color-text)" }}
-                                />
-                              </div>
-                              <div className="shrink-0 flex items-center gap-2">
-                                <button
-                                  type="button"
-                                  onClick={() => moveComboDeal(combo.id, -1)}
-                                  disabled={comboIndex === 0}
-                                  className="px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
-                                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
-                                >
-                                  Up
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => moveComboDeal(combo.id, 1)}
-                                  disabled={comboIndex === form.combo_deals.length - 1}
-                                  className="px-3 py-2 rounded-xl text-xs font-semibold disabled:opacity-40"
-                                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
-                                >
-                                  Down
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => deleteComboDeal(combo.id)}
-                                  className="px-3 py-2 rounded-xl text-xs font-semibold"
-                                  style={{ background: "#fee2e2", color: "#991b1b" }}
-                                >
-                                  Delete
-                                </button>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center justify-between gap-3 rounded-xl px-3 py-3" style={{ background: "var(--color-cream)" }}>
-                              <div>
-                                <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Visible to customers</p>
-                                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                                  {comboPreviewText(combo, itemsById, CURRENCY)}
-                                </p>
-                              </div>
-                              <label className="inline-flex items-center gap-2 text-sm shrink-0" style={{ color: "var(--color-text)" }}>
-                                <input
-                                  type="checkbox"
-                                  checked={combo.enabled}
-                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({ ...current, enabled: event.target.checked }))}
-                                  style={{ accentColor: "var(--color-sage)" }}
-                                />
-                                Enabled
-                              </label>
-                            </div>
-
-                            <div className="space-y-3">
-                              <div className="flex items-center justify-between gap-3">
-                                <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>Requirements</p>
-                                <button
-                                  type="button"
-                                  onClick={() => updateComboDeal(combo.id, (current) => ({
-                                    ...current,
-                                    requirements: [...current.requirements, { item_id: "", min_quantity: 1 }],
-                                  }))}
-                                  className="px-3 py-1.5 rounded-xl text-xs font-semibold"
-                                  style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
-                                >
-                                  + Add Requirement
-                                </button>
-                              </div>
-
-                              {combo.requirements.map((requirement, requirementIndex) => (
-                                <div key={`${combo.id}-requirement-${requirementIndex}`} className="grid grid-cols-1 md:grid-cols-[1fr_140px_auto] gap-3 items-end">
-                                  <div>
-                                    <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                      Item
-                                    </label>
-                                    <select
-                                      value={requirement.item_id}
-                                      onChange={(event) => updateComboDeal(combo.id, (current) => ({
-                                        ...current,
-                                        requirements: current.requirements.map((entry, index) =>
-                                          index === requirementIndex ? { ...entry, item_id: event.target.value } : entry
-                                        ),
-                                        discount: current.discount.applies_to === "item" && current.discount.target_item_id === requirement.item_id
-                                          ? { ...current.discount, target_item_id: event.target.value || null }
-                                          : current.discount,
-                                      }))}
-                                      className={inputClass}
-                                      style={{ color: "var(--color-text)", background: "white" }}
-                                    >
-                                      <option value="">Select an item</option>
-                                      {selectedEventItems.map((item) => (
-                                        <option key={item.id} value={item.id}>
-                                          {item.name}
-                                        </option>
-                                      ))}
-                                    </select>
-                                  </div>
-                                  <div>
-                                    <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                      Minimum Qty
-                                    </label>
-                                    <input
-                                      type="number"
-                                      min={1}
-                                      value={requirement.min_quantity}
-                                      onChange={(event) => updateComboDeal(combo.id, (current) => ({
-                                        ...current,
-                                        requirements: current.requirements.map((entry, index) =>
-                                          index === requirementIndex
-                                            ? { ...entry, min_quantity: Math.max(1, Number(event.target.value || 1)) }
-                                            : entry
-                                        ),
-                                      }))}
-                                      className={inputClass}
-                                      style={{ color: "var(--color-text)" }}
-                                    />
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => updateComboDeal(combo.id, (current) => ({
-                                      ...current,
-                                      requirements: current.requirements.length > 1
-                                        ? current.requirements.filter((_, index) => index !== requirementIndex)
-                                        : current.requirements,
-                                      discount: current.discount.target_item_id === requirement.item_id
-                                        ? { ...current.discount, target_item_id: null, applies_to: "combo_total" }
-                                        : current.discount,
-                                    }))}
-                                    disabled={combo.requirements.length === 1}
-                                    className="px-3 py-3 rounded-xl text-xs font-semibold disabled:opacity-40"
-                                    style={{ background: "#fee2e2", color: "#991b1b" }}
-                                  >
-                                    Remove
-                                  </button>
-                                </div>
-                              ))}
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                              <div>
-                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                  Discount Type
-                                </label>
-                                <select
-                                  value={combo.discount.type}
-                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
-                                    ...current,
-                                    discount: {
-                                      ...current.discount,
-                                      type: event.target.value as ComboDiscount["type"],
-                                      amount: current.discount.type === event.target.value
-                                        ? current.discount.amount
-                                        : 0,
-                                    },
-                                  }))}
-                                  className={inputClass}
-                                  style={{ color: "var(--color-text)", background: "white" }}
-                                >
-                                  <option value="fixed_amount">Dollar amount</option>
-                                  <option value="percentage">Percentage</option>
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                  {combo.discount.type === "percentage" ? "Discount Percentage" : "Discount Amount"}
-                                </label>
-                                <input
-                                  type="number"
-                                  min={0}
-                                  max={combo.discount.type === "percentage" ? 100 : undefined}
-                                  step={combo.discount.type === "percentage" ? "0.1" : "0.01"}
-                                  value={combo.discount.amount}
-                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
-                                    ...current,
-                                    discount: { ...current.discount, amount: Number(event.target.value || 0) },
-                                  }))}
-                                  className={inputClass}
-                                  style={{ color: "var(--color-text)" }}
-                                />
-                              </div>
-
-                              <div>
-                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                  Discount Applies To
-                                </label>
-                                <select
-                                  value={combo.discount.applies_to}
-                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
-                                    ...current,
-                                    discount: {
-                                      ...current.discount,
-                                      applies_to: event.target.value as ComboDiscount["applies_to"],
-                                      target_item_id: event.target.value === "item"
-                                        ? (current.discount.target_item_id ?? current.requirements[0]?.item_id ?? null)
-                                        : null,
-                                    },
-                                  }))}
-                                  className={inputClass}
-                                  style={{ color: "var(--color-text)", background: "white" }}
-                                >
-                                  <option value="combo_total">Whole combo</option>
-                                  <option value="item">Specific item</option>
-                                </select>
-                              </div>
-
-                              <div>
-                                <label className={labelClass} style={{ color: "var(--color-text)" }}>
-                                  Target Item
-                                </label>
-                                <select
-                                  value={combo.discount.target_item_id ?? ""}
-                                  disabled={combo.discount.applies_to !== "item"}
-                                  onChange={(event) => updateComboDeal(combo.id, (current) => ({
-                                    ...current,
-                                    discount: { ...current.discount, target_item_id: event.target.value || null },
-                                  }))}
-                                  className={inputClass}
-                                  style={{ color: "var(--color-text)", background: "white" }}
-                                >
-                                  <option value="">{combo.discount.applies_to === "item" ? "Select target item" : "Whole combo"}</option>
-                                  {combo.requirements
-                                    .map((requirement) => itemsById.get(requirement.item_id))
-                                    .filter((item): item is AdminItem => Boolean(item))
-                                    .map((item) => (
-                                      <option key={item.id} value={item.id}>
-                                        {item.name}
-                                      </option>
-                                    ))}
-                                </select>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-
-              <SelectorSection
-                title="Locations"
-                open={locationsOpen}
-                onToggle={() => setLocationsOpen((v) => !v)}
-                allItems={allLocations.map((loc) => ({
-                  id: loc.id,
-                  label: loc.name,
-                }))}
-                selectedIds={form.location_ids}
-                onSelect={(id) => toggleCheckbox("location_ids", id)}
-                onDeselect={(id) => toggleCheckbox("location_ids", id)}
-                search={locationsSearch}
-                onSearchChange={setLocationsSearch}
-                searchPlaceholder="Search locations by name..."
-                emptyLabel="No locations selected yet."
-              />
-            </div>
-
-            <div className="px-8 py-5 border-t flex justify-end gap-3" style={{ borderColor: "var(--color-border)" }}>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="px-5 py-2.5 rounded-2xl text-sm font-medium transition-all"
-                style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "var(--color-cream)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "white";
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-6 py-2.5 rounded-2xl text-sm font-semibold transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-                style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                onMouseEnter={(e) => {
-                  if (!saving) (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)";
-                }}
-              >
-                {saving ? "Saving..." : editingEvent ? "Save Changes" : "Create Event"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
-  );
-}
-
-export default function AdminEventsPage() {
-  return (
-    <Suspense>
-      <AdminEventsPageInner />
-    </Suspense>
   );
 }

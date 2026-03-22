@@ -17,10 +17,18 @@ export interface ComboRequirement {
   min_quantity: number;
 }
 
+export interface ComboRequirementGroup {
+  id: string;
+  name: string;
+  item_ids: string[];
+  min_quantity: number;
+}
+
 export interface ComboDiscount {
   type: "fixed_amount" | "percentage";
   amount: number;
-  applies_to: "combo_total" | "item";
+  applies_to: "combo_total" | "group";
+  target_group_id?: string | null;
   target_item_id?: string | null;
 }
 
@@ -29,7 +37,8 @@ export interface ComboDeal {
   name: string;
   enabled: boolean;
   sort_order: number;
-  requirements: ComboRequirement[];
+  requirement_groups?: ComboRequirementGroup[];
+  requirements?: ComboRequirement[];
   discount: ComboDiscount;
 }
 

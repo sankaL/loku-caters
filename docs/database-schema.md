@@ -43,6 +43,7 @@ Stores the backend-managed customer contact registry keyed by normalized email. 
 | `quantity` | `INTEGER` | NOT NULL, CHECK >= 1 | Number of portions |
 | `pickup_location` | `TEXT` | NOT NULL | Matches a location name in the `locations` table |
 | `pickup_time_slot` | `TEXT` | NOT NULL | Matches a time slot for that location |
+| `pickup_address` | `TEXT` | nullable | Freeform pickup address used by random requests and admin overrides |
 | `group_id` | `TEXT` | nullable, indexed | Shared identifier for cart checkouts that create multiple order rows priced together |
 | `phone_number` | `TEXT` | NULLABLE | Always optional for both customers and admin |
 | `email` | `TEXT` | NULLABLE | Used to send Resend confirmation/reminders unless excluded |
@@ -111,13 +112,14 @@ Relational table for pickup locations. Managed via `/admin/locations` in the adm
 
 ## Table: `events`
 
-Stores events with their associated item and location selections. Only one event has `is_active = true` at a time; that event drives the public order page. Managed via `/admin/config` in the admin panel.
+Stores events with their associated item and location selections. Only one non-system event has `is_active = true` at a time; that event drives the public order page. The reserved `Random Requests` row uses `kind = 'random_requests'` and is treated as an admin-only bucket for manual orders. Managed via `/admin/config` in the admin panel.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
 | `id` | `INTEGER` | Primary key, auto-increment | |
 | `name` | `TEXT` | NOT NULL | Internal label, e.g. `"February 2026 Batch"` |
 | `event_date` | `TEXT` | NOT NULL | Display string shown on hero and emails, e.g. `"February 28th, 2026"` |
+| `kind` | `TEXT` | NOT NULL, default `'event'`, check `kind IN ('event', 'random_requests')` | Event type marker used to reserve the admin-only `Random Requests` bucket |
 | `hero_header` | `TEXT` | NOT NULL, default `''` | Main heading on hero banner (white text). Required when creating/updating via admin API |
 | `hero_header_sage` | `TEXT` | NOT NULL, default `''` | Optional second heading line (sage text) |
 | `hero_subheader` | `TEXT` | NOT NULL, default `''` | Optional hero subheading |
@@ -280,6 +282,7 @@ alembic upgrade head
 | `0015_feedback_status_comment` | adds `status` (VARCHAR, default `'new'`) and `admin_comment` (TEXT, nullable) to `feedback` |
 | `0016_add_orders_payment_fields` | adds `paid`, `payment_method`, `payment_method_other` to `orders`; backfills legacy `status='paid'` rows to `status='confirmed', paid=true, payment_method='etransfer', payment_method_other=NULL` |
 | `0017_phone_optional` | updates `ck_orders_contact_required_unless_excluded` constraint to only require `email` (not `phone_number`) when `exclude_email` is false |
+| `0018_random_requests` | adds `events.kind`, adds `orders.pickup_address`, seeds the reserved `Random Requests` event row, and marks it as the admin-only random bucket |
 | `db2173ba0be0_create_catering_requests` | `catering_requests` table |
 | `5f2d6c8a9b01_create_customers_table` | `customers` table with backend-only RLS posture |
 | `4f7d2b6c9a10_feedback_origin_rework` | adds `origin` to `feedback`; backfills legacy rows into canonical `origin` and `feedback_type` values |
@@ -294,4 +297,4 @@ alembic upgrade head
 
 **Four-table design** with no foreign keys between them.
 
-`orders` captures item and location data as denormalised strings at order time so records remain accurate even if the config changes later. Each order is also tied to an `event_id` so admin views and emails can reference the correct event even after the active event changes. `items` and `locations` are the live source of truth for the full catalog. `events` holds one or more events, each referencing a subset of items and locations by ID; only the `is_active = true` event is shown on the public order page.
+`orders` captures item and location data as denormalised strings at order time so records remain accurate even if the config changes later. Each order is also tied to an `event_id` so admin views and emails can reference the correct event even after the active event changes. `items` and `locations` are the live source of truth for the full catalog. `events` holds one or more events, each referencing a subset of items and locations by ID; only the active non-system event is shown on the public order page. The reserved `Random Requests` row keeps random admin orders grouped together without affecting the public event picker.

@@ -19,6 +19,17 @@ function formatCurrency(amount: number, currency: string): string {
   }).format(amount);
 }
 
+function formatComboDiscountLabel(
+  combo: CheckoutResult["order"]["applied_combos"][number],
+  currency: string
+): string {
+  if (combo.discount_type === "percentage") {
+    const amount = combo.discount_amount.toFixed(2).replace(/\.00$/, "").replace(/(\.\d*[1-9])0$/, "$1");
+    return `${amount}% off ${combo.discount_scope_label.toLowerCase()}`;
+  }
+  return `${formatCurrency(combo.discount_amount, currency)} off ${combo.discount_scope_label.toLowerCase()}`;
+}
+
 export default function SuccessView({ result }: SuccessViewProps) {
   const { order } = result;
   const firstLine = order.lines[0];
@@ -171,8 +182,13 @@ export default function SuccessView({ result }: SuccessViewProps) {
           {order.applied_combos.length > 0 && (
             <div className="space-y-2 border-b pb-3" style={{ borderColor: "var(--color-border)" }}>
               {order.applied_combos.map((combo) => (
-                <div key={combo.combo_id} className="flex justify-between items-center text-sm">
-                  <span style={{ color: "var(--color-muted)" }}>{combo.name}</span>
+                <div key={combo.combo_id} className="flex justify-between items-center gap-3 text-sm">
+                  <div>
+                    <div style={{ color: "var(--color-muted)" }}>{combo.name}</div>
+                    <div className="text-xs mt-0.5" style={{ color: "var(--color-muted)" }}>
+                      {formatComboDiscountLabel(combo, order.currency)}
+                    </div>
+                  </div>
                   <span className="font-semibold" style={{ color: "#2d6a2d" }}>
                     -{formatCurrency(combo.savings_total, order.currency)}
                   </span>

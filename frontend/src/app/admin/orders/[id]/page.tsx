@@ -2,7 +2,7 @@
 
 import { useState, useEffect, use, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL, CURRENCY, fetchEventConfig, EventConfig } from "@/config/event";
+import { API_URL, CURRENCY, fetchEventConfig, EventConfig, type Item } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import CustomSelect from "@/components/ui/CustomSelect";
@@ -27,6 +27,7 @@ interface Order {
   quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
+  pickup_address?: string | null;
   base_total_price: number;
   discount_total: number;
   total_price: number;
@@ -45,6 +46,7 @@ interface AdminEvent {
   id: number;
   name: string;
   event_date: string;
+  kind?: string;
   is_active: boolean;
 }
 
@@ -54,8 +56,15 @@ interface EditOrderForm {
   phone_number: string;
   pickup_location: string;
   pickup_time_slot: string;
+  pickup_address: string;
   notes: string;
   exclude_email: boolean;
+}
+
+interface CatalogLocation {
+  id: string;
+  name: string;
+  timeSlots: string[];
 }
 
 const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }> = {
@@ -141,6 +150,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState<EditOrderForm | null>(null);
   const [editQuantities, setEditQuantities] = useState<Record<string, number>>({});
+  const [editLinePrices, setEditLinePrices] = useState<Record<string, number>>({});
   const [editItemsError, setEditItemsError] = useState("");
   const [savingEdits, setSavingEdits] = useState(false);
 
@@ -153,7 +163,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const [addItemSearch, setAddItemSearch] = useState("");
   const [addItemId, setAddItemId] = useState("");
   const [addItemQty, setAddItemQty] = useState(1);
+  const [addItemPrice, setAddItemPrice] = useState("");
   const [addingItem, setAddingItem] = useState(false);
+  const [catalogItems, setCatalogItems] = useState<Item[]>([]);
+  const [catalogLocations, setCatalogLocations] = useState<CatalogLocation[]>([]);
 
   const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -185,6 +198,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           phone_number: data.phone_number ?? "",
           pickup_location: data.pickup_location ?? "",
           pickup_time_slot: data.pickup_time_slot ?? "",
+          pickup_address: data.pickup_address ?? "",
           notes: data.notes ?? "",
           exclude_email: !!data.exclude_email,
         });
@@ -261,6 +275,36 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   }, []);
 
   useEffect(() => {
+    async function loadCatalogs() {
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const headers = { Authorization: `Bearer ${token}` };
+        const [itemsRes, locationsRes] = await Promise.all([
+          fetch(`${API_URL}/api/admin/items`, { headers }),
+          fetch(`${API_URL}/api/admin/locations`, { headers }),
+        ]);
+        if (!itemsRes.ok || !locationsRes.ok) return;
+        const itemsData = (await itemsRes.json()) as Item[];
+        const locationsData = (await locationsRes.json()) as Array<{ id: string; name: string; time_slots?: string[] }>;
+        setCatalogItems(Array.isArray(itemsData) ? itemsData : []);
+        setCatalogLocations(
+          Array.isArray(locationsData)
+            ? locationsData.map((location) => ({
+              id: location.id,
+              name: location.name,
+              timeSlots: Array.isArray(location.time_slots) ? location.time_slots : [],
+            }))
+            : []
+        );
+      } catch {
+        // Non-blocking
+      }
+    }
+    loadCatalogs();
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
     async function fetchSiblings() {
       if (!order?.event_id) {
@@ -297,6 +341,11 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     if (!e) return `Event ${order.event_id}`;
     return `${e.name} (${e.event_date})`;
   }, [events, order]);
+  const currentEvent = useMemo(
+    () => events.find((entry) => entry.id === order?.event_id) ?? null,
+    [events, order?.event_id]
+  );
+  const isRandomOrder = currentEvent?.kind === "random_requests";
 
   const statusOptions = useMemo(() => {
     const current = order?.status;
@@ -309,18 +358,35 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   }, [order?.status]);
 
   const editTimeSlots = useMemo(() => {
-    if (!eventConfig || !editForm?.pickup_location) return [];
+    if (!editForm?.pickup_location) return [];
+    if (isRandomOrder) {
+      const randomLocations = catalogLocations.length > 0
+        ? catalogLocations
+        : (eventConfig?.locations ?? []).map((location) => ({
+          id: location.id,
+          name: location.name,
+          timeSlots: location.timeSlots ?? [],
+        }));
+      const loc = randomLocations.find((l) => l.name === editForm.pickup_location);
+      return loc?.timeSlots ?? [];
+    }
+    if (!eventConfig) return [];
     const loc = eventConfig.locations.find((l) => l.name === editForm.pickup_location);
     return loc?.timeSlots ?? [];
-  }, [eventConfig, editForm?.pickup_location]);
+  }, [catalogLocations, editForm?.pickup_location, eventConfig, isRandomOrder]);
 
   const editLocationOptions = useMemo(() => {
-    const base = (eventConfig?.locations ?? []).map((l) => ({ value: l.name, label: l.name }));
+    const locationsSource = isRandomOrder
+      ? (catalogLocations.length > 0
+        ? catalogLocations.map((location) => ({ value: location.name, label: location.name }))
+        : (eventConfig?.locations ?? []).map((location) => ({ value: location.name, label: location.name })))
+      : (eventConfig?.locations ?? []).map((l) => ({ value: l.name, label: l.name }));
+    const base = locationsSource;
     const selected = (editForm?.pickup_location ?? "").trim();
     if (!selected) return base;
     if (base.some((o) => o.value === selected)) return base;
     return [{ value: selected, label: `${selected} (current)` }, ...base];
-  }, [eventConfig, editForm?.pickup_location]);
+  }, [catalogLocations, editForm?.pickup_location, eventConfig, isRandomOrder]);
 
   const editTimeSlotOptions = useMemo(() => {
     const base = editTimeSlots.map((s) => ({ value: s, label: s }));
@@ -351,8 +417,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   }, [order, siblingOrders]);
 
   const editEventItems = useMemo<OrderLineItem[]>(
-    () => (eventConfig?.items ?? []).map((item) => ({ ...item, is_locked: false })),
-    [eventConfig]
+    () => {
+      const sourceItems = isRandomOrder
+        ? (catalogItems.length > 0 ? catalogItems : (eventConfig?.items ?? []))
+        : (eventConfig?.items ?? []);
+      return sourceItems.map((item) => ({ ...item, is_locked: false }));
+    },
+    [catalogItems, eventConfig, isRandomOrder]
   );
 
   const editLegacyItems = useMemo<OrderLineItem[]>(() => {
@@ -415,6 +486,20 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   const editPickerItems = useMemo<OrderLineItem[]>(
     () => [...editLegacyItems, ...duplicateEditableRowItems, ...editEventItems],
     [editLegacyItems, duplicateEditableRowItems, editEventItems]
+  );
+
+  const addItemPickerItems = useMemo<OrderLineItem[]>(
+    () => {
+      const sourceItems = isRandomOrder
+        ? (catalogItems.length > 0 ? catalogItems : (eventConfig?.items ?? []))
+        : (eventConfig?.items ?? []);
+      return sourceItems.map((item) => ({ ...item, is_locked: false }));
+    },
+    [catalogItems, eventConfig, isRandomOrder]
+  );
+  const addItemSelected = useMemo(
+    () => addItemPickerItems.find((item) => item.id === addItemId) ?? null,
+    [addItemId, addItemPickerItems]
   );
 
   async function handleStatusChange(newStatus: string) {
@@ -504,11 +589,14 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
     if (!order) return;
     const seedRows = editScopeOrders.length > 0 ? editScopeOrders : [order];
     const nextQuantities: Record<string, number> = {};
+    const nextLinePrices: Record<string, number> = {};
     for (const row of seedRows) {
       const key = duplicatePickerIdByOrderId.get(row.id) ?? row.item_id;
       const qty = Number(row.quantity);
       if (!Number.isFinite(qty) || qty <= 0) continue;
       nextQuantities[key] = (nextQuantities[key] ?? 0) + qty;
+      const total = Number(row.total_price);
+      nextLinePrices[key] = Number.isFinite(total) && qty > 0 ? Math.max(0, Number((total / qty).toFixed(2))) : 0;
     }
 
     setEditForm({
@@ -517,10 +605,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       phone_number: order.phone_number ?? "",
       pickup_location: order.pickup_location ?? "",
       pickup_time_slot: order.pickup_time_slot ?? "",
+      pickup_address: order.pickup_address ?? "",
       notes: order.notes ?? "",
       exclude_email: !!order.exclude_email,
     });
     setEditQuantities(nextQuantities);
+    setEditLinePrices(nextLinePrices);
     setEditItemsError("");
     setShowEditModal(true);
   }
@@ -528,6 +618,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
   function closeEditModal() {
     setShowEditModal(false);
     setEditItemsError("");
+    setEditLinePrices({});
+  }
+
+  function closeAddItemModal() {
+    setShowAddItemModal(false);
+    setAddItemId("");
+    setAddItemQty(1);
+    setAddItemSearch("");
+    setAddItemPrice("");
   }
 
   function statusPatchSteps(targetStatus: string): string[] {
@@ -552,11 +651,21 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       setEditItemsError("Please add at least one item.");
       return;
     }
-    for (const { item, qty } of desiredLines) {
-      const minimumOrderQuantity = getMinimumOrderQuantity(item);
-      if (qty < minimumOrderQuantity) {
-        setEditItemsError(`${item.name} requires a minimum order of ${minimumOrderQuantity}.`);
-        return;
+    if (!isRandomOrder) {
+      for (const { item, qty } of desiredLines) {
+        const minimumOrderQuantity = getMinimumOrderQuantity(item);
+        if (qty < minimumOrderQuantity) {
+          setEditItemsError(`${item.name} requires a minimum order of ${minimumOrderQuantity}.`);
+          return;
+        }
+      }
+    } else {
+      for (const { item } of desiredLines) {
+        const linePrice = editLinePrices[item.id] ?? item.price;
+        if (!Number.isFinite(linePrice) || linePrice < 0) {
+          setEditItemsError(`Set a valid unit price for ${item.name}.`);
+          return;
+        }
       }
     }
     setEditItemsError("");
@@ -572,6 +681,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         phone_number: editForm.phone_number,
         pickup_location: editForm.pickup_location,
         pickup_time_slot: editForm.pickup_time_slot,
+        pickup_address: isRandomOrder ? editForm.pickup_address : undefined,
         notes: editForm.notes,
         exclude_email: editForm.exclude_email,
       };
@@ -653,6 +763,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       let removedCount = 0;
 
       for (const assignment of assignments) {
+        const unitPrice = isRandomOrder
+          ? (editLinePrices[assignment.line.item.id] ?? assignment.line.item.price)
+          : undefined;
         const updateRes = await fetch(`${API_URL}/api/admin/orders/${assignment.row.id}`, {
           method: "PUT",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -660,6 +773,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             ...basePayload,
             item_id: resolveBackendItemId(assignment.line.item),
             quantity: assignment.line.qty,
+            ...(isRandomOrder ? { mode: "random", unit_price: unitPrice } : {}),
           }),
         });
         if (!updateRes.ok) {
@@ -673,6 +787,9 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       }
 
       for (const line of createLines) {
+        const unitPrice = isRandomOrder
+          ? (editLinePrices[line.item.id] ?? line.item.price)
+          : undefined;
         const createRes = await fetch(`${API_URL}/api/admin/orders`, {
           method: "POST",
           headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -682,6 +799,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             group_id: order.group_id,
             item_id: resolveBackendItemId(line.item),
             quantity: line.qty,
+            ...(isRandomOrder ? { mode: "random", unit_price: unitPrice } : {}),
           }),
         });
         if (!createRes.ok) {
@@ -711,6 +829,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             ...basePayload,
             item_id: row.item_id,
             quantity: row.quantity,
+            ...(isRandomOrder ? { mode: "random", unit_price: row.quantity > 0 ? Number((Number(row.total_price) / row.quantity).toFixed(2)) : 0 } : {}),
           }),
         });
         if (!syncRes.ok) {
@@ -773,6 +892,13 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
 
   async function handleAddItem() {
     if (!order || !addItemId) return;
+    const parsedUnitPrice = isRandomOrder
+      ? Number.parseFloat(addItemPrice)
+      : Number.NaN;
+    if (isRandomOrder && (!Number.isFinite(parsedUnitPrice) || parsedUnitPrice < 0)) {
+      showToast("Enter a valid unit price", "error");
+      return;
+    }
     setAddingItem(true);
     try {
       const token = await getAdminToken();
@@ -783,6 +909,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         body: JSON.stringify({
           event_id: order.event_id,
           group_id: order.group_id,
+          mode: isRandomOrder ? "random" : "event",
           name: order.name,
           email: order.email ?? "",
           phone_number: order.phone_number ?? "",
@@ -790,8 +917,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           quantity: addItemQty,
           pickup_location: order.pickup_location,
           pickup_time_slot: order.pickup_time_slot,
+          pickup_address: order.pickup_address ?? "",
           notes: "",
           exclude_email: order.exclude_email ?? false,
+          ...(isRandomOrder ? { unit_price: Number(parsedUnitPrice.toFixed(2)) } : {}),
         }),
       });
       if (!res.ok) {
@@ -801,6 +930,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       setAddItemId("");
       setAddItemQty(1);
       setAddItemSearch("");
+      setAddItemPrice("");
       setSiblingVersion((v) => v + 1);
       showToast("Item added successfully", "success");
     } catch (err) {
@@ -1066,6 +1196,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <p style={labelStyle}>Location</p>
               <p style={valueStyle}>{order.pickup_location}</p>
             </div>
+            {order.pickup_address && (
+              <div>
+                <p style={labelStyle}>Pickup Address</p>
+                <p style={valueStyle}>{order.pickup_address}</p>
+              </div>
+            )}
             <div>
               <p style={labelStyle}>Time Slot</p>
               <p style={valueStyle}>{order.pickup_time_slot}</p>
@@ -1099,7 +1235,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               )}
             </h2>
             <button
-              onClick={() => { setAddItemId(""); setAddItemQty(1); setAddItemSearch(""); setShowAddItemModal(true); }}
+              onClick={() => { setAddItemId(""); setAddItemQty(1); setAddItemSearch(""); setAddItemPrice(""); setShowAddItemModal(true); }}
               className="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
             >
@@ -1193,7 +1329,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       {showAddItemModal && (
         <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
-          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAddItemModal(false); }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeAddItemModal(); }}
         >
           <div
             style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "480px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
@@ -1205,7 +1341,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
             <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
               <div>
                 <label className="block text-xs font-semibold mb-2" style={{ color: "var(--color-muted)" }}>Search and Select Item</label>
-                {eventConfig?.items && eventConfig.items.length > 0 ? (
+                {addItemPickerItems.length > 0 ? (
                   <div className="space-y-3">
                     <input
                       type="text"
@@ -1216,7 +1352,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                       style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
                     />
                     <div className="space-y-2 max-h-64 overflow-y-auto">
-                      {eventConfig.items
+                      {addItemPickerItems
                         .filter((item) => {
                           const q = addItemSearch.trim().toLowerCase();
                           return !q || item.name.toLowerCase().includes(q);
@@ -1228,7 +1364,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                             <button
                               key={item.id}
                               type="button"
-                              onClick={() => setAddItemId(item.id)}
+                              onClick={() => {
+                                setAddItemId(item.id);
+                                if (isRandomOrder) {
+                                  setAddItemPrice(price.toFixed(2));
+                                }
+                              }}
                               className="w-full flex items-center justify-between px-4 py-3 rounded-xl text-left transition-all"
                               style={{
                                 border: `1px solid ${isSelected ? "var(--color-sage)" : "var(--color-border)"}`,
@@ -1243,25 +1384,41 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     </div>
                   </div>
                 ) : (
-                  <p className="text-sm" style={{ color: "var(--color-muted)" }}>No items available for this event.</p>
+                  <p className="text-sm" style={{ color: "var(--color-muted)" }}>No items available for this order.</p>
                 )}
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Quantity</label>
-                <input
-                  type="number"
-                  min={1}
-                  value={addItemQty}
-                  onChange={(e) => setAddItemQty(parseInt(e.target.value, 10) || 1)}
-                  style={inputStyle}
-                />
+              <div style={{ display: "grid", gridTemplateColumns: isRandomOrder ? "1fr 1fr" : "1fr", gap: "1rem" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Quantity</label>
+                  <input
+                    type="number"
+                    min={1}
+                    value={addItemQty}
+                    onChange={(e) => setAddItemQty(parseInt(e.target.value, 10) || 1)}
+                    style={inputStyle}
+                  />
+                </div>
+                {isRandomOrder && (
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Unit Price</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={addItemPrice}
+                      onChange={(e) => setAddItemPrice(e.target.value)}
+                      placeholder={addItemSelected ? addItemSelected.price.toFixed(2) : "0.00"}
+                      style={inputStyle}
+                    />
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center justify-end gap-3 pt-2">
                 <button
                   type="button"
-                  onClick={() => setShowAddItemModal(false)}
+                  onClick={closeAddItemModal}
                   className="px-4 py-2 rounded-xl text-sm font-medium"
                   style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
                 >
@@ -1357,38 +1514,93 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                     setEditQuantities(next);
                     setEditItemsError("");
                   }}
+                  linePrices={isRandomOrder ? editLinePrices : undefined}
+                  onLinePricesChange={isRandomOrder ? setEditLinePrices : undefined}
+                  allowBelowMinimumOrder={isRandomOrder}
+                  allowPriceEdit={isRandomOrder}
                   currency={eventConfig?.currency ?? CURRENCY}
                   disabled={editPickerItems.length === 0}
                   error={editItemsError}
                 />
-                {configUsesFallback && (
+                {configUsesFallback && !isRandomOrder && (
                   <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
                     Using active event catalog as a fallback.
                   </p>
                 )}
               </div>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
-                <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Location</label>
-                  <CustomSelect
-                    options={editLocationOptions}
-                    value={editForm.pickup_location}
-                    onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_location: v, pickup_time_slot: "" }) : f)}
-                    disabled={!eventConfig}
-                  />
+              {isRandomOrder ? (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                    <div>
+                      <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Location</label>
+                      <input
+                        list="random-edit-location-options"
+                        required
+                        type="text"
+                        value={editForm.pickup_location}
+                        onChange={(e) => setEditForm((f) => f ? ({ ...f, pickup_location: e.target.value, pickup_time_slot: "" }) : f)}
+                        placeholder="Any pickup location"
+                        style={inputStyle}
+                      />
+                      <datalist id="random-edit-location-options">
+                        {catalogLocations.map((location) => (
+                          <option key={location.id} value={location.name} />
+                        ))}
+                      </datalist>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Time Slot</label>
+                      <input
+                        list="random-edit-time-slot-options"
+                        required
+                        type="text"
+                        value={editForm.pickup_time_slot}
+                        onChange={(e) => setEditForm((f) => f ? ({ ...f, pickup_time_slot: e.target.value }) : f)}
+                        placeholder="Any pickup time slot"
+                        style={inputStyle}
+                      />
+                      <datalist id="random-edit-time-slot-options">
+                        {editTimeSlots.map((slot) => (
+                          <option key={slot} value={slot} />
+                        ))}
+                      </datalist>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Address</label>
+                    <textarea
+                      value={editForm.pickup_address}
+                      onChange={(e) => setEditForm((f) => f ? ({ ...f, pickup_address: e.target.value }) : f)}
+                      rows={3}
+                      placeholder="Freeform pickup address or special instructions"
+                      style={{ ...inputStyle, resize: "vertical" as const, minHeight: "88px" }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Location</label>
+                    <CustomSelect
+                      options={editLocationOptions}
+                      value={editForm.pickup_location}
+                      onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_location: v, pickup_time_slot: "" }) : f)}
+                      disabled={!eventConfig}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Time Slot</label>
+                    <CustomSelect
+                      options={editTimeSlotOptions}
+                      value={editForm.pickup_time_slot}
+                      onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_time_slot: v }) : f)}
+                      disabled={!eventConfig || !editForm.pickup_location}
+                      placeholder={editForm.pickup_location ? "Select a time slot" : "Select a location first"}
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Time Slot</label>
-                  <CustomSelect
-                    options={editTimeSlotOptions}
-                    value={editForm.pickup_time_slot}
-                    onChange={(v) => setEditForm((f) => f ? ({ ...f, pickup_time_slot: v }) : f)}
-                    disabled={!eventConfig || !editForm.pickup_location}
-                    placeholder={editForm.pickup_location ? "Select a time slot" : "Select a location first"}
-                  />
-                </div>
-              </div>
+              )}
 
               <div>
                 <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Notes (admin only)</label>
@@ -1401,7 +1613,10 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               </div>
 
               <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                Price will be computed server-side.
+                {isRandomOrder
+                  ? "Manual prices are stored on each line."
+                  : "Price will be computed server-side."
+                }
               </p>
 
               <div className="flex items-center justify-end gap-3 pt-2">

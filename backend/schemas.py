@@ -23,11 +23,51 @@ class ComboRequirementModel(BaseModel):
         return v
 
 
+class ComboRequirementGroupModel(BaseModel):
+    id: str
+    name: str = ""
+    item_ids: list[str] = Field(default_factory=list)
+    min_quantity: int
+
+    @field_validator("id")
+    @classmethod
+    def requirement_group_id_must_not_be_empty(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("group id cannot be empty")
+        return stripped
+
+    @field_validator("name")
+    @classmethod
+    def normalize_requirement_group_name(cls, v: str) -> str:
+        return (v or "").strip()
+
+    @field_validator("item_ids")
+    @classmethod
+    def requirement_group_item_ids_must_be_present(cls, v: list[str]) -> list[str]:
+        normalized = [item_id.strip() for item_id in v if item_id.strip()]
+        if not normalized:
+            raise ValueError("item_ids must contain at least one item")
+        if len(normalized) != len(v):
+            raise ValueError("item_ids cannot contain empty values")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("item_ids cannot contain duplicates")
+        return normalized
+
+    @field_validator("min_quantity")
+    @classmethod
+    def requirement_group_min_quantity_must_be_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("min_quantity must be at least 1")
+        return v
+
+
 class ComboDiscountModel(BaseModel):
     type: str = "fixed_amount"
     amount: float
     applies_to: str
     target_item_id: Optional[str] = None
+    target_group_id: Optional[str] = None
 
     @field_validator("type")
     @classmethod
@@ -48,13 +88,21 @@ class ComboDiscountModel(BaseModel):
     @classmethod
     def combo_discount_applies_to_must_be_supported(cls, v: str) -> str:
         stripped = v.strip()
-        if stripped not in {"combo_total", "item"}:
-            raise ValueError("applies_to must be combo_total or item")
+        if stripped not in {"combo_total", "item", "group"}:
+            raise ValueError("applies_to must be combo_total, item, or group")
         return stripped
 
     @field_validator("target_item_id", mode="before")
     @classmethod
     def normalize_target_item_id(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("target_group_id", mode="before")
+    @classmethod
+    def normalize_target_group_id(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
             return None
         stripped = str(v).strip()
@@ -67,6 +115,7 @@ class ComboDealModel(BaseModel):
     enabled: bool = True
     sort_order: int = 0
     requirements: list[ComboRequirementModel] = Field(default_factory=list)
+    requirement_groups: list[ComboRequirementGroupModel] = Field(default_factory=list)
     discount: ComboDiscountModel
 
     @field_validator("id", "name")
@@ -79,18 +128,52 @@ class ComboDealModel(BaseModel):
 
     @model_validator(mode="after")
     def validate_combo_deal(self) -> "ComboDealModel":
-        if not self.requirements:
-            raise ValueError("Combo deal must include at least one requirement")
-        requirement_item_ids = [entry.item_id for entry in self.requirements]
-        if len(set(requirement_item_ids)) != len(requirement_item_ids):
-            raise ValueError("Combo deal cannot include the same item more than once")
+        if self.requirement_groups:
+            normalized_groups = self.requirement_groups
+        elif self.requirements:
+            normalized_groups = [
+                ComboRequirementGroupModel(
+                    id=f"legacy-{index + 1}-{entry.item_id}",
+                    name=entry.item_id,
+                    item_ids=[entry.item_id],
+                    min_quantity=entry.min_quantity,
+                )
+                for index, entry in enumerate(self.requirements)
+            ]
+            self.requirement_groups = normalized_groups
+        else:
+            raise ValueError("Combo deal must include at least one requirement group")
+
+        group_ids = [group.id for group in normalized_groups]
+        if len(set(group_ids)) != len(group_ids):
+            raise ValueError("Combo deal cannot include the same group more than once")
+
+        requirement_item_ids: list[str] = []
+        for group in normalized_groups:
+            for item_id in group.item_ids:
+                if item_id in requirement_item_ids:
+                    raise ValueError("Combo deal cannot include the same item in multiple groups")
+                requirement_item_ids.append(item_id)
+
         if self.discount.applies_to == "item":
             if not self.discount.target_item_id:
                 raise ValueError("target_item_id is required when applies_to is item")
             if self.discount.target_item_id not in requirement_item_ids:
                 raise ValueError("target_item_id must be one of the combo requirements")
+            target_group = next(
+                (group for group in normalized_groups if self.discount.target_item_id in group.item_ids),
+                None,
+            )
+            self.discount.target_group_id = target_group.id if target_group is not None else None
+        elif self.discount.applies_to == "group":
+            if not self.discount.target_group_id:
+                raise ValueError("target_group_id is required when applies_to is group")
+            if self.discount.target_group_id not in group_ids:
+                raise ValueError("target_group_id must be one of the combo requirement groups")
+            self.discount.target_item_id = None
         else:
             self.discount.target_item_id = None
+            self.discount.target_group_id = None
         if self.discount.type == "percentage" and self.discount.amount > 100:
             raise ValueError("Percentage discounts cannot exceed 100")
         return self
@@ -227,6 +310,9 @@ class AppliedComboResponse(BaseModel):
     application_count: int
     savings_total: float
     preview_text: str
+    discount_type: str
+    discount_amount: float
+    discount_scope_label: str
 
 
 class UpsellOpportunityResponse(BaseModel):

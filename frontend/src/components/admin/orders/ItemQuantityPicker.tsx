@@ -12,6 +12,10 @@ interface ItemQuantityPickerProps {
   quantities: Record<string, number>;
   onChange: (next: Record<string, number>) => void;
   currency: string;
+  linePrices?: Record<string, number>;
+  onLinePricesChange?: (next: Record<string, number>) => void;
+  allowBelowMinimumOrder?: boolean;
+  allowPriceEdit?: boolean;
   disabled?: boolean;
   error?: string | null;
 }
@@ -21,6 +25,10 @@ export default function ItemQuantityPicker({
   quantities,
   onChange,
   currency,
+  linePrices,
+  onLinePricesChange,
+  allowBelowMinimumOrder = false,
+  allowPriceEdit = false,
   disabled = false,
   error,
 }: ItemQuantityPickerProps) {
@@ -52,20 +60,30 @@ export default function ItemQuantityPicker({
     const currentQty = quantities[itemId] ?? 0;
     const minimumOrderQuantity = getMinimumOrderQuantity(item);
     const next = { ...quantities };
+    const nextPrices = linePrices ? { ...linePrices } : null;
 
     if (delta > 0) {
-      next[itemId] = currentQty === 0 ? minimumOrderQuantity : currentQty + delta;
+      next[itemId] = currentQty === 0
+        ? (allowBelowMinimumOrder ? 1 : minimumOrderQuantity)
+        : currentQty + delta;
+      if (allowPriceEdit && nextPrices && nextPrices[itemId] === undefined) {
+        nextPrices[itemId] = Number((item.discounted_price ?? item.price).toFixed(2));
+      }
       onChange(next);
+      if (nextPrices && onLinePricesChange) onLinePricesChange(nextPrices);
       return;
     }
 
     if (delta < 0) {
-      if (currentQty <= minimumOrderQuantity) {
+      const minimumQty = allowBelowMinimumOrder ? 1 : minimumOrderQuantity;
+      if (currentQty <= minimumQty) {
         delete next[itemId];
+        if (nextPrices) delete nextPrices[itemId];
         onChange(next);
+        if (nextPrices && onLinePricesChange) onLinePricesChange(nextPrices);
         return;
       }
-      next[itemId] = Math.max(minimumOrderQuantity, currentQty + delta);
+      next[itemId] = Math.max(minimumQty, currentQty + delta);
       onChange(next);
     }
   }
@@ -90,8 +108,9 @@ export default function ItemQuantityPicker({
       ) : (
         <div className="space-y-2 mb-3">
           {selectedLines.map(({ item, qty }) => {
-            const price = item.discounted_price ?? item.price;
+            const price = linePrices?.[item.id] ?? item.discounted_price ?? item.price;
             const minimumOrderQuantity = getMinimumOrderQuantity(item);
+            const showMinimumNotice = !allowBelowMinimumOrder && minimumOrderQuantity > 1 && !item.is_locked;
             return (
               <div
                 key={item.id}
@@ -109,12 +128,10 @@ export default function ItemQuantityPicker({
                     <p className="text-xs font-semibold" style={{ color: "var(--color-bark)" }}>
                       Legacy item (locked)
                     </p>
-                  ) : (
-                    minimumOrderQuantity > 1 && (
-                      <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-                        Minimum order: {minimumOrderQuantity}
-                      </p>
-                    )
+                  ) : showMinimumNotice && (
+                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      Standard minimum: {minimumOrderQuantity}
+                    </p>
                   )}
                 </div>
 
@@ -154,9 +171,36 @@ export default function ItemQuantityPicker({
                   </div>
                 )}
 
-                <p className="text-sm font-bold shrink-0" style={{ color: "var(--color-forest)" }}>
-                  {currency} ${(price * qty).toFixed(2)}
-                </p>
+                {allowPriceEdit && onLinePricesChange ? (
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <label className="text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--color-muted)" }}>
+                      Unit price
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={Number.isFinite(price) ? price.toFixed(2) : ""}
+                      onChange={(event) => {
+                        const raw = event.target.value;
+                        const parsed = raw === "" ? 0 : Number.parseFloat(raw);
+                        if (Number.isNaN(parsed)) return;
+                        const nextPrices = { ...(linePrices ?? {}) };
+                        nextPrices[item.id] = Math.max(0, Number(parsed.toFixed(2)));
+                        onLinePricesChange(nextPrices);
+                      }}
+                      className="w-24 px-2 py-2 rounded-lg text-sm text-right border"
+                      style={{ borderColor: "var(--color-border)", color: "var(--color-text)", background: "white" }}
+                    />
+                    <p className="text-[11px] font-semibold" style={{ color: "var(--color-forest)" }}>
+                      {currency} ${(price * qty).toFixed(2)}
+                    </p>
+                  </div>
+                ) : (
+                  <p className="text-sm font-bold shrink-0" style={{ color: "var(--color-forest)" }}>
+                    {currency} ${(price * qty).toFixed(2)}
+                  </p>
+                )}
               </div>
             );
           })}
