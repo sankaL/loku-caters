@@ -441,7 +441,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
           }}
           onPointerDown={(event) => event.stopPropagation()}
         >
-          <div className="flex items-center justify-between px-5 py-4 border-b shrink-0" style={{ borderColor: "var(--color-border)" }}>
+          <div className="flex items-center justify-between px-4 py-3 md:px-5 md:py-4 border-b shrink-0" style={{ borderColor: "var(--color-border)" }}>
             <h3 className="text-base font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
               Add Items
             </h3>
@@ -456,7 +456,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
             </button>
           </div>
 
-          <div className="px-5 py-3 border-b shrink-0" style={{ borderColor: "var(--color-border)" }}>
+          <div className="px-4 py-2 md:px-5 md:py-3 border-b shrink-0" style={{ borderColor: "var(--color-border)" }}>
             <input
               type="text"
               value={pickerSearch}
@@ -468,7 +468,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
             />
           </div>
 
-          <div className="overflow-y-auto flex-1 min-h-0 px-5 py-3 space-y-2" style={{ overscrollBehavior: "contain" }}>
+          <div className="overflow-y-auto flex-1 min-h-0 px-4 py-2 md:px-5 md:py-3 space-y-2" style={{ overscrollBehavior: "contain" }}>
             {pickerItems.length === 0 ? (
               <p className="text-sm py-4 text-center" style={{ color: "var(--color-muted)" }}>No items match your search.</p>
             ) : (
@@ -480,7 +480,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                 return (
                   <div
                     key={item.id}
-                    className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all"
+                    className="flex items-center gap-2 md:gap-3 rounded-2xl px-3 py-2 md:px-4 md:py-3 transition-all"
                     style={{
                       border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
                       background: inCart ? "#f0fdf4" : "white",
@@ -555,7 +555,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
             )}
           </div>
 
-          <div className="px-5 py-4 border-t shrink-0 flex items-center justify-between gap-3" style={{ borderColor: "var(--color-border)" }}>
+          <div className="px-4 py-3 md:px-5 md:py-4 border-t shrink-0 flex items-center justify-between gap-3" style={{ borderColor: "var(--color-border)" }}>
             <p className="text-sm" style={{ color: "var(--color-muted)" }}>
               {selectedLines.length} item{selectedLines.length !== 1 ? "s" : ""} selected
             </p>
@@ -830,7 +830,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                     Deals For Your Cart
                   </p>
                 </div>
-                <div className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: quote.applied_combos.length > 0 ? "rgba(114,145,82,0.35)" : "rgba(255,255,255,0.1)", color: "var(--color-cream)", border: `1px solid ${quote.applied_combos.length > 0 ? "rgba(114,145,82,0.5)" : "rgba(255,255,255,0.08)"}` }}>
+                <div className="rounded-full px-3 py-1 text-xs font-semibold whitespace-nowrap" style={{ background: quote.applied_combos.length > 0 ? "rgba(114,145,82,0.35)" : "rgba(255,255,255,0.1)", color: "var(--color-cream)", border: `1px solid ${quote.applied_combos.length > 0 ? "rgba(114,145,82,0.5)" : "rgba(255,255,255,0.08)"}` }}>
                   {quoteLoading ? "Checking deals..." : `${quote.applied_combos.length} applied`}
                 </div>
               </div>

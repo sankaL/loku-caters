@@ -60,6 +60,7 @@ export default function Modal({
       }}
     >
       <div
+        className="p-6 md:p-8"
         style={{
           background: "white",
           borderRadius: "24px",
@@ -68,7 +69,6 @@ export default function Modal({
           width: "100%",
           maxHeight: "calc(100vh - 32px)",
           overflowY: "auto",
-          padding: "32px",
           boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
         }}
         onMouseDown={(e) => e.stopPropagation()}
