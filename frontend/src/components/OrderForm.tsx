@@ -157,6 +157,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerSearch, setPickerSearch] = useState("");
   const [openDescriptionItemId, setOpenDescriptionItemId] = useState<string | null>(null);
+  const [expandedDealIds, setExpandedDealIds] = useState<Set<string>>(new Set());
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const timeSlots = form.pickup_location
@@ -856,37 +857,59 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                       {/* Subtle gradient accent on left edge */}
                       <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "linear-gradient(180deg, var(--color-sage) 0%, rgba(114,145,82,0.3) 100%)", borderRadius: "3px 0 0 3px" }} />
 
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-2.5 min-w-0">
-                          {/* Checkmark icon */}
-                          <div className="shrink-0 mt-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "var(--color-sage)" }}>
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="20 6 9 17 4 12" />
-                            </svg>
+                      <div
+                        className="cursor-pointer"
+                        onClick={() => setExpandedDealIds((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(combo.combo_id)) next.delete(combo.combo_id);
+                          else next.add(combo.combo_id);
+                          return next;
+                        })}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-2.5 min-w-0">
+                            {/* Checkmark icon */}
+                            <div className="shrink-0 mt-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "var(--color-sage)" }}>
+                              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="20 6 9 17 4 12" />
+                              </svg>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-base font-bold leading-tight">{combo.name}</p>
+                              <p
+                                className="text-xs mt-1.5 leading-relaxed"
+                                style={{
+                                  color: "rgba(247,245,240,0.65)",
+                                  ...(!expandedDealIds.has(combo.combo_id) ? { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {}),
+                                }}
+                              >
+                                {combo.preview_text}
+                              </p>
+                            </div>
                           </div>
-                          <div className="min-w-0">
-                            <p className="text-base font-bold leading-tight">{combo.name}</p>
-                            <p className="text-xs mt-1.5 leading-relaxed" style={{ color: "rgba(247,245,240,0.65)" }}>
-                              {combo.preview_text}
-                            </p>
-                          </div>
+                          <span className="shrink-0 rounded-full px-3 py-1 text-xs font-bold" style={{ background: "var(--color-bark)", color: "white", boxShadow: "0 2px 8px rgba(139,94,60,0.35)" }}>
+                            {formatComboPrimaryBadge(combo)}
+                          </span>
                         </div>
-                        <span className="shrink-0 rounded-full px-3 py-1 text-xs font-bold" style={{ background: "var(--color-bark)", color: "white", boxShadow: "0 2px 8px rgba(139,94,60,0.35)" }}>
-                          {formatComboPrimaryBadge(combo)}
-                        </span>
-                      </div>
 
-                      {/* Savings callout */}
-                      <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8bc34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
-                        </svg>
-                        <span className="text-sm font-semibold" style={{ color: "#8bc34a" }}>
-                          Saved {formatCurrency(combo.savings_total)}
-                        </span>
-                        <span className="text-xs ml-1" style={{ color: "rgba(247,245,240,0.5)" }}>
-                          {formatComboDiscountLabel(combo)}
-                        </span>
+                        {/* Savings callout */}
+                        <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                          <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8bc34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
+                          </svg>
+                          <span className="text-sm font-semibold shrink-0" style={{ color: "#8bc34a" }}>
+                            Saved {formatCurrency(combo.savings_total)}
+                          </span>
+                          <span
+                            className="text-xs"
+                            style={{
+                              color: "rgba(247,245,240,0.5)",
+                              ...(!expandedDealIds.has(combo.combo_id) ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" as const, maxWidth: "100%" } : {}),
+                            }}
+                          >
+                            {formatComboDiscountLabel(combo)}
+                          </span>
+                        </div>
                       </div>
                     </div>
                   ))}
@@ -912,10 +935,35 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                                 <line x1="7" y1="7" x2="7.01" y2="7" />
                               </svg>
                             </div>
-                            <div className="flex-1 min-w-0">
+                            <div
+                              className="flex-1 min-w-0 cursor-pointer"
+                              onClick={() => setExpandedDealIds((prev) => {
+                                const next = new Set(prev);
+                                const key = `upsell-${opportunity.combo_id}`;
+                                if (next.has(key)) next.delete(key);
+                                else next.add(key);
+                                return next;
+                              })}
+                            >
                               <p className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>{opportunity.name}</p>
-                              <p className="text-xs mt-1 leading-relaxed" style={{ color: "var(--color-muted)" }}>{opportunity.preview_text}</p>
-                              <p className="text-sm mt-2 font-medium" style={{ color: "var(--color-forest)" }}>{opportunity.message}</p>
+                              <p
+                                className="text-xs mt-1 leading-relaxed"
+                                style={{
+                                  color: "var(--color-muted)",
+                                  ...(!expandedDealIds.has(`upsell-${opportunity.combo_id}`) ? { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {}),
+                                }}
+                              >
+                                {opportunity.preview_text}
+                              </p>
+                              <p
+                                className="text-sm mt-2 font-medium"
+                                style={{
+                                  color: "var(--color-forest)",
+                                  ...(!expandedDealIds.has(`upsell-${opportunity.combo_id}`) ? { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {}),
+                                }}
+                              >
+                                {opportunity.message}
+                              </p>
                             </div>
                           </div>
                         </div>
