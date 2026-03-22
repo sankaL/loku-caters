@@ -68,7 +68,6 @@
 
 ### Appetizers
 * Cutlets - Fish
-* Patties - Fish
 * Rolls - Fish, Mutton & Chicken
 
 ### Speciality Items
