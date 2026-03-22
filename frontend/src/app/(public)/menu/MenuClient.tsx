@@ -603,79 +603,102 @@ export default function MenuClient({
                         </h2>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-12">
-                        {individualItems.categories.map((category, catIdx) => (
-                            <div
-                                key={catIdx}
-                                className={`animate-fade-up delay-${(catIdx % 4) * 100}`}
-                            >
-                                <h3
-                                    className="text-2xl font-semibold text-[color:var(--color-forest)] border-b border-[color:var(--color-border)] pb-2 mb-6"
-                                    style={{ fontFamily: "var(--font-serif)" }}
-                                >
-                                    {category.name}
-                                </h3>
-                                <div className="flex flex-col gap-6">
-                                    {category.items.map(
-                                        (item: MenuItem, itemIdx: number) => (
-                                            <div
-                                                key={itemIdx}
-                                                className="group"
-                                            >
-                                                <div className="flex items-baseline justify-between mb-1 gap-2 border-b border-transparent group-hover:border-[color:var(--color-sage)]/20 transition-all">
-                                                    <h4 className="text-lg font-bold text-[color:var(--color-forest)] group-hover:text-[color:var(--color-sage)] transition-colors inline-flex items-center gap-2">
-                                                        {item.name}
-                                                        {item.hasTooltip && (
-                                                            <button
-                                                                onClick={() =>
-                                                                    setIsLampraisModalOpen(
-                                                                        true
-                                                                    )
-                                                                }
-                                                                className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-[color:var(--color-cream-dark)] text-[color:var(--color-muted)] hover:bg-[color:var(--color-sage)] hover:text-white transition-colors"
-                                                                title="What is Lamprais?"
-                                                                aria-label="What is Lamprais?"
-                                                            >
-                                                                <svg
-                                                                    width="12"
-                                                                    height="12"
-                                                                    viewBox="0 0 24 24"
-                                                                    fill="none"
-                                                                    stroke="currentColor"
-                                                                    strokeWidth="2.5"
-                                                                    strokeLinecap="round"
-                                                                    strokeLinejoin="round"
-                                                                >
-                                                                    <circle
-                                                                        cx="12"
-                                                                        cy="12"
-                                                                        r="10"
-                                                                    />
-                                                                    <path d="M12 16v-4" />
-                                                                    <path d="M12 8h.01" />
-                                                                </svg>
-                                                            </button>
-                                                        )}
-                                                    </h4>
-                                                    {item.diet &&
-                                                        item.diet.length >
-                                                            0 && (
-                                                            <span className="shrink-0 text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 bg-[color:var(--color-sage)] text-white rounded-md mt-1">
-                                                                {item.diet[0]}
-                                                            </span>
-                                                        )}
-                                                </div>
-                                                {item.description && (
-                                                    <p className="text-[color:var(--color-muted)] text-sm leading-relaxed max-w-[90%]">
-                                                        {item.description}
-                                                    </p>
-                                                )}
-                                            </div>
-                                        )
-                                    )}
+                    {/* Lamprais Hero Card */}
+                    <div className="mb-14 animate-fade-up">
+                        <div className="group relative bg-white rounded-3xl border border-[color:var(--color-border)] overflow-hidden shadow-sm hover:shadow-xl transition-all duration-400">
+                            <div className="grid grid-cols-1 md:grid-cols-2">
+                                {/* Image side */}
+                                <div className="relative h-64 md:h-auto md:min-h-[320px] overflow-hidden">
+                                    <Image
+                                        src="/assets/food/lamprais.jpg"
+                                        alt="Lamprais - Our Signature Dish"
+                                        fill
+                                        className="object-cover group-hover:scale-105 transition-transform duration-700"
+                                    />
+                                    <div className="absolute inset-0 bg-gradient-to-r from-transparent to-black/10 md:bg-gradient-to-r md:from-transparent md:to-black/5" />
+                                    {/* Badges on image */}
+                                    <div className="absolute top-4 left-4 flex gap-2">
+                                        <span className="bg-[color:var(--color-sage)] text-white text-[10px] uppercase tracking-[0.15em] font-bold px-3 py-1.5 rounded-full shadow-lg">
+                                            Signature
+                                        </span>
+                                        <span className="bg-[#8B5E3C] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
+                                            $23
+                                        </span>
+                                    </div>
+                                </div>
+
+                                {/* Content side */}
+                                <div className="p-8 md:p-10 flex flex-col justify-center">
+                                    <h3
+                                        className="text-3xl md:text-4xl font-bold text-[color:var(--color-forest)] mb-4"
+                                        style={{ fontFamily: "var(--font-serif)" }}
+                                    >
+                                        Lamprais
+                                    </h3>
+                                    <p className="text-[color:var(--color-muted)] text-base leading-relaxed mb-6">
+                                        Wrapped in a banana leaf with Ghee Rice, Baked Chicken Curry, Fried boiled egg, Seeni Sambal, Fricadells (Beef and Pork), Ash Plantain curry, Brinjal Pahie, and Blachan.
+                                    </p>
+                                    <button
+                                        onClick={() => setIsLampraisModalOpen(true)}
+                                        className="inline-flex items-center gap-2 text-[color:var(--color-sage)] font-semibold text-sm hover:text-[color:var(--color-forest)] transition-colors group/btn"
+                                    >
+                                        <svg
+                                            width="16"
+                                            height="16"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                        >
+                                            <circle cx="12" cy="12" r="10" />
+                                            <path d="M12 16v-4" />
+                                            <path d="M12 8h.01" />
+                                        </svg>
+                                        How it&apos;s made
+                                        <svg
+                                            width="14"
+                                            height="14"
+                                            viewBox="0 0 24 24"
+                                            fill="none"
+                                            stroke="currentColor"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            className="group-hover/btn:translate-x-1 transition-transform"
+                                        >
+                                            <path d="M5 12h14" />
+                                            <path d="m12 5 7 7-7 7" />
+                                        </svg>
+                                    </button>
                                 </div>
                             </div>
-                        ))}
+                        </div>
+                    </div>
+
+                    {/* Appetizers */}
+                    <div className="animate-fade-up" style={{ animationDelay: "100ms" }}>
+                        <h3
+                            className="text-2xl font-semibold text-[color:var(--color-forest)] border-b border-[color:var(--color-border)] pb-2 mb-6"
+                            style={{ fontFamily: "var(--font-serif)" }}
+                        >
+                            Appetizers
+                        </h3>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                            {individualItems.categories
+                                .find((c) => c.name === "Appetizers")
+                                ?.items.map((item: MenuItem, idx: number) => (
+                                    <div key={idx} className="group">
+                                        <h4 className="text-lg font-bold text-[color:var(--color-forest)] group-hover:text-[color:var(--color-sage)] transition-colors mb-1">
+                                            {item.name}
+                                        </h4>
+                                        <p className="text-[color:var(--color-muted)] text-sm leading-relaxed">
+                                            {item.description}
+                                        </p>
+                                    </div>
+                                ))}
+                        </div>
                     </div>
                 </section>
 
@@ -714,7 +737,7 @@ export default function MenuClient({
 
                                     {/* price badge */}
                                     {menu.price && (
-                                        <span className="absolute top-3 right-3 bg-[color:var(--color-forest)] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
+                                        <span className="absolute top-3 right-3 bg-[#8B5E3C] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
                                             {menu.price}
                                             <span className="font-normal opacity-80">
                                                 /person
