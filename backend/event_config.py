@@ -11,6 +11,8 @@ _config_path = Path(__file__).parent / "event-config.json"
 with open(_config_path) as f:
     _file_config: dict = json.load(f)
 
+RANDOM_REQUESTS_EVENT_KIND = "random_requests"
+
 
 class NoActiveEventError(RuntimeError):
     pass
@@ -36,7 +38,7 @@ CURRENCY = get_currency()
 def get_config_from_db(db: Session) -> dict:
     """Load event config with items and locations from the active event."""
     from models import Event, Item, Location
-    event = db.query(Event).filter(Event.is_active == True).first()
+    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return _build_config_from_event(db, event)
@@ -55,22 +57,26 @@ def get_config_for_event_id_from_db(db: Session, event_id: int) -> dict:
 def _build_config_from_event(db: Session, event) -> dict:
     from models import Item, Location
 
-    item_ids = event.item_ids or []
-    location_ids = event.location_ids or []
+    if getattr(event, "kind", "event") == RANDOM_REQUESTS_EVENT_KIND:
+        items = db.query(Item).order_by(Item.sort_order).all()
+        locations = db.query(Location).order_by(Location.sort_order).all()
+    else:
+        item_ids = event.item_ids or []
+        location_ids = event.location_ids or []
 
-    items = (
-        db.query(Item)
-        .filter(Item.id.in_(item_ids))
-        .order_by(Item.sort_order)
-        .all()
-    ) if item_ids else []
+        items = (
+            db.query(Item)
+            .filter(Item.id.in_(item_ids))
+            .order_by(Item.sort_order)
+            .all()
+        ) if item_ids else []
 
-    locations = (
-        db.query(Location)
-        .filter(Location.id.in_(location_ids))
-        .order_by(Location.sort_order)
-        .all()
-    ) if location_ids else []
+        locations = (
+            db.query(Location)
+            .filter(Location.id.in_(location_ids))
+            .order_by(Location.sort_order)
+            .all()
+        ) if location_ids else []
 
     normalized_combo_deals = serialize_combo_deals(normalize_combo_deals(event.combo_deals or []))
 
@@ -119,7 +125,7 @@ def _build_config_from_event(db: Session, event) -> dict:
 def get_item_from_db(db: Session, item_id: str) -> Optional["Item"]:
     """Look up an item only if it belongs to the active event."""
     from models import Event, Item
-    event = db.query(Event).filter(Event.is_active == True).first()
+    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
     if event is None or item_id not in (event.item_ids or []):
         return None
     return db.query(Item).filter(Item.id == item_id).first()
@@ -128,7 +134,7 @@ def get_item_from_db(db: Session, item_id: str) -> Optional["Item"]:
 def get_event_date_from_db(db: Session) -> str:
     """Lightweight helper that only reads event_date from the active event."""
     from models import Event
-    event = db.query(Event).filter(Event.is_active == True).first()
+    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return event.event_date
@@ -138,7 +144,7 @@ def get_active_event_id_from_db(db: Session) -> int:
     """Return the current active event id."""
     from models import Event
 
-    event = db.query(Event).filter(Event.is_active == True).first()
+    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return int(event.id)
@@ -157,7 +163,7 @@ def get_event_date_for_event_id_from_db(db: Session, event_id: int) -> str:
 def get_etransfer_config_from_db(db: Session) -> dict:
     """Read optional e-transfer settings from the active event."""
     from models import Event
-    event = db.query(Event).filter(Event.is_active == True).first()
+    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return {

@@ -3,7 +3,7 @@ import json
 import uuid
 from urllib.parse import urlencode
 from urllib.request import urlopen
-from typing import Any, Optional, Union
+from typing import Any, Optional, Union, Literal
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -18,6 +18,7 @@ from constants import OrderStatus
 from database import get_db
 from event_config import (
     CURRENCY,
+    RANDOM_REQUESTS_EVENT_KIND,
     NoActiveEventError,
     EventNotFoundError,
     get_config_from_db,
@@ -174,7 +175,6 @@ class PaymentUpdate(BaseModel):
         self.payment_method_other = None
         return self
 
-
 class BulkCustomerDeleteRequest(BaseModel):
     ids: list[str]
 
@@ -199,6 +199,7 @@ ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
 class AdminOrderCreate(BaseModel):
     event_id: Optional[int] = None
     group_id: Optional[str] = None
+    mode: Literal["event", "random"] = "event"
     name: str
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = None
@@ -206,6 +207,8 @@ class AdminOrderCreate(BaseModel):
     quantity: int
     pickup_location: str
     pickup_time_slot: str
+    pickup_address: Optional[str] = None
+    unit_price: Optional[float] = None
     notes: Optional[str] = None
     exclude_email: bool = False
 
@@ -240,6 +243,23 @@ class AdminOrderCreate(BaseModel):
             return None
         stripped = str(v).strip()
         return stripped or None
+
+    @field_validator("pickup_address", mode="before")
+    @classmethod
+    def normalize_pickup_address(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("unit_price")
+    @classmethod
+    def validate_unit_price(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        if v < 0:
+            raise ValueError("unit_price cannot be negative")
+        return round(float(v), 2)
 
     @field_validator("quantity")
     @classmethod
@@ -272,6 +292,9 @@ class AdminOrderUpdate(BaseModel):
     quantity: int
     pickup_location: str
     pickup_time_slot: str
+    mode: Literal["event", "random"] = "event"
+    pickup_address: Optional[str] = None
+    unit_price: Optional[float] = None
     notes: Optional[str] = None
     exclude_email: bool = False
 
@@ -306,6 +329,23 @@ class AdminOrderUpdate(BaseModel):
             return None
         stripped = str(v).strip()
         return stripped or None
+
+    @field_validator("pickup_address", mode="before")
+    @classmethod
+    def normalize_pickup_address(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
+    @field_validator("unit_price")
+    @classmethod
+    def validate_unit_price(cls, v: Optional[float]) -> Optional[float]:
+        if v is None:
+            return None
+        if v < 0:
+            raise ValueError("unit_price cannot be negative")
+        return round(float(v), 2)
 
     @field_validator("quantity")
     @classmethod
@@ -354,6 +394,7 @@ def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 
         "id": event.id,
         "name": event.name,
         "event_date": event.event_date,
+        "kind": getattr(event, "kind", "event"),
         "hero_header": event.hero_header,
         "hero_header_sage": event.hero_header_sage,
         "hero_subheader": event.hero_subheader,
@@ -373,6 +414,83 @@ def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 
         "total_revenue": total_revenue,
         "order_count": order_count,
     }
+
+
+def _is_random_requests_event(event: Optional[Event]) -> bool:
+    return bool(event is not None and getattr(event, "kind", "event") == RANDOM_REQUESTS_EVENT_KIND)
+
+
+def _require_random_requests_event(db: Session) -> Event:
+    event = db.query(Event).filter(Event.kind == RANDOM_REQUESTS_EVENT_KIND).first()
+    if event is None:
+        raise HTTPException(status_code=404, detail="Random Requests event not found")
+    return event
+
+
+def _normalize_price(value: float) -> float:
+    return round(float(value), 2)
+
+
+def _item_base_unit_price(item: Item) -> float:
+    return float(item.discounted_price if item.discounted_price is not None else item.price)
+
+
+def _apply_manual_pricing(
+    *,
+    order: Order,
+    item: Item,
+    unit_price: Optional[float],
+) -> None:
+    base_unit_price = _item_base_unit_price(item)
+    manual_unit_price = _normalize_price(unit_price if unit_price is not None else base_unit_price)
+    quantity = int(order.quantity)
+    catalog_base_total = _normalize_price(base_unit_price * quantity)
+    total_price = _normalize_price(manual_unit_price * quantity)
+    base_total = _normalize_price(max(catalog_base_total, total_price))
+    discount_total = _normalize_price(max(base_total - total_price, 0))
+
+    order.item_name = item.name
+    order.base_total_price = base_total
+    order.discount_total = discount_total
+    order.total_price = total_price
+    order.pricing_meta = {
+        "mode": "manual",
+        "base_unit_price": base_unit_price,
+        "manual_unit_price": manual_unit_price,
+        "base_total": catalog_base_total,
+        "manual_total_price": total_price,
+    }
+
+
+def _existing_manual_unit_price(order: Order) -> Optional[float]:
+    meta = order.pricing_meta or {}
+    raw_unit_price = meta.get("manual_unit_price")
+    if raw_unit_price is not None:
+        try:
+            return _normalize_price(float(raw_unit_price))
+        except (TypeError, ValueError):
+            return None
+
+    quantity = int(order.quantity or 0)
+    if quantity > 0:
+        try:
+            return _normalize_price(float(order.total_price) / quantity)
+        except (TypeError, ValueError, ZeroDivisionError):
+            return None
+    return None
+
+
+def _resolve_order_pickup_address(db: Session, order: Order) -> str:
+    pickup_address = _normalize_group_text(getattr(order, "pickup_address", None))
+    if pickup_address:
+        return pickup_address
+
+    location = db.query(Location).filter(
+        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
+    ).first()
+    if location and getattr(location, "address", None):
+        return str(location.address).strip()
+    return ""
 
 
 def _validate_event_images(payload: Union[EventCreate, EventUpdate]) -> tuple[Optional[str], Optional[str]]:
@@ -472,6 +590,7 @@ def admin_create_event(
     event = Event(
         name=body.name,
         event_date=body.event_date,
+        kind="event",
         hero_header=body.hero_header,
         hero_header_sage=body.hero_header_sage,
         hero_subheader=body.hero_subheader,
@@ -507,6 +626,8 @@ def admin_update_event(
     event = db.query(Event).filter(Event.id == event_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
+    if _is_random_requests_event(event):
+        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be edited")
     event.name = body.name
     event.event_date = body.event_date
     event.hero_header = body.hero_header
@@ -538,6 +659,8 @@ def admin_activate_event(
     event = db.query(Event).filter(Event.id == event_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
+    if _is_random_requests_event(event):
+        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be activated")
     db.query(Event).update({"is_active": False})
     event.is_active = True
     event.updated_at = datetime.now(timezone.utc)
@@ -555,6 +678,8 @@ def admin_deactivate_event(
     event = db.query(Event).filter(Event.id == event_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
+    if _is_random_requests_event(event):
+        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be deactivated")
     event.is_active = False
     event.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -571,6 +696,8 @@ def admin_delete_event(
     event = db.query(Event).filter(Event.id == event_id).first()
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
+    if _is_random_requests_event(event):
+        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be deleted")
     if event.is_active:
         raise HTTPException(status_code=400, detail="Cannot delete the active event")
 
@@ -757,6 +884,7 @@ def _order_dict(order: Order) -> dict:
         "quantity": order.quantity,
         "pickup_location": order.pickup_location,
         "pickup_time_slot": order.pickup_time_slot,
+        "pickup_address": getattr(order, "pickup_address", None),
         "base_total_price": float(order.base_total_price),
         "discount_total": float(order.discount_total),
         "total_price": float(order.total_price),
@@ -777,7 +905,7 @@ def _get_reminder_context(db: Session, orders: list[Order]) -> tuple[dict[int, E
     events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
     events_by_id: dict[int, Event] = {int(event.id): event for event in events}
 
-    active_event = db.query(Event).filter(Event.is_active == True).first()
+    active_event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
     active_event_date = active_event.event_date if active_event else ""
     active_etransfer = {
         "enabled": bool(active_event.etransfer_enabled) if active_event else False,
@@ -823,6 +951,7 @@ def _validate_group_order_payload(existing_group_orders: list[Order], body: Admi
         ("phone_number", _normalize_group_text(first_order.phone_number), _normalize_group_text(body.phone_number)),
         ("pickup_location", _normalize_group_text(first_order.pickup_location), _normalize_group_text(body.pickup_location)),
         ("pickup_time_slot", _normalize_group_text(first_order.pickup_time_slot), _normalize_group_text(body.pickup_time_slot)),
+        ("pickup_address", _normalize_group_text(getattr(first_order, "pickup_address", None)), _normalize_group_text(getattr(body, "pickup_address", None))),
         ("exclude_email", bool(first_order.exclude_email), bool(body.exclude_email)),
     )
     for field_name, existing_value, incoming_value in shared_fields:
@@ -910,10 +1039,7 @@ def _prepare_reminder_order_data(
             message="Missing email",
         ), None, group_orders
 
-    location = db.query(Location).filter(
-        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-    ).first()
-    address = location.address if location else ""
+    address = _resolve_order_pickup_address(db, order)
 
     event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
     event_date = event.event_date if event else active_event_date
@@ -1005,10 +1131,7 @@ def _prepare_payment_reminder_order_data(
             message="Missing email",
         ), None, group_orders
 
-    location = db.query(Location).filter(
-        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-    ).first()
-    address = location.address if location else ""
+    address = _resolve_order_pickup_address(db, order)
 
     event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
     event_date = event.event_date if event else active_event_date
@@ -1109,6 +1232,20 @@ def _validate_order_line_inputs(
                 detail=f"Minimum order quantity for {item.name} is {minimum_order_quantity}",
             )
     return item_lookup
+
+
+def _validate_random_order_line_inputs(
+    *,
+    db: Session,
+    item_id: str,
+    quantity: int,
+) -> Item:
+    item = db.query(Item).filter(Item.id == item_id).first()
+    if item is None:
+        raise HTTPException(status_code=400, detail="Invalid item_id for random request")
+    if quantity < 1:
+        raise HTTPException(status_code=400, detail="Quantity must be at least 1")
+    return item
 
 
 def _validate_order_location(
@@ -1227,6 +1364,7 @@ def _group_email_order_data(
         "phone_number": first.phone_number,
         "pickup_location": first.pickup_location,
         "pickup_time_slot": first.pickup_time_slot,
+        "pickup_address": getattr(first, "pickup_address", None),
         "currency": CURRENCY,
         "address": address,
         "event_date": event.event_date if event else "",
@@ -1248,22 +1386,35 @@ def admin_create_order(
     if body.event_id is not None and body.event_id < 1:
         raise HTTPException(status_code=400, detail="Invalid event_id")
 
+    is_random_mode = body.mode == "random"
     event: Optional[Event]
-    if body.event_id is not None:
+    if is_random_mode:
+        event = _require_random_requests_event(db)
+    elif body.event_id is not None:
         event = db.query(Event).filter(Event.id == body.event_id).first()
         if event is None:
             raise HTTPException(status_code=404, detail="Event not found")
+        if _is_random_requests_event(event):
+            raise HTTPException(status_code=400, detail="Random Requests orders must use random mode")
     else:
-        event = db.query(Event).filter(Event.is_active == True).first()
+        event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
         if event is None:
             raise HTTPException(status_code=400, detail="No active event")
 
-    _validate_order_location(
-        db=db,
-        event=event,
-        pickup_location=body.pickup_location,
-        pickup_time_slot=body.pickup_time_slot,
-    )
+    random_item: Optional[Item] = None
+    if is_random_mode:
+        random_item = _validate_random_order_line_inputs(
+            db=db,
+            item_id=body.item_id,
+            quantity=body.quantity,
+        )
+    else:
+        _validate_order_location(
+            db=db,
+            event=event,
+            pickup_location=body.pickup_location,
+            pickup_time_slot=body.pickup_time_slot,
+        )
 
     existing_group_orders = (
         db.query(Order).filter(Order.group_id == body.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
@@ -1288,6 +1439,7 @@ def admin_create_order(
         quantity=body.quantity,
         pickup_location=body.pickup_location,
         pickup_time_slot=body.pickup_time_slot,
+        pickup_address=body.pickup_address,
         base_total_price=0,
         discount_total=0,
         total_price=0,
@@ -1302,19 +1454,34 @@ def admin_create_order(
     db.add(order)
     db.flush()
 
+    if is_random_mode and random_item is not None:
+        _apply_manual_pricing(order=order, item=random_item, unit_price=body.unit_price)
+
     if order.group_id:
         group_orders = db.query(Order).filter(Order.group_id == order.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
         if any(int(group_order.event_id) != int(event.id) for group_order in group_orders):
             raise HTTPException(status_code=400, detail="group_id cannot span multiple events")
         _reset_group_payment_state(group_orders)
-        _reprice_order_group(db=db, event=event, orders=group_orders)
+        if is_random_mode:
+            for group_order in group_orders:
+                if group_order.id != order.id:
+                    continue
+                group_order.event_id = int(event.id)
+                if random_item is not None:
+                    _apply_manual_pricing(order=group_order, item=random_item, unit_price=body.unit_price)
+        else:
+            _reprice_order_group(db=db, event=event, orders=group_orders)
     else:
-        pricing = _quote_event_lines(
-            db=db,
-            event=event,
-            lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
-        )
-        _apply_pricing_to_orders(orders=[order], pricing=pricing)
+        if is_random_mode:
+            if random_item is None:
+                raise HTTPException(status_code=400, detail="Invalid random order item")
+        else:
+            pricing = _quote_event_lines(
+                db=db,
+                event=event,
+                lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
+            )
+            _apply_pricing_to_orders(orders=[order], pricing=pricing)
 
     sync_customer_from_contact(
         db,
@@ -1481,16 +1648,28 @@ def admin_update_order(
         raise HTTPException(status_code=404, detail="Order not found")
 
     event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
-    enforce_event_membership = event is not None
-    if not enforce_event_membership or event is None:
+    if event is None:
         raise HTTPException(status_code=400, detail="Order is missing event context")
 
-    _validate_order_location(
-        db=db,
-        event=event,
-        pickup_location=body.pickup_location,
-        pickup_time_slot=body.pickup_time_slot,
-    )
+    is_random_mode = _is_random_requests_event(event) or body.mode == "random"
+    if body.mode == "random" and not _is_random_requests_event(event):
+        raise HTTPException(status_code=400, detail="Random Requests orders can only be edited in the random bucket")
+
+    preserved_manual_unit_price = _existing_manual_unit_price(order)
+    random_item: Optional[Item] = None
+    if is_random_mode:
+        random_item = _validate_random_order_line_inputs(
+            db=db,
+            item_id=body.item_id,
+            quantity=body.quantity,
+        )
+    else:
+        _validate_order_location(
+            db=db,
+            event=event,
+            pickup_location=body.pickup_location,
+            pickup_time_slot=body.pickup_time_slot,
+        )
 
     if order.group_id:
         group_orders = _get_order_group_rows(db, order)
@@ -1500,12 +1679,25 @@ def admin_update_order(
             group_order.phone_number = body.phone_number
             group_order.pickup_location = body.pickup_location
             group_order.pickup_time_slot = body.pickup_time_slot
+            group_order.pickup_address = body.pickup_address
             group_order.notes = body.notes
             group_order.exclude_email = body.exclude_email
             if group_order.id == order.id:
                 group_order.item_id = body.item_id
                 group_order.quantity = body.quantity
-        _reprice_order_group(db=db, event=event, orders=group_orders)
+                if is_random_mode and random_item is not None:
+                    _apply_manual_pricing(
+                        order=group_order,
+                        item=random_item,
+                        unit_price=body.unit_price if body.unit_price is not None else preserved_manual_unit_price,
+                    )
+        if is_random_mode:
+            for group_order in group_orders:
+                if group_order.id != order.id:
+                    continue
+                group_order.event_id = int(event.id)
+        else:
+            _reprice_order_group(db=db, event=event, orders=group_orders)
     else:
         order.name = body.name
         order.email = str(body.email) if body.email is not None else None
@@ -1514,14 +1706,24 @@ def admin_update_order(
         order.quantity = body.quantity
         order.pickup_location = body.pickup_location
         order.pickup_time_slot = body.pickup_time_slot
+        order.pickup_address = body.pickup_address
         order.notes = body.notes
         order.exclude_email = body.exclude_email
-        pricing = _quote_event_lines(
-            db=db,
-            event=event,
-            lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
-        )
-        _apply_pricing_to_orders(orders=[order], pricing=pricing)
+        if is_random_mode:
+            if random_item is None:
+                raise HTTPException(status_code=400, detail="Invalid random order item")
+            _apply_manual_pricing(
+                order=order,
+                item=random_item,
+                unit_price=body.unit_price if body.unit_price is not None else preserved_manual_unit_price,
+            )
+        else:
+            pricing = _quote_event_lines(
+                db=db,
+                event=event,
+                lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
+            )
+            _apply_pricing_to_orders(orders=[order], pricing=pricing)
 
     sync_customer_from_contact(
         db,
@@ -1564,17 +1766,14 @@ def admin_confirm_order(
 
         event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
         if event is None:
-            event = db.query(Event).filter(Event.is_active == True).first()
+            event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
         event_date = event.event_date if event else ""
         etransfer = {
             "enabled": bool(event.etransfer_enabled) if event else False,
             "email": event.etransfer_email if event else None,
         }
 
-        location = db.query(Location).filter(
-            or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-        ).first()
-        address = location.address if location else ""
+        address = _resolve_order_pickup_address(db, order)
 
         order_data = _group_email_order_data(orders=group_orders, event=event, address=address)
         order_data["event_date"] = event_date
@@ -1667,7 +1866,7 @@ def delete_order(
     group_id = order.group_id
     db.delete(order)
     db.flush()
-    if group_id and event is not None:
+    if group_id and event is not None and not _is_random_requests_event(event):
         remaining_orders = db.query(Order).filter(Order.group_id == group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
         if remaining_orders:
             _reprice_order_group(db=db, event=event, orders=remaining_orders)

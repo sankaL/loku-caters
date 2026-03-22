@@ -14,6 +14,7 @@ interface EventItem {
   id: number;
   name: string;
   event_date: string;
+  kind?: string;
   is_active: boolean;
   item_ids: string[];
   location_ids: string[];
@@ -193,6 +194,7 @@ export default function AdminEventsPage() {
       ) : (
         <div className="space-y-2">
           {pagedEvents.map((event) => {
+            const isRandomRequests = event.kind === "random_requests";
             const revenue = new Intl.NumberFormat("en-CA", {
               style: "currency",
               currency: CURRENCY,
@@ -218,6 +220,14 @@ export default function AdminEventsPage() {
                       >
                         {event.is_active ? "ACTIVE" : "INACTIVE"}
                       </span>
+                      {isRandomRequests && (
+                        <span
+                          className="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold"
+                          style={{ background: "#f0f7ea", color: "var(--color-forest)" }}
+                        >
+                          SYSTEM
+                        </span>
+                      )}
                     </div>
                     <span className="text-xs" style={{ color: "var(--color-muted)" }}>
                       {event.event_date}
@@ -239,14 +249,23 @@ export default function AdminEventsPage() {
                   </div>
 
                   <div className="flex items-center gap-2 shrink-0" onClick={(eventValue) => eventValue.stopPropagation()}>
-                    <button
-                      onClick={() => router.push(`/admin/events/${event.id}/edit`)}
-                      className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
-                      style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
-                    >
-                      Edit
-                    </button>
-                    {!event.is_active && (
+                    {isRandomRequests ? (
+                      <span
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium"
+                        style={{ border: "1px solid var(--color-border)", color: "var(--color-muted)", background: "var(--color-cream)" }}
+                      >
+                        Reserved bucket
+                      </span>
+                    ) : (
+                      <button
+                        onClick={() => router.push(`/admin/events/${event.id}/edit`)}
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                        style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+                      >
+                        Edit
+                      </button>
+                    )}
+                    {!event.is_active && !isRandomRequests && (
                       <button
                         onClick={() => handleDelete(event)}
                         disabled={deleting === event.id}
@@ -256,43 +275,49 @@ export default function AdminEventsPage() {
                         {deleting === event.id ? "..." : "Delete"}
                       </button>
                     )}
-                    <div className="flex flex-col items-center gap-1">
-                      <button
-                        role="switch"
-                        aria-checked={event.is_active}
-                        onClick={() => setPendingToggle({ eventId: event.id, eventName: event.name, willActivate: !event.is_active })}
-                        disabled={activating === event.id}
-                        title={event.is_active ? "Deactivate event" : "Activate event"}
-                        style={{
-                          width: "44px",
-                          height: "24px",
-                          borderRadius: "12px",
-                          background: event.is_active ? "var(--color-forest)" : "var(--color-border)",
-                          border: "none",
-                          cursor: activating === event.id ? "not-allowed" : "pointer",
-                          position: "relative",
-                          opacity: activating === event.id ? 0.5 : 1,
-                          padding: 0,
-                        }}
-                      >
-                        <span
-                          style={{
-                            position: "absolute",
-                            top: "2px",
-                            left: event.is_active ? "22px" : "2px",
-                            width: "20px",
-                            height: "20px",
-                            borderRadius: "50%",
-                            background: "var(--color-cream)",
-                            transition: "left 0.2s",
-                            boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
-                          }}
-                        />
-                      </button>
-                      <span style={{ fontSize: "10px", color: event.is_active ? "var(--color-forest)" : "var(--color-muted)", fontWeight: 600 }}>
-                        {activating === event.id ? "..." : event.is_active ? "Live" : "Off"}
+                    {isRandomRequests ? (
+                      <span style={{ fontSize: "10px", color: "var(--color-muted)", fontWeight: 600 }}>
+                        System only
                       </span>
-                    </div>
+                    ) : (
+                      <div className="flex flex-col items-center gap-1">
+                        <button
+                          role="switch"
+                          aria-checked={event.is_active}
+                          onClick={() => setPendingToggle({ eventId: event.id, eventName: event.name, willActivate: !event.is_active })}
+                          disabled={activating === event.id}
+                          title={event.is_active ? "Deactivate event" : "Activate event"}
+                          style={{
+                            width: "44px",
+                            height: "24px",
+                            borderRadius: "12px",
+                            background: event.is_active ? "var(--color-forest)" : "var(--color-border)",
+                            border: "none",
+                            cursor: activating === event.id ? "not-allowed" : "pointer",
+                            position: "relative",
+                            opacity: activating === event.id ? 0.5 : 1,
+                            padding: 0,
+                          }}
+                        >
+                          <span
+                            style={{
+                              position: "absolute",
+                              top: "2px",
+                              left: event.is_active ? "22px" : "2px",
+                              width: "20px",
+                              height: "20px",
+                              borderRadius: "50%",
+                              background: "var(--color-cream)",
+                              transition: "left 0.2s",
+                              boxShadow: "0 1px 3px rgba(0,0,0,0.25)",
+                            }}
+                          />
+                        </button>
+                        <span style={{ fontSize: "10px", color: event.is_active ? "var(--color-forest)" : "var(--color-muted)", fontWeight: 600 }}>
+                          {activating === event.id ? "..." : event.is_active ? "Live" : "Off"}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

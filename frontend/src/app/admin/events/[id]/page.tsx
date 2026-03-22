@@ -245,6 +245,7 @@ interface EventMeta {
   id: number;
   name: string;
   event_date: string;
+  kind?: string;
   is_active: boolean;
   item_ids: string[];
   location_ids: string[];
@@ -343,6 +344,7 @@ export default function EventDetailPage() {
     () => (activeOrders.length > 0 ? totalRevenue / activeOrders.length : 0),
     [activeOrders, totalRevenue]
   );
+  const isRandomRequests = eventMeta?.kind === "random_requests";
 
   const fmtCurrency = (n: number) =>
     new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(n);
@@ -390,19 +392,25 @@ export default function EventDetailPage() {
             Events
           </button>
           <button
-            onClick={() => router.push(`/admin/events/${id}/edit`)}
+            onClick={() => {
+              if (isRandomRequests) return;
+              router.push(`/admin/events/${id}/edit`);
+            }}
+            disabled={isRandomRequests}
             style={{
               fontSize: 13,
               fontWeight: 600,
               color: "var(--color-forest)",
-              background: "var(--color-cream)",
+              background: isRandomRequests ? "rgba(247,245,240,0.7)" : "var(--color-cream)",
               border: "none",
               borderRadius: 12,
               padding: "7px 16px",
-              cursor: "pointer",
+              cursor: isRandomRequests ? "not-allowed" : "pointer",
+              opacity: isRandomRequests ? 0.7 : 1,
             }}
+            title={isRandomRequests ? "Random Requests is a reserved system event" : "Configure event"}
           >
-            Configure Event
+            {isRandomRequests ? "System Event" : "Configure Event"}
           </button>
         </div>
 
@@ -425,6 +433,20 @@ export default function EventDetailPage() {
               >
                 {eventMeta.is_active ? "ACTIVE" : "INACTIVE"}
               </span>
+              {isRandomRequests && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    borderRadius: 20,
+                    padding: "3px 10px",
+                    background: "rgba(247,245,240,0.16)",
+                    color: "rgba(247,245,240,0.75)",
+                  }}
+                >
+                  SYSTEM
+                </span>
+              )}
             </div>
             <p style={{ fontSize: 13, color: "rgba(247,245,240,0.6)", margin: 0 }}>{eventMeta.event_date}</p>
           </div>

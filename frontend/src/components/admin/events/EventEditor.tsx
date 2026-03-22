@@ -65,6 +65,7 @@ interface EventRecord {
   id: number;
   name: string;
   event_date: string;
+  kind?: string;
   hero_header: string;
   hero_header_sage: string;
   hero_subheader: string;
@@ -481,6 +482,9 @@ export default function EventEditor({ mode }: { mode: "create" | "edit" }) {
 
     if (mode === "edit" && eventRes) {
       const eventData = (await eventRes.json()) as EventRecord;
+      if (eventData.kind === "random_requests") {
+        throw new Error("Random Requests is a system event and cannot be edited");
+      }
       setForm({
         name: eventData.name,
         event_date: eventData.event_date,

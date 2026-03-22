@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { API_URL, CURRENCY, fetchEventConfig, EventConfig } from "@/config/event";
+import { API_URL, CURRENCY, fetchEventConfig, EventConfig, type Item, type Location } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
@@ -26,7 +26,9 @@ interface Order {
   quantity: number;
   pickup_location: string;
   pickup_time_slot: string;
+  pickup_address?: string | null;
   total_price: number;
+  pricing_meta?: Record<string, unknown>;
   status: string;
   reminded: boolean;
   paid: boolean;
@@ -41,6 +43,7 @@ interface AdminEvent {
   id: number;
   name: string;
   event_date: string;
+  kind?: string;
   is_active: boolean;
 }
 
@@ -181,6 +184,15 @@ const EMPTY_ADD_FORM: AddOrderForm = {
   exclude_email: false,
 };
 
+interface RandomAddOrderForm extends AddOrderForm {
+  pickup_address: string;
+}
+
+const EMPTY_RANDOM_ADD_FORM: RandomAddOrderForm = {
+  ...EMPTY_ADD_FORM,
+  pickup_address: "",
+};
+
 interface BulkRow {
   name: string;
   email: string;
@@ -191,6 +203,13 @@ interface BulkRow {
   pickup_time_slot: string;
   _rowNum: number;
   _error?: string;
+}
+
+interface AdminLocationResponse {
+  id: string;
+  name: string;
+  address?: string;
+  time_slots?: string[];
 }
 
 type ReminderApiStatus =
@@ -371,6 +390,14 @@ function getPaymentReminderUnavailableReason(order: Order): string | null {
   return null;
 }
 
+function formatPickupLabel(order: Pick<Order, "pickup_location" | "pickup_time_slot" | "pickup_address">): string {
+  const location = (order.pickup_location ?? "").trim();
+  const timeSlot = (order.pickup_time_slot ?? "").trim();
+  const address = (order.pickup_address ?? "").trim();
+  const base = [location || "-", timeSlot || "-"].join(" - ");
+  return address ? `${base} - ${address}` : base;
+}
+
 function getPaymentReminderRecipientKey(order: Pick<Order, "id" | "group_id">): string {
   return order.group_id ? `group:${order.group_id}` : `order:${order.id}`;
 }
@@ -439,7 +466,9 @@ export default function AdminOrdersPage() {
   const [bulkConfirming, setBulkConfirming] = useState(false);
 
   // Add order modal
+  const [showAddOrderChoiceModal, setShowAddOrderChoiceModal] = useState(false);
   const [showAddOrderModal, setShowAddOrderModal] = useState(false);
+  const [showRandomOrderModal, setShowRandomOrderModal] = useState(false);
   const [addOrderForm, setAddOrderForm] = useState<AddOrderForm>(EMPTY_ADD_FORM);
   const [addOrderQuantities, setAddOrderQuantities] = useState<Record<string, number>>({});
   const [addOrderItemsError, setAddOrderItemsError] = useState<string>("");
@@ -448,6 +477,13 @@ export default function AdminOrdersPage() {
   const [addModalEventConfig, setAddModalEventConfig] = useState<EventConfig | null>(null);
   const [addModalEventSearch, setAddModalEventSearch] = useState("");
   const [showAddEventDropdown, setShowAddEventDropdown] = useState(false);
+  const [randomOrderForm, setRandomOrderForm] = useState<RandomAddOrderForm>(EMPTY_RANDOM_ADD_FORM);
+  const [randomOrderQuantities, setRandomOrderQuantities] = useState<Record<string, number>>({});
+  const [randomOrderPrices, setRandomOrderPrices] = useState<Record<string, number>>({});
+  const [randomOrderItemsError, setRandomOrderItemsError] = useState<string>("");
+  const [randomOrderGroupId, setRandomOrderGroupId] = useState<string | null>(null);
+  const [catalogItems, setCatalogItems] = useState<Item[]>([]);
+  const [catalogLocations, setCatalogLocations] = useState<Location[]>([]);
 
   // Bulk import modal
   const [showBulkImportModal, setShowBulkImportModal] = useState(false);
@@ -502,18 +538,57 @@ export default function AdminOrdersPage() {
     loadEvents();
   }, []);
 
+  useEffect(() => {
+    async function loadCatalogs() {
+      try {
+        const token = await getAdminToken();
+        if (!token) return;
+        const headers = { Authorization: `Bearer ${token}` };
+        const [itemsRes, locationsRes] = await Promise.all([
+          fetch(`${API_URL}/api/admin/items`, { headers }),
+          fetch(`${API_URL}/api/admin/locations`, { headers }),
+        ]);
+        if (!itemsRes.ok || !locationsRes.ok) return;
+        const itemsData = (await itemsRes.json()) as Item[];
+        const locationsData = (await locationsRes.json()) as AdminLocationResponse[];
+        setCatalogItems(Array.isArray(itemsData) ? itemsData : []);
+        setCatalogLocations(
+          Array.isArray(locationsData)
+            ? locationsData.map((location) => ({
+              id: location.id,
+              name: location.name,
+              address: location.address,
+              timeSlots: Array.isArray(location.time_slots) ? location.time_slots : [],
+            }))
+            : []
+        );
+      } catch {
+        // Non-blocking
+      }
+    }
+    loadCatalogs();
+  }, []);
+
   const activeEventId = useMemo(() => {
-    const active = events.find((e) => e.is_active);
+    const active = events.find((e) => e.is_active && e.kind !== "random_requests");
     return active ? active.id : null;
   }, [events]);
 
+  const selectedFilterEvent = useMemo(
+    () => (eventFilter === "all" ? null : events.find((e) => String(e.id) === eventFilter) ?? null),
+    [eventFilter, events]
+  );
+
   const configEventId = useMemo(() => {
     if (eventFilter !== "all") {
+      if (selectedFilterEvent?.kind === "random_requests") {
+        return activeEventId;
+      }
       const parsed = parseInt(eventFilter, 10);
       return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
     }
     return activeEventId;
-  }, [eventFilter, activeEventId]);
+  }, [eventFilter, activeEventId, selectedFilterEvent]);
 
   const configEventLabel = useMemo(() => {
     if (!configEventId) return "";
@@ -723,7 +798,7 @@ export default function AdminOrdersPage() {
         orderId: order.id,
         name: order.name,
         email: (order.email ?? "").trim(),
-        pickupLabel: `${order.pickup_location} - ${order.pickup_time_slot}`,
+        pickupLabel: formatPickupLabel(order),
         disabledReason: getPaymentReminderUnavailableReason(order),
       });
     }
@@ -982,7 +1057,7 @@ export default function AdminOrdersPage() {
         orderId: order.id,
         name: order.name,
         email: (order.email ?? "").trim(),
-        pickupLabel: `${order.pickup_location} - ${order.pickup_time_slot}`,
+        pickupLabel: formatPickupLabel(order),
         status: "queued",
         attempts: 0,
         message: "",
@@ -1515,6 +1590,114 @@ export default function AdminOrdersPage() {
     }
   }
 
+  async function handleAddRandomOrder(e: React.FormEvent) {
+    e.preventDefault();
+
+    const addModalItems = randomOrderPickerItems;
+    const selectedLines = linesFromQuantities(addModalItems, randomOrderQuantities);
+    if (selectedLines.length === 0) {
+      setRandomOrderItemsError("Please add at least one item.");
+      return;
+    }
+
+    for (const { item, qty } of selectedLines) {
+      if (qty < 1) {
+        setRandomOrderItemsError(`${item.name} requires at least one portion.`);
+        return;
+      }
+      const unitPrice = randomOrderPrices[item.id] ?? item.discounted_price ?? item.price;
+      if (unitPrice <= 0) {
+        setRandomOrderItemsError(`${item.name} needs a unit price greater than 0.`);
+        return;
+      }
+    }
+
+    if (!randomOrderForm.name.trim()) {
+      setRandomOrderItemsError("Name is required.");
+      return;
+    }
+    if (!randomOrderForm.exclude_email && !randomOrderForm.email.trim()) {
+      setRandomOrderItemsError("Email is required unless email is excluded.");
+      return;
+    }
+    if (!randomOrderForm.pickup_location.trim() || !randomOrderForm.pickup_time_slot.trim()) {
+      setRandomOrderItemsError("Pickup location and time slot are required.");
+      return;
+    }
+
+    setAddingOrder(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+
+      const groupId = randomOrderGroupId ?? crypto.randomUUID();
+      if (!randomOrderGroupId) {
+        setRandomOrderGroupId(groupId);
+      }
+
+      const createResults = await Promise.allSettled(
+        selectedLines.map(async ({ item, qty }) => {
+          const unitPrice = randomOrderPrices[item.id] ?? item.discounted_price ?? item.price;
+          const res = await fetch(`${API_URL}/api/admin/orders`, {
+            method: "POST",
+            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...randomOrderForm,
+              mode: "random",
+              group_id: groupId,
+              item_id: item.id,
+              quantity: qty,
+              unit_price: unitPrice,
+            }),
+          });
+          if (!res.ok) {
+            throw new Error(await getApiErrorMessage(res, `Failed to create line for ${item.name}`));
+          }
+          return true;
+        })
+      );
+
+      const succeeded = createResults.filter((result) => result.status === "fulfilled").length;
+      const failed = createResults.length - succeeded;
+      const failedLines = selectedLines.filter((_, index) => createResults[index]?.status === "rejected");
+
+      if (succeeded > 0) {
+        await fetchOrders();
+        if (failed > 0) {
+          const nextQuantities: Record<string, number> = {};
+          for (const { item, qty } of failedLines) {
+            nextQuantities[item.id] = qty;
+          }
+          setRandomOrderQuantities(nextQuantities);
+          setRandomOrderItemsError("Some lines were created. Only failed lines remain selected for retry.");
+        }
+      }
+
+      if (failed === 0) {
+        showToast(`Created ${succeeded} random request line${succeeded !== 1 ? "s" : ""}`, "success");
+        resetRandomOrderModalState();
+        return;
+      }
+
+      const firstFailure = createResults.find((result) => result.status === "rejected");
+      const firstFailureMessage = firstFailure && firstFailure.status === "rejected"
+        ? firstFailure.reason instanceof Error
+          ? firstFailure.reason.message
+          : "Unknown error"
+        : "Unknown error";
+
+      if (succeeded === 0) {
+        throw new Error(firstFailureMessage);
+      }
+
+      showToast(`Created ${succeeded}, failed ${failed}. First error: ${firstFailureMessage}`, "error");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to create random order", "error");
+    } finally {
+      setAddingOrder(false);
+    }
+  }
+
   function downloadCsvTemplate() {
     const headers = "Name,Email,Phone,Item ID,Quantity,Pickup Location,Time Slot";
     const example = eventConfig
@@ -1747,11 +1930,60 @@ export default function AdminOrdersPage() {
     [addModalEventConfig]
   );
 
+  const randomOrderPickerItems = useMemo<OrderLineItem[]>(
+    () => catalogItems.map((item) => ({ ...item, is_locked: false })),
+    [catalogItems]
+  );
+
+  const randomLocationSuggestions = useMemo(
+    () => Array.from(new Set(catalogLocations.map((location) => location.name).filter(Boolean))).sort((a, b) => a.localeCompare(b)),
+    [catalogLocations]
+  );
+
+  const randomTimeSlotSuggestions = useMemo(
+    () => Array.from(new Set(catalogLocations.flatMap((location) => location.timeSlots || []))).filter(Boolean).sort((a, b) => a.localeCompare(b)),
+    [catalogLocations]
+  );
+
   function resetAddOrderModalState() {
     setShowAddOrderModal(false);
     setAddOrderForm(EMPTY_ADD_FORM);
     setAddOrderQuantities({});
     setAddOrderItemsError("");
+  }
+
+  function resetRandomOrderModalState() {
+    setShowRandomOrderModal(false);
+    setRandomOrderForm(EMPTY_RANDOM_ADD_FORM);
+    setRandomOrderQuantities({});
+    setRandomOrderPrices({});
+    setRandomOrderItemsError("");
+    setRandomOrderGroupId(null);
+  }
+
+  function openEventAddOrderModal() {
+    setShowAddOrderChoiceModal(false);
+    setShowRandomOrderModal(false);
+    setShowAddOrderModal(true);
+    setAddOrderForm(EMPTY_ADD_FORM);
+    setAddOrderQuantities({});
+    setAddOrderItemsError("");
+    setAddModalEventId(configEventId);
+    setAddModalEventConfig(configEventId ? eventConfig : null);
+    const matchedEvent = configEventId ? events.find((evt) => evt.id === configEventId) : null;
+    setAddModalEventSearch(matchedEvent ? `${matchedEvent.name} (${matchedEvent.event_date})` : "");
+    setShowAddEventDropdown(false);
+  }
+
+  function openRandomAddOrderModal() {
+    setShowAddOrderChoiceModal(false);
+    setShowAddOrderModal(false);
+    setShowRandomOrderModal(true);
+    setRandomOrderForm(EMPTY_RANDOM_ADD_FORM);
+    setRandomOrderQuantities({});
+    setRandomOrderPrices({});
+    setRandomOrderItemsError("");
+    setRandomOrderGroupId(crypto.randomUUID());
   }
 
   const normalizedAddModalEventQuery = useMemo(() => {
@@ -1764,8 +1996,9 @@ export default function AdminOrdersPage() {
 
   const filteredAddModalEvents = useMemo(() => {
     const q = normalizedAddModalEventQuery;
-    if (!q) return events;
-    return events.filter((e) => {
+    const eventChoices = events.filter((e) => e.kind !== "random_requests");
+    if (!q) return eventChoices;
+    return eventChoices.filter((e) => {
       const haystack = `${e.name} ${e.event_date}`
         .toLowerCase()
         .replace(/[()]/g, " ")
@@ -1774,6 +2007,14 @@ export default function AdminOrdersPage() {
       return haystack.includes(q);
     });
   }, [events, normalizedAddModalEventQuery]);
+
+  const randomEventLabel = useMemo(() => {
+    const randomEvent = events.find((event) => event.kind === "random_requests");
+    if (!randomEvent) return "Random Requests";
+    return randomEvent.name === randomEvent.event_date
+      ? randomEvent.name
+      : `${randomEvent.name} (${randomEvent.event_date})`;
+  }, [events]);
 
   const validBulkRows = bulkImportRows.filter((r) => !r._error);
   const invalidBulkRows = bulkImportRows.filter((r) => r._error);
@@ -1850,17 +2091,7 @@ export default function AdminOrdersPage() {
             Remind
           </button>
           <button
-            onClick={() => {
-              setShowAddOrderModal(true);
-              setAddOrderForm(EMPTY_ADD_FORM);
-              setAddOrderQuantities({});
-              setAddOrderItemsError("");
-              setAddModalEventId(configEventId);
-              setAddModalEventConfig(configEventId ? eventConfig : null);
-              const matchedEvent = configEventId ? events.find(e => e.id === configEventId) : null;
-              setAddModalEventSearch(matchedEvent ? `${matchedEvent.name} (${matchedEvent.event_date})` : "");
-              setShowAddEventDropdown(false);
-            }}
+            onClick={() => setShowAddOrderChoiceModal(true)}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
             style={{ background: "var(--color-forest)", color: "var(--color-cream)", border: "1px solid var(--color-forest)" }}
           >
@@ -2216,7 +2447,12 @@ export default function AdminOrdersPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        {order.pickup_location}
+                        <div>{order.pickup_location}</div>
+                        {order.pickup_address && (
+                          <div className="text-xs" style={{ color: "var(--color-muted)" }}>
+                            {order.pickup_address}
+                          </div>
+                        )}
                       </td>
                       <td className="px-4 py-3 whitespace-nowrap" style={{ color: "var(--color-text)" }}>
                         {order.pickup_time_slot}
@@ -2707,8 +2943,52 @@ export default function AdminOrdersPage() {
         This will send an automated payment reminder email to {paymentReminderTarget?.name ?? "this customer"} for the selected unpaid order bundle. If payment has already been resolved, the email copy will instruct them to ignore it.
       </Modal>
 
+      {/* Add Order Type Modal */}
+      {showAddOrderChoiceModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setShowAddOrderChoiceModal(false); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "560px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)" }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-2" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              Add Order
+            </h2>
+            <p className="text-sm mb-6" style={{ color: "var(--color-muted)" }}>
+              Choose whether this order belongs to a normal event or the reserved random requests bucket.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <button
+                type="button"
+                onClick={openEventAddOrderModal}
+                className="rounded-2xl p-5 text-left transition-all"
+                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
+              >
+                <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-forest)" }}>Event</p>
+                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                  Use the normal event modal with event pricing, item minimums, and location restrictions.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={openRandomAddOrderModal}
+                className="rounded-2xl p-5 text-left transition-all"
+                style={{ background: "#f0f7ea", border: "1px solid var(--color-sage)" }}
+              >
+                <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-forest)" }}>Random</p>
+                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                  Use freeform pickup details and manual line pricing for the {randomEventLabel}.
+                </p>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Add Order Modal */}
-        {showAddOrderModal && (
+      {showAddOrderModal && (
           <div
           style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
           onMouseDown={(e) => { if (e.target === e.currentTarget) resetAddOrderModalState(); }}
@@ -2926,6 +3206,183 @@ export default function AdminOrdersPage() {
                   style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
                 >
                   {addingOrder ? "Creating..." : "Create Order"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Random Add Order Modal */}
+      {showRandomOrderModal && (
+        <div
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "16px" }}
+          onMouseDown={(e) => { if (e.target === e.currentTarget) resetRandomOrderModalState(); }}
+        >
+          <div
+            style={{ background: "white", borderRadius: "24px", border: "1px solid var(--color-border)", maxWidth: "760px", width: "100%", padding: "32px", boxShadow: "0 20px 60px rgba(0,0,0,0.15)", maxHeight: "90vh", overflowY: "auto" }}
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-xl font-bold mb-2" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+              Random Requests Order
+            </h2>
+            <p className="text-sm mb-5" style={{ color: "var(--color-muted)" }}>
+              Add any saved items with manual line prices and adjust the pickup details for this order bundle.
+            </p>
+
+            <form onSubmit={handleAddRandomOrder} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Name</label>
+                  <input
+                    required
+                    type="text"
+                    value={randomOrderForm.name}
+                    onChange={(e) => setRandomOrderForm((f) => ({ ...f, name: e.target.value }))}
+                    placeholder="Full name"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Email</label>
+                  <input
+                    required={!randomOrderForm.exclude_email}
+                    type="email"
+                    value={randomOrderForm.email}
+                    onChange={(e) => setRandomOrderForm((f) => ({ ...f, email: e.target.value }))}
+                    placeholder="email@example.com"
+                    style={inputStyle}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Phone (Optional)</label>
+                  <input
+                    type="tel"
+                    value={randomOrderForm.phone_number}
+                    onChange={(e) => setRandomOrderForm((f) => ({ ...f, phone_number: e.target.value }))}
+                    placeholder="905-555-0123"
+                    style={inputStyle}
+                  />
+                </div>
+
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label className="flex items-center gap-2 text-sm font-medium" style={{ color: "var(--color-text)" }}>
+                    <input
+                      type="checkbox"
+                      checked={randomOrderForm.exclude_email}
+                      onChange={(e) => setRandomOrderForm((f) => ({ ...f, exclude_email: e.target.checked }))}
+                      style={{ accentColor: "var(--color-forest)", width: "15px", height: "15px" }}
+                    />
+                    Exclude Email (no confirmation or reminder emails)
+                  </label>
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    When enabled, Email and Phone are optional.
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <ItemQuantityPicker
+                  items={randomOrderPickerItems}
+                  quantities={randomOrderQuantities}
+                  onChange={(next) => {
+                    setRandomOrderQuantities(next);
+                    setRandomOrderItemsError("");
+                  }}
+                  linePrices={randomOrderPrices}
+                  onLinePricesChange={(next) => setRandomOrderPrices(next)}
+                  currency={CURRENCY}
+                  allowBelowMinimumOrder
+                  allowPriceEdit
+                  disabled={randomOrderPickerItems.length === 0}
+                  error={randomOrderItemsError}
+                />
+                {!catalogItems.length && (
+                  <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                    Loading the full item catalog...
+                  </p>
+                )}
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1rem" }}>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Location</label>
+                  <input
+                    list="random-location-options"
+                    required
+                    type="text"
+                    value={randomOrderForm.pickup_location}
+                    onChange={(e) => setRandomOrderForm((f) => ({ ...f, pickup_location: e.target.value }))}
+                    placeholder="Any pickup location"
+                    style={inputStyle}
+                  />
+                  <datalist id="random-location-options">
+                    {randomLocationSuggestions.map((location) => (
+                      <option key={location} value={location} />
+                    ))}
+                  </datalist>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Time Slot</label>
+                  <input
+                    list="random-time-slot-options"
+                    required
+                    type="text"
+                    value={randomOrderForm.pickup_time_slot}
+                    onChange={(e) => setRandomOrderForm((f) => ({ ...f, pickup_time_slot: e.target.value }))}
+                    placeholder="Any pickup time slot"
+                    style={inputStyle}
+                  />
+                  <datalist id="random-time-slot-options">
+                    {randomTimeSlotSuggestions.map((slot) => (
+                      <option key={slot} value={slot} />
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Address</label>
+                <textarea
+                  value={randomOrderForm.pickup_address}
+                  onChange={(e) => setRandomOrderForm((f) => ({ ...f, pickup_address: e.target.value }))}
+                  placeholder="Freeform pickup address or special instructions"
+                  rows={3}
+                  style={{ ...inputStyle, resize: "vertical" as const, minHeight: "88px" }}
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Notes (admin only)</label>
+                <textarea
+                  value={randomOrderForm.notes}
+                  onChange={(e) => setRandomOrderForm((f) => ({ ...f, notes: e.target.value }))}
+                  placeholder="Internal notes for this random request..."
+                  rows={3}
+                  style={{ ...inputStyle, resize: "vertical" as const, minHeight: "88px" }}
+                />
+              </div>
+
+              <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                Manual prices are stored on each line. The Random Requests bucket is always used for these orders.
+              </p>
+
+              <div className="flex items-center justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={resetRandomOrderModalState}
+                  className="px-4 py-2 rounded-xl text-sm font-medium"
+                  style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={addingOrder}
+                  className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                  style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                >
+                  {addingOrder ? "Creating..." : "Create Random Request"}
                 </button>
               </div>
             </form>
@@ -3512,7 +3969,7 @@ export default function AdminOrdersPage() {
                           <div style={{ flex: 1, minWidth: 0 }}>
                             <p className="text-sm font-semibold" style={{ color: "var(--color-text)", margin: 0 }}>{order.name}</p>
                             <p className="text-xs" style={{ color: "var(--color-muted)", margin: "2px 0 0" }}>{order.email ?? "-"}</p>
-                            <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{order.pickup_location} - {order.pickup_time_slot}</p>
+                            <p className="text-xs" style={{ color: "var(--color-muted)", margin: "1px 0 0" }}>{formatPickupLabel(order)}</p>
                           </div>
                         </label>
                       ))

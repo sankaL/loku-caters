@@ -21,7 +21,7 @@ router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
 def _get_active_event(db: Session) -> Event:
-    event = db.query(Event).filter(Event.is_active == True).first()
+    event = db.query(Event).filter(Event.is_active == True, Event.kind != "random_requests").first()
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return event

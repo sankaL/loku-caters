@@ -10,8 +10,9 @@ os.environ.setdefault("RESEND_API_KEY", "test-key")
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from constants import OrderStatus  # noqa: E402
-from models import Location, Order  # noqa: E402
+from models import Event, Location, Order  # noqa: E402
 from routers.admin import (  # noqa: E402
+    admin_confirm_order,
     _send_order_payment_reminder,
     admin_send_single_payment_reminder,
 )
@@ -45,6 +46,33 @@ def make_order(**overrides):
     return SimpleNamespace(**base)
 
 
+def make_event(**overrides):
+    base = {
+        "id": 42,
+        "name": "Random Requests",
+        "event_date": "April 2, 2026",
+        "kind": "random_requests",
+        "hero_header": "",
+        "hero_header_sage": "",
+        "hero_subheader": "",
+        "promo_details": None,
+        "tooltip_enabled": False,
+        "tooltip_header": None,
+        "tooltip_body": None,
+        "tooltip_image_key": None,
+        "hero_side_image_key": None,
+        "etransfer_enabled": False,
+        "etransfer_email": None,
+        "is_active": False,
+        "item_ids": [],
+        "location_ids": [],
+        "combo_deals": [],
+        "updated_at": None,
+    }
+    base.update(overrides)
+    return SimpleNamespace(**base)
+
+
 class FakeQuery:
     def __init__(self, result):
         self.result = result
@@ -57,16 +85,22 @@ class FakeQuery:
 
 
 class FakeSession:
-    def __init__(self, *, order=None, location=None):
+    def __init__(self, *, order=None, location=None, event=None):
         self.order = order
         self.location = location
+        self.event = event
 
     def query(self, model):
         if model is Order:
             return FakeQuery(self.order)
         if model is Location:
             return FakeQuery(self.location)
+        if model is Event:
+            return FakeQuery(self.event)
         raise AssertionError(f"Unexpected model query: {model}")
+
+    def commit(self):
+        return None
 
 
 class PaymentReminderTests(unittest.TestCase):
@@ -87,6 +121,25 @@ class PaymentReminderTests(unittest.TestCase):
         self.assertEqual(payload["event_date"], "April 2, 2026")
         self.assertEqual(payload["etransfer_email"], "payments@example.com")
         self.assertEqual(payload["address"], "123 Main St")
+
+    def test_confirmation_email_uses_order_pickup_address_for_random_requests(self):
+        order = make_order(
+            event_id=42,
+            pickup_location="Any Location",
+            pickup_time_slot="Any Time",
+            pickup_address="789 Random Road",
+            status=OrderStatus.PENDING,
+        )
+        event = make_event()
+        db = FakeSession(order=order, event=event)
+
+        with patch("routers.admin.send_confirmation") as mock_send:
+            result = admin_confirm_order("order-1", db, {})
+
+        self.assertEqual(result["status"], OrderStatus.CONFIRMED)
+        mock_send.assert_called_once()
+        payload = mock_send.call_args.args[0]
+        self.assertEqual(payload["address"], "789 Random Road")
 
     def test_grouped_payment_reminder_sends_single_summary(self):
         first = make_order(id="order-1", group_id="group-1", item_name="Lamprais", quantity=1, total_price=24.0, base_total_price=24.0)
