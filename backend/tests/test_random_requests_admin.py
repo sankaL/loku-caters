@@ -397,6 +397,7 @@ class RandomRequestsAdminTests(unittest.TestCase):
         mock_send.assert_called_once()
         payload = mock_send.call_args.args[0]
         self.assertEqual(payload["address"], "789 Random Road")
+        self.assertEqual(payload["event_date"], "")
 
 
 if __name__ == "__main__":

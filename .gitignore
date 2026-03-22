@@ -48,3 +48,5 @@ build/
 backup_data/*
 
 docs/assets/*
+
+.artifacts/*

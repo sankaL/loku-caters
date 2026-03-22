@@ -420,6 +420,15 @@ def _is_random_requests_event(event: Optional[Event]) -> bool:
     return bool(event is not None and getattr(event, "kind", "event") == RANDOM_REQUESTS_EVENT_KIND)
 
 
+def _customer_email_event_date(event: Optional[Event], fallback: str = "") -> str:
+    if event is None:
+        return fallback
+    if _is_random_requests_event(event):
+        return ""
+    event_date = _normalize_group_text(getattr(event, "event_date", None))
+    return event_date if event_date is not None else fallback
+
+
 def _require_random_requests_event(db: Session) -> Event:
     event = db.query(Event).filter(Event.kind == RANDOM_REQUESTS_EVENT_KIND).first()
     if event is None:
@@ -1042,7 +1051,7 @@ def _prepare_reminder_order_data(
     address = _resolve_order_pickup_address(db, order)
 
     event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
-    event_date = event.event_date if event else active_event_date
+    event_date = _customer_email_event_date(event, active_event_date)
     etransfer = {
         "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
         "email": event.etransfer_email if event else active_etransfer["email"],
@@ -1134,7 +1143,7 @@ def _prepare_payment_reminder_order_data(
     address = _resolve_order_pickup_address(db, order)
 
     event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
-    event_date = event.event_date if event else active_event_date
+    event_date = _customer_email_event_date(event, active_event_date)
     etransfer = {
         "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
         "email": event.etransfer_email if event else active_etransfer["email"],
@@ -1367,7 +1376,7 @@ def _group_email_order_data(
         "pickup_address": getattr(first, "pickup_address", None),
         "currency": CURRENCY,
         "address": address,
-        "event_date": event.event_date if event else "",
+        "event_date": _customer_email_event_date(event),
         "etransfer_enabled": bool(event.etransfer_enabled) if event else False,
         "etransfer_email": event.etransfer_email if event else None,
         "subtotal": subtotal,
@@ -1767,7 +1776,7 @@ def admin_confirm_order(
         event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
         if event is None:
             event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
-        event_date = event.event_date if event else ""
+        event_date = _customer_email_event_date(event)
         etransfer = {
             "enabled": bool(event.etransfer_enabled) if event else False,
             "email": event.etransfer_email if event else None,

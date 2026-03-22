@@ -87,6 +87,15 @@ def _build_order_summary_html(order_data: dict) -> str:
                       </tr>
 """
 
+    pickup_date_row_html = ""
+    if event_date:
+        pickup_date_row_html = f"""
+                      <tr>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Date</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{event_date}</td>
+                      </tr>
+"""
+
     return f"""
               <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-radius:12px;overflow:hidden;margin-bottom:28px;">
                 <tr>
@@ -103,10 +112,7 @@ def _build_order_summary_html(order_data: dict) -> str:
                         <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${subtotal:.2f}</td>
                       </tr>
 {savings_row_html}
-                      <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Date</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{event_date}</td>
-                      </tr>
+{pickup_date_row_html}
                       <tr>
                         <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Pickup Location</td>
                         <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{location_display}</td>
@@ -259,6 +265,18 @@ def send_reminder(order_data: dict) -> None:
     location_display = pickup_location
     if address:
         location_display = f"{pickup_location} - {address}"
+    if event_date:
+        pickup_sentence_html = (
+            f"Just a friendly reminder that your Lamprais order will be ready for pickup on "
+            f"<strong>{event_date}</strong> at <strong>{location_display}</strong> during your selected time slot. "
+            "We look forward to seeing you soon!"
+        )
+    else:
+        pickup_sentence_html = (
+            f"Just a friendly reminder that your Lamprais order will be ready for pickup at "
+            f"<strong>{location_display}</strong> during your selected time slot. "
+            "We look forward to seeing you soon!"
+        )
     order_lines = _normalize_order_lines(order_data)
     subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
 
@@ -289,8 +307,7 @@ def send_reminder(order_data: dict) -> None:
             <td style="padding:40px;">
               <p style="margin:0 0 8px;font-size:16px;color:#1C1C1A;">Hi <strong>{name}</strong>,</p>
               <p style="margin:0 0 28px;font-size:15px;color:#4a4a4a;line-height:1.6;">
-                Just a friendly reminder that your Lamprais order will be ready for pickup on <strong>{event_date}</strong>
-                at <strong>{location_display}</strong> during your selected time slot. We look forward to seeing you soon!
+                {pickup_sentence_html}
               </p>
 {summary_html}
 
@@ -337,6 +354,12 @@ def send_payment_reminder(order_data: dict) -> None:
     summary_html = _build_order_summary_html(order_data)
     order_lines = _normalize_order_lines(order_data)
     subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
+    pickup_sentence_html = ""
+    if event_date:
+        pickup_sentence_html = (
+            f"{f' This order was scheduled for pickup on <strong>{event_date}</strong>.' if pickup_completed else ''}"
+            f"{f' Your scheduled pickup is on <strong>{event_date}</strong>.' if not pickup_completed else ''}"
+        )
 
     html_body = f"""
 <!DOCTYPE html>
@@ -370,8 +393,7 @@ def send_payment_reminder(order_data: dict) -> None:
               </p>
               <p style="margin:0 0 28px;font-size:15px;color:#4a4a4a;line-height:1.6;">
                 If you have already sent payment or otherwise resolved this order, please disregard this message.
-                {f' This order was scheduled for pickup on <strong>{event_date}</strong>.' if event_date and pickup_completed else ''}
-                {f' Your scheduled pickup is on <strong>{event_date}</strong>.' if event_date and not pickup_completed else ''}
+                {pickup_sentence_html}
               </p>
 {summary_html}
 
