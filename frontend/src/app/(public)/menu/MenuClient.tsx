@@ -66,11 +66,6 @@ const individualItems = {
                         "Crispy fried rolls filled with spiced fish and herbs.",
                 },
                 {
-                    name: "Fish Patties",
-                    description:
-                        "Flaky savory pastries filled with spiced fish.",
-                },
-                {
                     name: "Fish Pastries",
                     description:
                         "Delicate golden pastries stuffed with a fragrant fish filling.",
