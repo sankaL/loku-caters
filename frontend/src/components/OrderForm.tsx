@@ -818,77 +818,132 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
           </button>
 
           {selectedLines.length > 0 && (
-            <div className="rounded-3xl p-5 md:p-6" style={{ background: "linear-gradient(135deg, #12270F 0%, #203b19 100%)", color: "white" }}>
-              <div className="flex items-start justify-between gap-4 mb-4">
-                <div>
-                  <p className="text-xs uppercase tracking-[0.2em] font-semibold" style={{ color: "rgba(247,245,240,0.65)" }}>
+            <div className="rounded-3xl overflow-hidden" style={{ background: "linear-gradient(135deg, #12270F 0%, #1a3316 50%, #203b19 100%)", color: "white", boxShadow: "0 4px 24px rgba(18,39,15,0.25)" }}>
+              {/* Section header */}
+              <div className="flex items-center justify-between gap-4 px-5 md:px-6 pt-5 md:pt-6 pb-3">
+                <div className="flex items-center gap-2">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(247,245,240,0.5)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
+                  </svg>
+                  <p className="text-xs uppercase tracking-[0.2em] font-semibold" style={{ color: "rgba(247,245,240,0.6)" }}>
                     Deals For Your Cart
                   </p>
                 </div>
-                <div className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "rgba(255,255,255,0.12)", color: "var(--color-cream)" }}>
+                <div className="rounded-full px-3 py-1 text-xs font-semibold" style={{ background: quote.applied_combos.length > 0 ? "rgba(114,145,82,0.35)" : "rgba(255,255,255,0.1)", color: "var(--color-cream)", border: `1px solid ${quote.applied_combos.length > 0 ? "rgba(114,145,82,0.5)" : "rgba(255,255,255,0.08)"}` }}>
                   {quoteLoading ? "Checking deals..." : `${quote.applied_combos.length} applied`}
                 </div>
               </div>
 
               {quoteError && (
-                <p className="text-sm mb-3" style={{ color: "#fbd5d5" }}>
+                <p className="text-sm px-5 md:px-6 pb-3" style={{ color: "#fbd5d5" }}>
                   {quoteError}
                 </p>
               )}
 
+              {/* Applied combo deals */}
               {quote.applied_combos.length > 0 && (
-                <div className="space-y-3 mb-4">
+                <div className="space-y-3 px-5 md:px-6 pb-4">
                   {quote.applied_combos.map((combo) => (
-                    <div key={combo.combo_id} className="rounded-2xl p-4" style={{ background: "rgba(255,255,255,0.1)", border: "1px solid rgba(255,255,255,0.12)" }}>
+                    <div
+                      key={combo.combo_id}
+                      className="rounded-2xl p-4 relative overflow-hidden"
+                      style={{
+                        background: "rgba(255,255,255,0.08)",
+                        border: "1px solid rgba(114,145,82,0.35)",
+                        backdropFilter: "blur(8px)",
+                      }}
+                    >
+                      {/* Subtle gradient accent on left edge */}
+                      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: "linear-gradient(180deg, var(--color-sage) 0%, rgba(114,145,82,0.3) 100%)", borderRadius: "3px 0 0 3px" }} />
+
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold">{combo.name}</p>
-                          <p className="text-xs mt-1" style={{ color: "rgba(247,245,240,0.9)" }}>
-                            {formatComboDiscountLabel(combo)}
-                          </p>
-                          <p className="text-xs mt-1" style={{ color: "rgba(247,245,240,0.72)" }}>
-                            {combo.preview_text}
-                          </p>
+                        <div className="flex items-start gap-2.5 min-w-0">
+                          {/* Checkmark icon */}
+                          <div className="shrink-0 mt-0.5 w-5 h-5 rounded-full flex items-center justify-center" style={{ background: "var(--color-sage)" }}>
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+                              <polyline points="20 6 9 17 4 12" />
+                            </svg>
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-base font-bold leading-tight">{combo.name}</p>
+                            <p className="text-xs mt-1.5 leading-relaxed" style={{ color: "rgba(247,245,240,0.65)" }}>
+                              {combo.preview_text}
+                            </p>
+                          </div>
                         </div>
-                        <span className="shrink-0 rounded-full px-3 py-1 text-xs font-semibold" style={{ background: "var(--color-bark)", color: "white" }}>
+                        <span className="shrink-0 rounded-full px-3 py-1 text-xs font-bold" style={{ background: "var(--color-bark)", color: "white", boxShadow: "0 2px 8px rgba(139,94,60,0.35)" }}>
                           {formatComboPrimaryBadge(combo)}
                         </span>
                       </div>
-                      <div className="text-xs mt-2" style={{ color: "rgba(247,245,240,0.72)" }}>
-                        Saved {formatCurrency(combo.savings_total)}
+
+                      {/* Savings callout */}
+                      <div className="flex items-center gap-2 mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8bc34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
+                        </svg>
+                        <span className="text-sm font-semibold" style={{ color: "#8bc34a" }}>
+                          Saved {formatCurrency(combo.savings_total)}
+                        </span>
+                        <span className="text-xs ml-1" style={{ color: "rgba(247,245,240,0.5)" }}>
+                          {formatComboDiscountLabel(combo)}
+                        </span>
                       </div>
                     </div>
                   ))}
                 </div>
               )}
 
+              {/* Upsell opportunities */}
               {quote.upsell_opportunities.length > 0 ? (
-                <div className="space-y-3">
-                  {quote.upsell_opportunities.map((opportunity) => (
-                    <div key={opportunity.combo_id} className="rounded-2xl p-4" style={{ background: "#F7F5F0", color: "var(--color-text)" }}>
-                      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-                        <div>
-                          <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{opportunity.name}</p>
-                          <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>{opportunity.preview_text}</p>
-                          <p className="text-sm mt-2" style={{ color: "var(--color-text)" }}>{opportunity.message}</p>
+                <div className="px-5 md:px-6 pb-5 md:pb-6" style={{ borderTop: quote.applied_combos.length > 0 ? "1px solid rgba(255,255,255,0.06)" : "none", paddingTop: quote.applied_combos.length > 0 ? "16px" : 0 }}>
+                  <div className="space-y-3">
+                    {quote.upsell_opportunities.map((opportunity) => (
+                      <div
+                        key={opportunity.combo_id}
+                        className="rounded-2xl overflow-hidden"
+                        style={{ background: "#F7F5F0", color: "var(--color-text)", border: "1px solid rgba(114,145,82,0.2)" }}
+                      >
+                        <div className="p-4 pb-3">
+                          <div className="flex items-start gap-2.5">
+                            {/* Tag icon */}
+                            <div className="shrink-0 mt-0.5">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
+                                <line x1="7" y1="7" x2="7.01" y2="7" />
+                              </svg>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>{opportunity.name}</p>
+                              <p className="text-xs mt-1 leading-relaxed" style={{ color: "var(--color-muted)" }}>{opportunity.preview_text}</p>
+                              <p className="text-sm mt-2 font-medium" style={{ color: "var(--color-forest)" }}>{opportunity.message}</p>
+                            </div>
+                          </div>
                         </div>
                         <button
                           type="button"
                           onClick={() => addMissingRequirements(opportunity)}
-                          className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold transition-all"
-                          style={{ background: "var(--color-sage)", color: "white" }}
+                          className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all"
+                          style={{ background: "var(--color-sage)", color: "white", borderTop: "1px solid rgba(114,145,82,0.3)" }}
                         >
                           Add and Save
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <line x1="5" y1="12" x2="19" y2="12" />
+                            <polyline points="12 5 19 12 12 19" />
+                          </svg>
                         </button>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
               ) : quote.applied_combos.length === 0 && !quoteLoading ? (
-                <p className="text-sm" style={{ color: "rgba(247,245,240,0.72)" }}>
-                  Add more qualifying items to unlock combo savings when available.
-                </p>
-              ) : null}
+                <div className="px-5 md:px-6 pb-5 md:pb-6">
+                  <p className="text-sm" style={{ color: "rgba(247,245,240,0.6)" }}>
+                    Add more qualifying items to unlock combo savings when available.
+                  </p>
+                </div>
+              ) : (
+                <div className="pb-1" />
+              )}
             </div>
           )}
         </form>
