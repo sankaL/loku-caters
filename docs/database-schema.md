@@ -44,6 +44,7 @@ Stores the backend-managed customer contact registry keyed by normalized email. 
 | `pickup_location` | `TEXT` | NOT NULL | Matches a location name in the `locations` table |
 | `pickup_time_slot` | `TEXT` | NOT NULL | Matches a time slot for that location |
 | `pickup_address` | `TEXT` | nullable | Freeform pickup address used by random requests and admin overrides |
+| `pickup_date` | `DATE` | nullable | Specific pickup date for random orders; for event orders, uses the event's `pickup_date` |
 | `group_id` | `TEXT` | nullable, indexed | Shared identifier for cart checkouts that create multiple order rows priced together |
 | `phone_number` | `TEXT` | NULLABLE | Always optional for both customers and admin |
 | `email` | `TEXT` | NULLABLE | Used to send Resend confirmation/reminders unless excluded |
@@ -119,6 +120,7 @@ Stores events with their associated item and location selections. Only one non-s
 | `id` | `INTEGER` | Primary key, auto-increment | |
 | `name` | `TEXT` | NOT NULL | Internal label, e.g. `"February 2026 Batch"` |
 | `event_date` | `TEXT` | NOT NULL | Display string shown on hero and emails, e.g. `"February 28th, 2026"` |
+| `pickup_date` | `DATE` | NULLABLE | ISO date (YYYY-MM-DD) for the event's pickup date; auto-filled on event orders |
 | `kind` | `TEXT` | NOT NULL, default `'event'`, check `kind IN ('event', 'random_requests')` | Event type marker used to reserve the admin-only `Random Requests` bucket |
 | `hero_header` | `TEXT` | NOT NULL, default `''` | Main heading on hero banner (white text). Required when creating/updating via admin API |
 | `hero_header_sage` | `TEXT` | NOT NULL, default `''` | Optional second heading line (sage text) |

@@ -1,6 +1,7 @@
 {
   "event": {
-    "date": "February 28th, 2026"
+    "date": "February 28th, 2026",
+    "pickup_date": "2026-02-28"
   },
   "currency": "CAD",
   "hero_header": "",

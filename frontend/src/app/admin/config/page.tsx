@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
+import Modal from "@/components/ui/Modal";
 
 interface ComboDeal {
   id: string;
@@ -22,6 +23,8 @@ interface EventItem {
   updated_at: string | null;
   total_revenue?: number;
   order_count?: number;
+  etransfer_enabled: boolean;
+  etransfer_email: string | null;
 }
 
 function Spinner() {
@@ -43,6 +46,9 @@ export default function AdminEventsPage() {
   const [deleting, setDeleting] = useState<number | null>(null);
   const [pendingToggle, setPendingToggle] = useState<{ eventId: number; eventName: string; willActivate: boolean } | null>(null);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const [randomConfigModal, setRandomConfigModal] = useState<{ isOpen: boolean; event: EventItem | null }>({ isOpen: false, event: null });
+  const [randomConfigForm, setRandomConfigForm] = useState({ etransfer_enabled: false, etransfer_email: "" });
+  const [savingRandom, setSavingRandom] = useState(false);
   const PAGE_SIZE = 10;
 
   const showToast = useCallback((message: string, type: "success" | "error") => {
@@ -130,6 +136,36 @@ export default function AdminEventsPage() {
       showToast(`Failed to ${willActivate ? "activate" : "deactivate"} event`, "error");
     } finally {
       setActivating(null);
+    }
+  }
+
+  async function handleSaveRandomConfig() {
+    if (!randomConfigModal.event) return;
+    setSavingRandom(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/random-requests/config`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          etransfer_enabled: randomConfigForm.etransfer_enabled,
+          etransfer_email: randomConfigForm.etransfer_email.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        throw new Error("Failed to save config");
+      }
+      await loadEvents();
+      showToast("System settings updated.", "success");
+      setRandomConfigModal({ isOpen: false, event: null });
+    } catch {
+      showToast("Failed to update system settings", "error");
+    } finally {
+      setSavingRandom(false);
     }
   }
 
@@ -250,12 +286,20 @@ export default function AdminEventsPage() {
 
                   <div className="flex items-center gap-2 shrink-0" onClick={(eventValue) => eventValue.stopPropagation()}>
                     {isRandomRequests ? (
-                      <span
-                        className="px-3 py-1.5 rounded-xl text-xs font-medium"
-                        style={{ border: "1px solid var(--color-border)", color: "var(--color-muted)", background: "var(--color-cream)" }}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setRandomConfigForm({
+                            etransfer_enabled: event.etransfer_enabled,
+                            etransfer_email: event.etransfer_email ?? "",
+                          });
+                          setRandomConfigModal({ isOpen: true, event });
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all"
+                        style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
                       >
-                        Reserved bucket
-                      </span>
+                        Edit Settings
+                      </button>
                     ) : (
                       <button
                         onClick={() => router.push(`/admin/events/${event.id}/edit`)}
@@ -399,6 +443,97 @@ export default function AdminEventsPage() {
           </div>
         </div>
       )}
+
+      <Modal
+        isOpen={randomConfigModal.isOpen}
+        onClose={() => setRandomConfigModal({ isOpen: false, event: null })}
+        title="Random Requests Settings"
+        actions={
+          <>
+            <button
+              onClick={() => setRandomConfigModal({ isOpen: false, event: null })}
+              style={{ color: "var(--color-muted)", fontSize: "14px", fontWeight: 500 }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSaveRandomConfig}
+              disabled={savingRandom}
+              style={{
+                background: "var(--color-forest)",
+                color: "white",
+                padding: "8px 20px",
+                borderRadius: "12px",
+                fontSize: "14px",
+                fontWeight: 600,
+                opacity: savingRandom ? 0.6 : 1,
+              }}
+            >
+              {savingRandom ? "Saving..." : "Save Changes"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-6">
+          <p className="text-sm leading-relaxed" style={{ color: "var(--color-muted)" }}>
+            Configure default settings for "Random Requests" (orders not tied to a specific pre-order batch).
+          </p>
+
+          <div
+            className="p-4 rounded-2xl flex items-center justify-between"
+            style={{ border: "1px solid var(--color-border)", background: "var(--color-cream)" }}
+          >
+            <div>
+              <p className="text-sm font-semibold" style={{ color: "var(--color-forest)" }}>E-Transfer Payment</p>
+              <p className="text-xs" style={{ color: "var(--color-muted)" }}>Allow customers to choose e-Transfer</p>
+            </div>
+            <button
+              role="switch"
+              aria-checked={randomConfigForm.etransfer_enabled}
+              onClick={() => setRandomConfigForm((prev) => ({ ...prev, etransfer_enabled: !prev.etransfer_enabled }))}
+              style={{
+                width: "44px",
+                height: "24px",
+                borderRadius: "12px",
+                background: randomConfigForm.etransfer_enabled ? "var(--color-forest)" : "var(--color-border)",
+                border: "none",
+                cursor: "pointer",
+                position: "relative",
+                padding: 0,
+              }}
+            >
+              <span
+                style={{
+                  position: "absolute",
+                  top: "2px",
+                  left: randomConfigForm.etransfer_enabled ? "22px" : "2px",
+                  width: "20px",
+                  height: "20px",
+                  borderRadius: "50%",
+                  background: "white",
+                  transition: "left 0.2s",
+                }}
+              />
+            </button>
+          </div>
+
+          {randomConfigForm.etransfer_enabled && (
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider" style={{ color: "var(--color-muted)" }}>
+                E-Transfer Email
+              </label>
+              <input
+                type="email"
+                value={randomConfigForm.etransfer_email}
+                onChange={(e) => setRandomConfigForm((prev) => ({ ...prev, etransfer_email: e.target.value }))}
+                placeholder="payment@lokucaters.local"
+                className="w-full px-4 py-2.5 rounded-xl border bg-white focus:outline-none focus:ring-2 transition-all text-sm"
+                style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
+              />
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
