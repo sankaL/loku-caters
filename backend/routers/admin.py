@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 import json
 import uuid
 from urllib.parse import urlencode
@@ -208,6 +208,7 @@ class AdminOrderCreate(BaseModel):
     pickup_location: str
     pickup_time_slot: str
     pickup_address: Optional[str] = None
+    pickup_date: Optional[date] = None
     unit_price: Optional[float] = None
     notes: Optional[str] = None
     exclude_email: bool = False
@@ -281,6 +282,8 @@ class AdminOrderCreate(BaseModel):
         if not self.exclude_email:
             if not self.email:
                 raise ValueError("email is required unless exclude_email is true")
+        if self.mode == "random" and self.pickup_date is None:
+            raise ValueError("pickup_date is required for random orders")
         return self
 
 
@@ -294,6 +297,7 @@ class AdminOrderUpdate(BaseModel):
     pickup_time_slot: str
     mode: Literal["event", "random"] = "event"
     pickup_address: Optional[str] = None
+    pickup_date: Optional[date] = None
     unit_price: Optional[float] = None
     notes: Optional[str] = None
     exclude_email: bool = False
@@ -359,6 +363,8 @@ class AdminOrderUpdate(BaseModel):
         if not self.exclude_email:
             if not self.email:
                 raise ValueError("email is required unless exclude_email is true")
+        if self.mode == "random" and self.pickup_date is None:
+            raise ValueError("pickup_date is required for random orders")
         return self
 
 
@@ -382,6 +388,11 @@ class CateringRequestBulkDeleteRequest(BaseModel):
 class CateringRequestBulkStatusRequest(BaseModel):
     ids: list[str]
     status: str
+
+
+class RandomRequestsConfigUpdate(BaseModel):
+    etransfer_enabled: bool
+    etransfer_email: Optional[str] = None
 
 
 # ---------------------------------------------------------------------------
@@ -427,6 +438,32 @@ def _customer_email_event_date(event: Optional[Event], fallback: str = "") -> st
         return ""
     event_date = _normalize_group_text(getattr(event, "event_date", None))
     return event_date if event_date is not None else fallback
+
+
+def _format_pickup_date_display(pickup_date) -> str:
+    if pickup_date is None:
+        return ""
+    if isinstance(pickup_date, str) and pickup_date:
+        return pickup_date
+    try:
+        return pickup_date.strftime("%B ") + str(pickup_date.day) + _ordinal_suffix(pickup_date.day) + pickup_date.strftime(", %Y")
+    except (AttributeError, TypeError):
+        return str(pickup_date) if pickup_date else ""
+
+
+def _ordinal_suffix(day: int) -> str:
+    if 11 <= day <= 13:
+        return "th"
+    return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+
+
+def _resolve_order_email_date(order: Order, event: Optional[Event], fallback: str = "") -> str:
+    pickup_date = getattr(order, "pickup_date", None)
+    if pickup_date is not None:
+        formatted = _format_pickup_date_display(pickup_date)
+        if formatted:
+            return formatted
+    return _customer_email_event_date(event, fallback)
 
 
 def _require_random_requests_event(db: Session) -> Event:
@@ -618,6 +655,21 @@ def admin_create_event(
         updated_at=datetime.now(timezone.utc),
     )
     db.add(event)
+    db.commit()
+    db.refresh(event)
+    return _event_dict(event)
+
+
+@router.put("/random-requests/config")
+def admin_update_random_requests_config(
+    body: RandomRequestsConfigUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    event = _require_random_requests_event(db)
+    event.etransfer_enabled = body.etransfer_enabled
+    event.etransfer_email = str(body.etransfer_email) if body.etransfer_email is not None else None
+    event.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(event)
     return _event_dict(event)
@@ -894,6 +946,7 @@ def _order_dict(order: Order) -> dict:
         "pickup_location": order.pickup_location,
         "pickup_time_slot": order.pickup_time_slot,
         "pickup_address": getattr(order, "pickup_address", None),
+        "pickup_date": order.pickup_date.isoformat() if getattr(order, "pickup_date", None) is not None else None,
         "base_total_price": float(order.base_total_price),
         "discount_total": float(order.discount_total),
         "total_price": float(order.total_price),
@@ -1051,7 +1104,7 @@ def _prepare_reminder_order_data(
     address = _resolve_order_pickup_address(db, order)
 
     event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
-    event_date = _customer_email_event_date(event, active_event_date)
+    event_date = _resolve_order_email_date(order, event, active_event_date)
     etransfer = {
         "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
         "email": event.etransfer_email if event else active_etransfer["email"],
@@ -1143,7 +1196,7 @@ def _prepare_payment_reminder_order_data(
     address = _resolve_order_pickup_address(db, order)
 
     event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
-    event_date = _customer_email_event_date(event, active_event_date)
+    event_date = _resolve_order_email_date(order, event, active_event_date)
     etransfer = {
         "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
         "email": event.etransfer_email if event else active_etransfer["email"],
@@ -1449,6 +1502,7 @@ def admin_create_order(
         pickup_location=body.pickup_location,
         pickup_time_slot=body.pickup_time_slot,
         pickup_address=body.pickup_address,
+        pickup_date=body.pickup_date if is_random_mode else getattr(event, "pickup_date", None),
         base_total_price=0,
         discount_total=0,
         total_price=0,
@@ -1689,6 +1743,7 @@ def admin_update_order(
             group_order.pickup_location = body.pickup_location
             group_order.pickup_time_slot = body.pickup_time_slot
             group_order.pickup_address = body.pickup_address
+            group_order.pickup_date = body.pickup_date if is_random_mode else (getattr(event, "pickup_date", None) or body.pickup_date)
             group_order.notes = body.notes
             group_order.exclude_email = body.exclude_email
             if group_order.id == order.id:
@@ -1716,6 +1771,7 @@ def admin_update_order(
         order.pickup_location = body.pickup_location
         order.pickup_time_slot = body.pickup_time_slot
         order.pickup_address = body.pickup_address
+        order.pickup_date = body.pickup_date if is_random_mode else (getattr(event, "pickup_date", None) or body.pickup_date)
         order.notes = body.notes
         order.exclude_email = body.exclude_email
         if is_random_mode:
@@ -1776,7 +1832,7 @@ def admin_confirm_order(
         event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
         if event is None:
             event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
-        event_date = _customer_email_event_date(event)
+        event_date = _resolve_order_email_date(order, event)
         etransfer = {
             "enabled": bool(event.etransfer_enabled) if event else False,
             "email": event.etransfer_email if event else None,

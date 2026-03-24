@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional
 
-from sqlalchemy import String, Integer, Numeric, DateTime, Text, Boolean, func
+from sqlalchemy import String, Integer, Numeric, DateTime, Date, Text, Boolean, func
 from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 
@@ -56,6 +56,7 @@ class Event(Base):
     item_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     location_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     combo_deals: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    pickup_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -71,6 +72,7 @@ class Order(Base):
     pickup_location: Mapped[str] = mapped_column(String, nullable=False)
     pickup_time_slot: Mapped[str] = mapped_column(String, nullable=False)
     pickup_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pickup_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     group_id: Mapped[Optional[str]] = mapped_column(String, nullable=True, index=True)
     phone_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True)

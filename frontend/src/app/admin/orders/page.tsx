@@ -186,11 +186,13 @@ const EMPTY_ADD_FORM: AddOrderForm = {
 
 interface RandomAddOrderForm extends AddOrderForm {
   pickup_address: string;
+  pickup_date: string;
 }
 
 const EMPTY_RANDOM_ADD_FORM: RandomAddOrderForm = {
   ...EMPTY_ADD_FORM,
   pickup_address: "",
+  pickup_date: "",
 };
 
 interface BulkRow {
@@ -1622,6 +1624,10 @@ export default function AdminOrdersPage() {
     }
     if (!randomOrderForm.pickup_location.trim() || !randomOrderForm.pickup_time_slot.trim()) {
       setRandomOrderItemsError("Pickup location and time slot are required.");
+      return;
+    }
+    if (!randomOrderForm.pickup_date.trim()) {
+      setRandomOrderItemsError("Pickup date is required.");
       return;
     }
 
@@ -3339,6 +3345,17 @@ export default function AdminOrdersPage() {
                     ))}
                   </datalist>
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Date</label>
+                <input
+                  required
+                  type="date"
+                  value={randomOrderForm.pickup_date}
+                  onChange={(e) => setRandomOrderForm((f) => ({ ...f, pickup_date: e.target.value }))}
+                  style={inputStyle}
+                />
               </div>
 
               <div>

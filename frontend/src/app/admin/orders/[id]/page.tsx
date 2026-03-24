@@ -28,6 +28,7 @@ interface Order {
   pickup_location: string;
   pickup_time_slot: string;
   pickup_address?: string | null;
+  pickup_date?: string | null;
   base_total_price: number;
   discount_total: number;
   total_price: number;
@@ -57,6 +58,7 @@ interface EditOrderForm {
   pickup_location: string;
   pickup_time_slot: string;
   pickup_address: string;
+  pickup_date: string;
   notes: string;
   exclude_email: boolean;
 }
@@ -199,6 +201,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
           pickup_location: data.pickup_location ?? "",
           pickup_time_slot: data.pickup_time_slot ?? "",
           pickup_address: data.pickup_address ?? "",
+          pickup_date: data.pickup_date ?? "",
           notes: data.notes ?? "",
           exclude_email: !!data.exclude_email,
         });
@@ -606,6 +609,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
       pickup_location: order.pickup_location ?? "",
       pickup_time_slot: order.pickup_time_slot ?? "",
       pickup_address: order.pickup_address ?? "",
+      pickup_date: order.pickup_date ?? "",
       notes: order.notes ?? "",
       exclude_email: !!order.exclude_email,
     });
@@ -682,6 +686,7 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
         pickup_location: editForm.pickup_location,
         pickup_time_slot: editForm.pickup_time_slot,
         pickup_address: isRandomOrder ? editForm.pickup_address : undefined,
+        pickup_date: isRandomOrder ? editForm.pickup_date : undefined,
         notes: editForm.notes,
         exclude_email: editForm.exclude_email,
       };
@@ -1206,6 +1211,12 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
               <p style={labelStyle}>Time Slot</p>
               <p style={valueStyle}>{order.pickup_time_slot}</p>
             </div>
+            {order.pickup_date && (
+              <div>
+                <p style={labelStyle}>Pickup Date</p>
+                <p style={valueStyle}>{order.pickup_date}</p>
+              </div>
+            )}
             <div>
               <p style={labelStyle}>Date Placed</p>
               <p style={valueStyle}>{formatDate(order.created_at)}</p>
@@ -1566,6 +1577,15 @@ export default function OrderDetailPage({ params }: { params: Promise<{ id: stri
                         ))}
                       </datalist>
                     </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Date</label>
+                    <input
+                      type="date"
+                      value={editForm.pickup_date}
+                      onChange={(e) => setEditForm((f) => f ? ({ ...f, pickup_date: e.target.value }) : f)}
+                      style={inputStyle}
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>Pickup Address</label>
