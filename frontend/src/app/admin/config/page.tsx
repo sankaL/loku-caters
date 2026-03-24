@@ -476,7 +476,7 @@ export default function AdminEventsPage() {
       >
         <div className="space-y-6">
           <p className="text-sm leading-relaxed" style={{ color: "var(--color-muted)" }}>
-            Configure default settings for "Random Requests" (orders not tied to a specific pre-order batch).
+            Configure default settings for &quot;Random Requests&quot; (orders not tied to a specific pre-order batch).
           </p>
 
           <div
