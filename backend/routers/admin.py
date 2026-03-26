@@ -962,6 +962,106 @@ def _order_dict(order: Order) -> dict:
     }
 
 
+def _bundle_sort_key(order: Order) -> tuple[datetime, str]:
+    created_at = getattr(order, "created_at", None)
+    if created_at is None:
+        created_at = datetime.min.replace(tzinfo=timezone.utc)
+    return created_at, str(order.id)
+
+
+def _bundle_id_for_order(order: Order) -> str:
+    group_id = _normalize_group_text(getattr(order, "group_id", None))
+    return group_id if group_id is not None else str(order.id)
+
+
+def _build_bundle_status_breakdown(orders: list[Order]) -> dict[str, int]:
+    breakdown: dict[str, int] = {}
+    for order in orders:
+        status = str(getattr(order, "status", "") or "").strip()
+        if not status:
+            continue
+        breakdown[status] = breakdown.get(status, 0) + 1
+    return breakdown
+
+
+def _project_order_bundle(orders: list[Order]) -> dict[str, Any]:
+    if not orders:
+        raise ValueError("orders must not be empty")
+
+    sorted_orders = sorted(orders, key=_bundle_sort_key)
+    primary = sorted_orders[0]
+    bundle_id = _bundle_id_for_order(primary)
+    breakdown = _build_bundle_status_breakdown(sorted_orders)
+    unique_statuses = set(breakdown.keys())
+    status = sorted(unique_statuses)[0] if len(unique_statuses) == 1 else "mixed"
+
+    normalized_notes = [_normalize_group_text(getattr(order, "notes", None)) for order in sorted_orders]
+    primary_notes = normalized_notes[0]
+    notes_mixed = any(note != primary_notes for note in normalized_notes[1:])
+
+    return {
+        "id": primary.id,
+        "bundle_id": bundle_id,
+        "group_id": primary.group_id,
+        "primary_order_id": primary.id,
+        "event_id": int(primary.event_id) if getattr(primary, "event_id", None) is not None else None,
+        "name": primary.name,
+        "email": primary.email,
+        "phone_number": primary.phone_number,
+        "pickup_location": primary.pickup_location,
+        "pickup_time_slot": primary.pickup_time_slot,
+        "pickup_address": getattr(primary, "pickup_address", None),
+        "pickup_date": primary.pickup_date.isoformat() if getattr(primary, "pickup_date", None) is not None else None,
+        "line_count": len(sorted_orders),
+        "quantity_total": int(sum(int(getattr(order, "quantity", 0) or 0) for order in sorted_orders)),
+        "base_total_price": round(sum(float(getattr(order, "base_total_price", 0) or 0) for order in sorted_orders), 2),
+        "discount_total": round(sum(float(getattr(order, "discount_total", 0) or 0) for order in sorted_orders), 2),
+        "total_price": round(sum(float(getattr(order, "total_price", 0) or 0) for order in sorted_orders), 2),
+        "status": status,
+        "status_breakdown": breakdown,
+        "reminded": all(bool(getattr(order, "reminded", False)) for order in sorted_orders),
+        "paid": all(bool(getattr(order, "paid", False)) for order in sorted_orders),
+        "payment_method": primary.payment_method,
+        "payment_method_other": primary.payment_method_other,
+        "notes": primary_notes,
+        "notes_mixed": notes_mixed,
+        "exclude_email": bool(primary.exclude_email),
+        "created_at": primary.created_at.isoformat() if primary.created_at else None,
+    }
+
+
+def _orders_to_bundle_rows(orders: list[Order]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Order]] = {}
+    for order in orders:
+        grouped.setdefault(_bundle_id_for_order(order), []).append(order)
+
+    bundle_rows = [_project_order_bundle(group_orders) for group_orders in grouped.values()]
+    bundle_rows.sort(
+        key=lambda row: (
+            row.get("created_at") or "",
+            str(row.get("primary_order_id") or ""),
+        ),
+        reverse=True,
+    )
+    return bundle_rows
+
+
+def _find_orders_for_bundle_id(db: Session, bundle_id: str) -> list[Order]:
+    grouped = (
+        db.query(Order)
+        .filter(Order.group_id == bundle_id)
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .all()
+    )
+    if grouped:
+        return grouped
+
+    single = db.query(Order).filter(Order.id == bundle_id).first()
+    if single is None:
+        return []
+    return [single]
+
+
 def _get_reminder_context(db: Session, orders: list[Order]) -> tuple[dict[int, Event], str, dict]:
     event_ids = sorted({int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None})
     events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
@@ -1566,9 +1666,26 @@ def admin_list_orders(
     event_id: Optional[int] = Query(None),
     paid: Optional[bool] = Query(None),
     email: Optional[str] = Query(None),
+    view: Optional[Literal["bundle"]] = Query(None),
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
+    if view == "bundle":
+        query = db.query(Order)
+        if event_id is not None:
+            query = query.filter(Order.event_id == event_id)
+        if email is not None:
+            query = query.filter(Order.email == email)
+
+        bundle_rows = _orders_to_bundle_rows(
+            query.order_by(Order.created_at.asc(), Order.id.asc()).all()
+        )
+        if status:
+            bundle_rows = [row for row in bundle_rows if str(row.get("status") or "") == status]
+        if paid is not None:
+            bundle_rows = [row for row in bundle_rows if bool(row.get("paid")) == bool(paid)]
+        return bundle_rows
+
     query = db.query(Order)
     if status:
         query = query.filter(Order.status == status)
@@ -1580,6 +1697,46 @@ def admin_list_orders(
         query = query.filter(Order.email == email)
     orders = query.order_by(Order.created_at.desc()).all()
     return [_order_dict(o) for o in orders]
+
+
+@router.get("/orders/bundles/{bundle_id}")
+def admin_get_order_bundle(
+    bundle_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    orders = _find_orders_for_bundle_id(db, bundle_id)
+    if not orders:
+        raise HTTPException(status_code=404, detail="Order bundle not found")
+
+    sorted_orders = sorted(orders, key=_bundle_sort_key)
+    return {
+        "bundle": _project_order_bundle(sorted_orders),
+        "lines": [_order_dict(order) for order in sorted_orders],
+    }
+
+
+@router.delete("/orders/bundles/{bundle_id}")
+def admin_delete_order_bundle(
+    bundle_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    orders = _find_orders_for_bundle_id(db, bundle_id)
+    if not orders:
+        raise HTTPException(status_code=404, detail="Order bundle not found")
+
+    try:
+        for order in orders:
+            db.delete(order)
+        db.commit()
+    except Exception:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        raise
+
+    return {"success": True, "deleted": len(orders), "bundle_id": bundle_id}
 
 
 @router.post("/orders/remind")

@@ -78,7 +78,7 @@ dev:
 ## Full local stack: local Postgres + backend (local DB) + frontend
 ##   Backend logs go to /tmp/loku-backend.log
 ##   Frontend runs in the foreground (Ctrl-C stops everything; run 'make stop' for cleanup)
-dev-local: sync-config db-up db-migrate
+dev-local: sync-config db-up db-migrate db-seed
 	@echo ""
 	@echo "  Starting backend (local DB, DEV_MODE=true)..."
 	@echo "  Backend logs: /tmp/loku-backend.log"
@@ -122,9 +122,9 @@ db-down:
 db-migrate: sync-config
 	cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
 
-## Seed the local DB with test orders (removes existing orders first)
+## Seed the local DB with comprehensive test data (removes existing orders first)
 db-seed:
-	cd backend && $(BACKEND_DEV_ENV) python3 seed.py
+	cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py
 
 ## Drop all tables, re-run migrations, and seed fresh test data
 db-reset: db-up
@@ -172,7 +172,7 @@ help:
 	@echo "    make db-up           Start local Postgres container (port 5433)"
 	@echo "    make db-down         Stop local Postgres container"
 	@echo "    make db-migrate      Run Alembic migrations on local DB"
-	@echo "    make db-seed         Insert test orders (clears existing first)"
+	@echo "    make db-seed         Insert comprehensive test data (clears existing first)"
 	@echo "    make db-reset        Drop schema + migrate + seed (full wipe)"
 	@echo ""
 	@echo "  CONFIG:"

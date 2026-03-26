@@ -9,3 +9,4 @@ resend==2.4.0
 python-dotenv==1.0.1
 python-multipart==0.0.20
 python-jose[cryptography]==3.3.0
+faker==26.0.0

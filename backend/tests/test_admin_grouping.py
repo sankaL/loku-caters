@@ -1,6 +1,7 @@
 import os
 import sys
 import unittest
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -11,26 +12,43 @@ os.environ.setdefault("RESEND_API_KEY", "test-key")
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from constants import OrderStatus  # noqa: E402
+from models import Order  # noqa: E402
 from routers.admin import (  # noqa: E402
     _already_confirmed_response,
+    _project_order_bundle,
     _reset_group_payment_state,
     _validate_group_order_payload,
+    admin_delete_order_bundle,
+    admin_list_orders,
 )
 
 
 def make_order(**overrides):
+    now = datetime.now(timezone.utc)
     base = {
         "id": "order-1",
+        "event_id": 10,
+        "group_id": None,
         "name": "Test Customer",
         "email": "test@example.com",
         "phone_number": "111-222-3333",
+        "item_id": "item-a",
+        "item_name": "Lamprais",
+        "quantity": 1,
         "pickup_location": "Markham",
         "pickup_time_slot": "10:00 AM - 11:00 AM",
+        "pickup_address": None,
         "exclude_email": False,
         "status": OrderStatus.CONFIRMED,
+        "reminded": False,
         "paid": True,
         "payment_method": "cash",
         "payment_method_other": None,
+        "notes": None,
+        "base_total_price": 20.0,
+        "discount_total": 0.0,
+        "total_price": 20.0,
+        "created_at": now,
     }
     base.update(overrides)
     return SimpleNamespace(**base)
@@ -47,6 +65,63 @@ def make_body(**overrides):
     }
     base.update(overrides)
     return SimpleNamespace(**base)
+
+
+class FakeQuery:
+    def __init__(self, rows):
+        self.rows = rows
+        self.criteria = []
+
+    def filter(self, *criteria):
+        self.criteria.extend(criteria)
+        return self
+
+    def order_by(self, *_args, **_kwargs):
+        return self
+
+    @staticmethod
+    def _criterion_matches(row, criterion) -> bool:
+        left = getattr(criterion, "left", None)
+        right = getattr(criterion, "right", None)
+        key = getattr(left, "key", None) or getattr(left, "name", None)
+        if key is None:
+            return True
+        value = getattr(right, "value", right)
+        return getattr(row, key, None) == value
+
+    def _matches(self, row) -> bool:
+        return all(self._criterion_matches(row, criterion) for criterion in self.criteria)
+
+    def all(self):
+        return [row for row in self.rows if self._matches(row)]
+
+    def first(self):
+        rows = self.all()
+        return rows[0] if rows else None
+
+
+class FakeSession:
+    def __init__(self, orders):
+        self.orders = list(orders)
+        self.deleted = []
+        self.rollback_called = False
+        self.raise_on_commit = False
+
+    def query(self, model):
+        if model is not Order:
+            raise AssertionError(f"Unexpected query model: {model}")
+        return FakeQuery(self.orders)
+
+    def delete(self, order):
+        self.deleted.append(order.id)
+        self.orders = [row for row in self.orders if row.id != order.id]
+
+    def commit(self):
+        if self.raise_on_commit:
+            raise RuntimeError("commit failed")
+
+    def rollback(self):
+        self.rollback_called = True
 
 
 class AdminGroupingTests(unittest.TestCase):
@@ -105,6 +180,119 @@ class AdminGroupingTests(unittest.TestCase):
         ]
 
         self.assertIsNone(_already_confirmed_response(group_orders[0], group_orders))
+
+    def test_project_order_bundle_computes_primary_aggregates_and_mixed_flags(self):
+        first_time = datetime(2026, 3, 20, 10, 0, tzinfo=timezone.utc)
+        second_time = first_time + timedelta(minutes=1)
+        orders = [
+            make_order(
+                id="a-order",
+                group_id="bundle-1",
+                created_at=first_time,
+                notes="First note",
+                status=OrderStatus.CONFIRMED,
+                paid=True,
+                reminded=True,
+                quantity=2,
+                total_price=30.0,
+                base_total_price=34.0,
+                discount_total=4.0,
+            ),
+            make_order(
+                id="b-order",
+                group_id="bundle-1",
+                created_at=second_time,
+                notes="Second note",
+                status=OrderStatus.PICKED_UP,
+                paid=False,
+                reminded=True,
+                quantity=1,
+                total_price=9.5,
+                base_total_price=10.0,
+                discount_total=0.5,
+            ),
+        ]
+
+        bundle = _project_order_bundle(orders)
+
+        self.assertEqual(bundle["bundle_id"], "bundle-1")
+        self.assertEqual(bundle["primary_order_id"], "a-order")
+        self.assertEqual(bundle["line_count"], 2)
+        self.assertEqual(bundle["quantity_total"], 3)
+        self.assertEqual(bundle["total_price"], 39.5)
+        self.assertEqual(bundle["base_total_price"], 44.0)
+        self.assertEqual(bundle["discount_total"], 4.5)
+        self.assertEqual(bundle["status"], "mixed")
+        self.assertEqual(bundle["status_breakdown"][OrderStatus.CONFIRMED], 1)
+        self.assertEqual(bundle["status_breakdown"][OrderStatus.PICKED_UP], 1)
+        self.assertFalse(bundle["paid"])
+        self.assertTrue(bundle["reminded"])
+        self.assertEqual(bundle["notes"], "First note")
+        self.assertTrue(bundle["notes_mixed"])
+
+    def test_admin_list_orders_bundle_view_groups_rows_and_keeps_single_status(self):
+        first = make_order(
+            id="order-1",
+            group_id="bundle-1",
+            event_id=10,
+            status=OrderStatus.CONFIRMED,
+            paid=True,
+            reminded=True,
+            created_at=datetime(2026, 3, 20, 10, 0, tzinfo=timezone.utc),
+        )
+        second = make_order(
+            id="order-2",
+            group_id="bundle-1",
+            event_id=10,
+            status=OrderStatus.CONFIRMED,
+            paid=True,
+            reminded=True,
+            quantity=2,
+            total_price=40.0,
+            created_at=datetime(2026, 3, 20, 10, 1, tzinfo=timezone.utc),
+        )
+        third = make_order(
+            id="order-3",
+            group_id=None,
+            event_id=11,
+            status=OrderStatus.PENDING,
+            paid=False,
+            reminded=False,
+            created_at=datetime(2026, 3, 21, 10, 0, tzinfo=timezone.utc),
+        )
+        db = FakeSession([first, second, third])
+
+        rows = admin_list_orders(view="bundle", status=None, event_id=None, paid=None, email=None, db=db, _={})
+        self.assertEqual(len(rows), 2)
+
+        grouped = next(row for row in rows if row["bundle_id"] == "bundle-1")
+        self.assertEqual(grouped["line_count"], 2)
+        self.assertEqual(grouped["status"], OrderStatus.CONFIRMED)
+        self.assertTrue(grouped["paid"])
+        self.assertTrue(grouped["reminded"])
+
+    def test_admin_list_orders_bundle_view_filters_by_aggregated_status(self):
+        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.PICKED_UP)
+        third = make_order(id="order-3", group_id=None, status=OrderStatus.PENDING)
+        db = FakeSession([first, second, third])
+
+        rows = admin_list_orders(view="bundle", status="mixed", event_id=None, paid=None, email=None, db=db, _={})
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["bundle_id"], "bundle-1")
+        self.assertEqual(rows[0]["status"], "mixed")
+
+    def test_admin_delete_order_bundle_rolls_back_on_commit_failure(self):
+        first = make_order(id="order-1", group_id="bundle-1")
+        second = make_order(id="order-2", group_id="bundle-1")
+        db = FakeSession([first, second])
+        db.raise_on_commit = True
+
+        with self.assertRaises(RuntimeError):
+            admin_delete_order_bundle("bundle-1", db=db, _={})
+
+        self.assertTrue(db.rollback_called)
 
 
 if __name__ == "__main__":

@@ -8,6 +8,7 @@ import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import ItemQuantityPicker from "@/components/admin/orders/ItemQuantityPicker";
+import BundleEditModal from "@/components/admin/orders/BundleEditModal";
 import {
   getMinimumOrderQuantity,
   linesFromQuantities,
@@ -15,6 +16,40 @@ import {
 } from "@/lib/orderLineUtils";
 
 interface Order {
+  id: string;
+  bundle_id: string;
+  primary_order_id: string;
+  event_id: number;
+  group_id: string | null;
+  name: string;
+  email: string | null;
+  phone_number: string | null;
+  item_name?: string;
+  item_id?: string;
+  quantity?: number;
+  line_count: number;
+  quantity_total: number;
+  pickup_location: string;
+  pickup_time_slot: string;
+  pickup_address?: string | null;
+  pickup_date?: string | null;
+  total_price: number;
+  base_total_price?: number;
+  discount_total?: number;
+  pricing_meta?: Record<string, unknown>;
+  status: string;
+  status_breakdown?: Record<string, number>;
+  reminded: boolean;
+  paid: boolean;
+  payment_method: string | null;
+  payment_method_other: string | null;
+  notes?: string | null;
+  notes_mixed?: boolean;
+  exclude_email?: boolean;
+  created_at: string;
+}
+
+interface OrderLine {
   id: string;
   event_id: number;
   group_id: string | null;
@@ -27,11 +62,11 @@ interface Order {
   pickup_location: string;
   pickup_time_slot: string;
   pickup_address?: string | null;
+  pickup_date?: string | null;
   total_price: number;
-  pricing_meta?: Record<string, unknown>;
   status: string;
-  reminded: boolean;
   paid: boolean;
+  reminded: boolean;
   payment_method: string | null;
   payment_method_other: string | null;
   notes?: string | null;
@@ -57,6 +92,7 @@ const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
   cancelled: { bg: "#f3f4f6", color: "#374151", label: "Cancelled" },
+  mixed: { bg: "#ede9fe", color: "#5b21b6", label: "Mixed" },
 };
 
 const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -65,6 +101,7 @@ const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
   picked_up: ["picked_up", "no_show", "cancelled"],
   no_show: ["no_show", "picked_up", "cancelled"],
   cancelled: ["cancelled", "picked_up", "no_show"],
+  mixed: ["pending", "confirmed", "picked_up", "no_show", "cancelled"],
 };
 
 function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
@@ -400,8 +437,8 @@ function formatPickupLabel(order: Pick<Order, "pickup_location" | "pickup_time_s
   return address ? `${base} - ${address}` : base;
 }
 
-function getPaymentReminderRecipientKey(order: Pick<Order, "id" | "group_id">): string {
-  return order.group_id ? `group:${order.group_id}` : `order:${order.id}`;
+function getPaymentReminderRecipientKey(order: Pick<Order, "bundle_id">): string {
+  return `bundle:${order.bundle_id}`;
 }
 
 function normalizeCsvHeader(value: string): string {
@@ -433,7 +470,13 @@ function getTimeSlotStartMinutes(slot: string): number {
 
 export default function AdminOrdersPage() {
   const router = useRouter();
+  const [highlightBundleParam, setHighlightBundleParam] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [bundleLines, setBundleLines] = useState<OrderLine[]>([]);
+  const [selectedBundle, setSelectedBundle] = useState<Order | null>(null);
+  const [loadingBundleDetails, setLoadingBundleDetails] = useState(false);
+  const [showBundleDetailsModal, setShowBundleDetailsModal] = useState(false);
+  const [showEditBundleModal, setShowEditBundleModal] = useState(false);
   const [filter, setFilter] = useState<string>("all");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [eventFilter, setEventFilter] = useState<string>("all");
@@ -516,10 +559,10 @@ export default function AdminOrdersPage() {
     setLocationFilter("all");
   }, [eventFilter]);
 
-  const showToast = (message: string, type: "success" | "error") => {
+  const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
-  };
+  }, []);
 
   // Fetch all events for label + filtering
   useEffect(() => {
@@ -538,7 +581,7 @@ export default function AdminOrdersPage() {
       }
     }
     loadEvents();
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     async function loadCatalogs() {
@@ -662,6 +705,7 @@ export default function AdminOrdersPage() {
       const token = await getAdminToken();
       if (!token) return false;
       const qs = new URLSearchParams();
+      qs.set("view", "bundle");
       if (filter !== "all") qs.set("status", filter);
       if (paymentFilter === "paid") qs.set("paid", "true");
       if (paymentFilter === "unpaid") qs.set("paid", "false");
@@ -671,7 +715,8 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to fetch orders");
-      setOrders(await res.json());
+      const rows = (await res.json()) as Order[];
+      setOrders(Array.isArray(rows) ? rows : []);
       setPage(1);
       return true;
     } catch {
@@ -682,10 +727,58 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter, paymentFilter, eventFilter]);
+  }, [eventFilter, filter, paymentFilter, showToast]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setHighlightBundleParam(params.get("highlight_bundle"));
+  }, []);
+
+  const fetchBundleDetails = useCallback(async (bundle: Order) => {
+    setLoadingBundleDetails(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/bundles/${encodeURIComponent(bundle.bundle_id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to load bundle details"));
+      }
+      const payload = (await res.json()) as { bundle?: Order; lines?: OrderLine[] };
+      const nextBundle = payload.bundle ?? bundle;
+      setSelectedBundle(nextBundle);
+      setBundleLines(Array.isArray(payload.lines) ? payload.lines : []);
+      setShowBundleDetailsModal(true);
+      return true;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to load bundle details", "error");
+      return false;
+    } finally {
+      setLoadingBundleDetails(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    const highlightBundle = highlightBundleParam;
+    if (!highlightBundle || orders.length === 0 || showBundleDetailsModal) return;
+    const matched = orders.find((order) => order.bundle_id === highlightBundle);
+    if (!matched) return;
+    void (async () => {
+      const opened = await fetchBundleDetails(matched);
+      if (!opened) return;
+      const nextParams = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+      nextParams.delete("highlight_bundle");
+      nextParams.delete("order_id");
+      const query = nextParams.toString();
+      router.replace(`/admin/orders${query ? `?${query}` : ""}`, { scroll: false });
+      setHighlightBundleParam(null);
+    })();
+  }, [fetchBundleDetails, highlightBundleParam, orders, router, showBundleDetailsModal]);
 
   const eventLabelById = useMemo(() => {
     const map = new Map<number, string>();
@@ -797,7 +890,7 @@ export default function AdminOrdersPage() {
       seenRecipientKeys.add(recipientKey);
       recipients.push({
         recipientKey,
-        orderId: order.id,
+        orderId: getOrderActionId(order),
         name: order.name,
         email: (order.email ?? "").trim(),
         pickupLabel: formatPickupLabel(order),
@@ -825,6 +918,10 @@ export default function AdminOrdersPage() {
     setPage(1);
   }
 
+  function getOrderActionId(order: Pick<Order, "id" | "primary_order_id">): string {
+    return (order.primary_order_id ?? "").trim() || order.id;
+  }
+
   async function handleConfirm(orderId: string) {
     setConfirming(orderId);
     try {
@@ -846,6 +943,9 @@ export default function AdminOrdersPage() {
         showToast("Order confirmed, but email failed to send", "error");
       }
       await fetchOrders();
+      if (selectedBundle && getOrderActionId(selectedBundle) === orderId) {
+        await fetchBundleDetails(selectedBundle);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to send email", "error");
     } finally {
@@ -872,6 +972,7 @@ export default function AdminOrdersPage() {
         }
         return prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o));
       });
+      setSelectedBundle((prev) => (prev && getOrderActionId(prev) === orderId ? { ...prev, status: newStatus } : prev));
       showToast("Status updated", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to update status", "error");
@@ -917,6 +1018,16 @@ export default function AdminOrdersPage() {
             : o
         );
       });
+      setSelectedBundle((prev) => (
+        prev && getOrderActionId(prev) === orderId
+          ? {
+            ...prev,
+            paid: nextPaid,
+            payment_method: data.payment_method ?? null,
+            payment_method_other: data.payment_method_other ?? null,
+          }
+          : prev
+      ));
 
       showToast(nextPaid ? "Marked paid" : "Marked unpaid", "success");
       return true;
@@ -933,15 +1044,21 @@ export default function AdminOrdersPage() {
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}`, {
+      const bundleId = orders.find((order) => order.id === orderId)?.bundle_id ?? orderId;
+      const res = await fetch(`${API_URL}/api/admin/orders/bundles/${encodeURIComponent(bundleId)}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to delete order"));
+        throw new Error(await getApiErrorMessage(res, "Failed to delete order bundle"));
       }
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
-      showToast("Order deleted", "success");
+      setOrders((prev) => prev.filter((order) => order.bundle_id !== bundleId));
+      if (selectedBundle?.bundle_id === bundleId) {
+        setShowBundleDetailsModal(false);
+        setSelectedBundle(null);
+        setBundleLines([]);
+      }
+      showToast("Order bundle deleted", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to delete order", "error");
     } finally {
@@ -956,26 +1073,36 @@ export default function AdminOrdersPage() {
     try {
       const token = await getAdminToken();
       if (!token) return;
+      const selectedBundles = Array.from(
+        new Set(
+          ids.map((id) => orders.find((order) => order.id === id)?.bundle_id ?? id)
+        )
+      );
       const results = await Promise.allSettled(
-        ids.map(async (id) => {
-          const res = await fetch(`${API_URL}/api/admin/orders/${id}`, {
+        selectedBundles.map(async (bundleId) => {
+          const res = await fetch(`${API_URL}/api/admin/orders/bundles/${encodeURIComponent(bundleId)}`, {
             method: "DELETE",
             headers: { Authorization: `Bearer ${token}` },
           });
-          return { id, ok: res.ok };
+          return { bundleId, ok: res.ok };
         })
       );
       const succeededIds = results.flatMap((result) =>
-        result.status === "fulfilled" && result.value.ok ? [result.value.id] : []
+        result.status === "fulfilled" && result.value.ok ? [result.value.bundleId] : []
       );
       const succeededSet = new Set(succeededIds);
-      setOrders((prev) => prev.filter((o) => !succeededSet.has(o.id)));
+      setOrders((prev) => prev.filter((order) => !succeededSet.has(order.bundle_id)));
+      if (selectedBundle && succeededSet.has(selectedBundle.bundle_id)) {
+        setShowBundleDetailsModal(false);
+        setSelectedBundle(null);
+        setBundleLines([]);
+      }
       setSelectedIds(new Set());
-      const failed = ids.length - succeededIds.length;
+      const failed = selectedBundles.length - succeededIds.length;
       if (failed > 0) {
         showToast(`Deleted ${succeededIds.length}, failed ${failed}`, "error");
       } else {
-        showToast(`Deleted ${succeededIds.length} order${succeededIds.length !== 1 ? "s" : ""}`, "success");
+        showToast(`Deleted ${succeededIds.length} bundle${succeededIds.length !== 1 ? "s" : ""}`, "success");
       }
     } catch {
       showToast("Bulk delete failed", "error");
@@ -1046,6 +1173,20 @@ export default function AdminOrdersPage() {
     setPaymentRemindSearch("");
     setPaymentReminderRun(EMPTY_REMINDER_RUN);
     setShowPaymentRemindModal(true);
+  }
+
+  function closeBundleDetailsModal() {
+    if (loadingBundleDetails) return;
+    setShowBundleDetailsModal(false);
+    setSelectedBundle(null);
+    setBundleLines([]);
+    setShowEditBundleModal(false);
+  }
+
+  async function refreshSelectedBundleDetails() {
+    if (!selectedBundle) return;
+    const refreshed = orders.find((order) => order.bundle_id === selectedBundle.bundle_id) ?? selectedBundle;
+    await fetchBundleDetails(refreshed);
   }
 
   function buildReminderItems(orderIds: string[]): ReminderQueueItem[] {
@@ -1528,6 +1669,7 @@ export default function AdminOrdersPage() {
     try {
       const token = await getAdminToken();
       if (!token) return;
+      const groupId = selectedLines.length > 1 ? crypto.randomUUID() : null;
 
       const createResults = await Promise.allSettled(
         selectedLines.map(async ({ item, qty }) => {
@@ -1539,10 +1681,11 @@ export default function AdminOrdersPage() {
               item_id: item.id,
               quantity: qty,
               event_id: addModalEventId,
+              group_id: groupId,
             }),
           });
           if (!res.ok) {
-            throw new Error(await getApiErrorMessage(res, `Failed to create line for ${item.name}`));
+            throw new Error(await getApiErrorMessage(res, `Failed to create item for ${item.name}`));
           }
           return true;
         })
@@ -1560,12 +1703,12 @@ export default function AdminOrdersPage() {
             nextQuantities[item.id] = qty;
           }
           setAddOrderQuantities(nextQuantities);
-          setAddOrderItemsError("Some lines were created. Only failed lines remain selected for retry.");
+          setAddOrderItemsError("Some items were created. Only failed items remain selected for retry.");
         }
       }
 
       if (failed === 0) {
-        showToast(`Created ${succeeded} order line${succeeded !== 1 ? "s" : ""}`, "success");
+        showToast(`Created ${succeeded} order item${succeeded !== 1 ? "s" : ""}`, "success");
         setShowAddOrderModal(false);
         setAddOrderForm(EMPTY_ADD_FORM);
         setAddOrderQuantities({});
@@ -1657,7 +1800,7 @@ export default function AdminOrdersPage() {
             }),
           });
           if (!res.ok) {
-            throw new Error(await getApiErrorMessage(res, `Failed to create line for ${item.name}`));
+            throw new Error(await getApiErrorMessage(res, `Failed to create item for ${item.name}`));
           }
           return true;
         })
@@ -1675,12 +1818,12 @@ export default function AdminOrdersPage() {
             nextQuantities[item.id] = qty;
           }
           setRandomOrderQuantities(nextQuantities);
-          setRandomOrderItemsError("Some lines were created. Only failed lines remain selected for retry.");
+          setRandomOrderItemsError("Some items were created. Only failed items remain selected for retry.");
         }
       }
 
       if (failed === 0) {
-        showToast(`Created ${succeeded} random request line${succeeded !== 1 ? "s" : ""}`, "success");
+        showToast(`Created ${succeeded} random request item${succeeded !== 1 ? "s" : ""}`, "success");
         resetRandomOrderModalState();
         return;
       }
@@ -1824,20 +1967,30 @@ export default function AdminOrdersPage() {
     });
   }
 
+  function formatMoney(value: number) {
+    return new Intl.NumberFormat("en-CA", {
+      style: "currency",
+      currency: CURRENCY,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
+  }
+
   function handleExportCsv() {
     if (sorted.length === 0) {
-      showToast("No orders to export", "error");
+      showToast("No bundles to export", "error");
       return;
     }
 
     const headers = [
-      "Order ID",
+      "Bundle ID",
+      "Primary Order ID",
       "Name",
       "Email",
       "Phone",
-      "Item",
+      "Item Types",
+      "Items Total",
       "Event",
-      "Quantity",
       "Pickup Location",
       "Pickup Time Slot",
       "Total Price",
@@ -1849,13 +2002,14 @@ export default function AdminOrdersPage() {
     ];
 
     const rows = sorted.map((order) => [
-      order.id,
+      order.bundle_id,
+      order.primary_order_id,
       order.name,
       order.email ?? "",
       order.phone_number ?? "",
-      order.item_name,
+      order.line_count,
+      order.quantity_total,
       eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`,
-      order.quantity,
       order.pickup_location,
       order.pickup_time_slot,
       order.total_price.toFixed(2),
@@ -1876,13 +2030,13 @@ export default function AdminOrdersPage() {
     const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
 
     link.href = url;
-    link.download = `orders-${filter}-${timestamp}.csv`;
+    link.download = `order-bundles-${filter}-${timestamp}.csv`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
 
-    showToast(`Exported ${sorted.length} order${sorted.length === 1 ? "" : "s"}`, "success");
+    showToast(`Exported ${sorted.length} bundle${sorted.length === 1 ? "" : "s"}`, "success");
   }
 
   // Checkbox select-all (current page)
@@ -2264,7 +2418,7 @@ export default function AdminOrdersPage() {
         <p className="text-xs mb-3" style={{ color: "var(--color-muted)" }}>
           {search
             ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""} for "${search}"`
-            : `${filtered.length} order${filtered.length !== 1 ? "s" : ""}`}
+            : `${filtered.length} bundle${filtered.length !== 1 ? "s" : ""}`}
           {totalPages > 1 && ` - page ${page} of ${totalPages}`}
         </p>
       )}
@@ -2275,7 +2429,7 @@ export default function AdminOrdersPage() {
           className="flex items-center gap-3 px-4 py-3 rounded-xl mb-3 text-sm font-medium"
           style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
         >
-          <span className="flex-1">{selectedIds.size} order{selectedIds.size !== 1 ? "s" : ""} selected</span>
+          <span className="flex-1">{selectedIds.size} bundle{selectedIds.size !== 1 ? "s" : ""} selected</span>
           <button
             onClick={() => setShowBulkConfirmModal(true)}
             disabled={bulkConfirming}
@@ -2317,7 +2471,7 @@ export default function AdminOrdersPage() {
         ) : paginated.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-              {search ? `No orders match "${search}".` : "No orders found."}
+              {search ? `No bundles match "${search}".` : "No bundles found."}
             </p>
           </div>
         ) : (
@@ -2337,7 +2491,7 @@ export default function AdminOrdersPage() {
                   </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Name</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Item</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Items</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Event</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Location</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
@@ -2388,10 +2542,11 @@ export default function AdminOrdersPage() {
               <tbody>
                 {paginated.map((order, idx) => {
                   const statusStyle = STATUS_STYLES[order.status] ?? STATUS_STYLES.pending;
-                  const isConfirming = confirming === order.id;
-                  const isUpdatingStatus = updatingStatus === order.id;
-                  const isUpdatingPayment = updatingPayment === order.id;
-                  const isDeleting = deleting === order.id;
+                  const actionId = getOrderActionId(order);
+                  const isConfirming = confirming === actionId;
+                  const isUpdatingStatus = updatingStatus === actionId;
+                  const isUpdatingPayment = updatingPayment === actionId;
+                  const isDeleting = deleting === actionId;
                   const isSelected = selectedIds.has(order.id);
                   const paymentReminderDisabledReason = getPaymentReminderUnavailableReason(order);
                   const canSendPaymentReminder = !paymentReminderDisabledReason;
@@ -2401,7 +2556,7 @@ export default function AdminOrdersPage() {
                   return (
                     <tr
                       key={order.id}
-                      onClick={() => router.push(`/admin/orders/${order.id}`)}
+                      onClick={() => { void fetchBundleDetails(order); }}
                       className="cursor-pointer transition-colors"
                       style={{
                         borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none",
@@ -2445,7 +2600,9 @@ export default function AdminOrdersPage() {
                         )}
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        {order.item_name} x{order.quantity}
+                        <div className="text-lg font-semibold" style={{ lineHeight: 1.1 }}>
+                          {order.quantity_total}
+                        </div>
                       </td>
                       <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
                         <span className="block" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -2471,7 +2628,7 @@ export default function AdminOrdersPage() {
                           <select
                             value={order.status}
                             disabled={isUpdatingStatus}
-                            onChange={(e) => handleStatusChange(order.id, e.target.value)}
+                            onChange={(e) => handleStatusChange(actionId, e.target.value)}
                             className="appearance-none pl-2.5 pr-6 py-1 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-sage)] disabled:opacity-60 transition-opacity"
                             style={{ background: statusStyle.bg, color: statusStyle.color }}
                           >
@@ -2590,7 +2747,7 @@ export default function AdminOrdersPage() {
                         <div className="flex items-center gap-2">
                           {order.status === "pending" && (
                             <button
-                              onClick={() => handleConfirm(order.id)}
+                              onClick={() => handleConfirm(actionId)}
                               disabled={isConfirming}
                               className="p-1.5 rounded-lg transition-all disabled:opacity-60"
                               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
@@ -2617,12 +2774,12 @@ export default function AdminOrdersPage() {
                             </button>
                           )}
                           <button
-                            onClick={() => setDeleteTarget(order.id)}
+                            onClick={() => setDeleteTarget(actionId)}
                             disabled={isDeleting}
                             className="p-1.5 rounded-lg transition-all disabled:opacity-60"
                             style={{ color: "#991b1b", background: "#fee2e2", border: "1px solid #fca5a5" }}
-                            aria-label="Delete order"
-                            title="Delete order"
+                            aria-label="Delete bundle"
+                            title="Delete bundle"
                           >
                             {isDeleting ? (
                               <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2700,11 +2857,247 @@ export default function AdminOrdersPage() {
         </div>
       )}
 
+      {showBundleDetailsModal && selectedBundle && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            zIndex: 110,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeBundleDetailsModal();
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "24px",
+              border: "1px solid var(--color-border)",
+              maxWidth: "900px",
+              width: "100%",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              padding: "24px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 mb-5">
+              <div>
+                <h2 className="text-2xl font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+                  Order Bundle
+                </h2>
+                <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                  Bundle: {selectedBundle.bundle_id}
+                </p>
+              </div>
+              <button
+                onClick={closeBundleDetailsModal}
+                className="w-9 h-9 rounded-lg"
+                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+                aria-label="Close details"
+              >
+                X
+              </button>
+            </div>
+
+            {loadingBundleDetails ? (
+              <div className="flex justify-center py-12">
+                <svg className="animate-spin" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" opacity="0.3" />
+                  <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
+                </svg>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Customer Details</p>
+                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>{selectedBundle.name}</p>
+                    <p className="text-sm" style={{ color: "var(--color-muted)" }}>{selectedBundle.email ?? "-"}</p>
+                    <p className="text-sm" style={{ color: "var(--color-muted)" }}>{selectedBundle.phone_number ?? "-"}</p>
+                  </div>
+
+                  <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Order Actions</p>
+                    <div className="flex items-center gap-2 flex-wrap mb-2">
+                      <select
+                        value={selectedBundle.status}
+                        disabled={updatingStatus === getOrderActionId(selectedBundle)}
+                        onChange={(event) => {
+                          void handleStatusChange(getOrderActionId(selectedBundle), event.target.value);
+                        }}
+                        className="appearance-none px-2.5 py-1.5 rounded-full text-xs font-semibold border-0"
+                        style={{
+                          background: (STATUS_STYLES[selectedBundle.status] ?? STATUS_STYLES.pending).bg,
+                          color: (STATUS_STYLES[selectedBundle.status] ?? STATUS_STYLES.pending).color,
+                        }}
+                      >
+                        {(ALLOWED_STATUS_TRANSITIONS[selectedBundle.status] ?? Object.keys(STATUS_STYLES))
+                          .filter((value) => value in STATUS_STYLES && value !== "mixed")
+                          .map((value) => (
+                            <option key={value} value={value}>{STATUS_STYLES[value].label}</option>
+                          ))}
+                      </select>
+                      <button
+                        onClick={() => { void handleConfirm(getOrderActionId(selectedBundle)); }}
+                        disabled={selectedBundle.status !== "pending" || confirming === getOrderActionId(selectedBundle)}
+                        className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                        style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                      >
+                        {selectedBundle.exclude_email ? "Confirm (No Email)" : "Send Confirmation"}
+                      </button>
+                      {selectedBundle.paid ? (
+                        <button
+                          onClick={() => setUnpayTarget(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                          style={{ background: "#dc2626", color: "white" }}
+                        >
+                          Mark Unpaid
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => {
+                            setPaymentTarget(selectedBundle);
+                            setPaymentMethod("cash");
+                            setPaymentMethodOther("");
+                          }}
+                          disabled={selectedBundle.status === "pending"}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{ background: "var(--color-sage)", color: "white" }}
+                        >
+                          Mark Paid
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      Payment: {selectedBundle.paid ? "Paid" : "Unpaid"}{selectedBundle.payment_method ? ` (${selectedBundle.payment_method}${selectedBundle.payment_method_other ? `: ${selectedBundle.payment_method_other}` : ""})` : ""}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Order Details</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><span style={{ color: "var(--color-muted)" }}>Event:</span><div style={{ color: "var(--color-text)" }}>{eventLabelById.get(selectedBundle.event_id) ?? `Event ${selectedBundle.event_id}`}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Items:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.quantity_total}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Item Types:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.line_count}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Total:</span><div style={{ color: "var(--color-forest)", fontWeight: 700 }}>{formatMoney(selectedBundle.total_price)}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Location:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.pickup_location}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Time Slot:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.pickup_time_slot}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Address:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.pickup_address ?? "-"}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Date Placed:</span><div style={{ color: "var(--color-text)" }}>{formatDate(selectedBundle.created_at)}</div></div>
+                  </div>
+                  {selectedBundle.status === "mixed" && selectedBundle.status_breakdown && (
+                    <p className="text-xs mt-2" style={{ color: "var(--color-muted)" }}>
+                      Mixed status: {Object.entries(selectedBundle.status_breakdown).map(([status, count]) => `${status}: ${count}`).join(", ")}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Items Ordered</p>
+                  {bundleLines.length === 0 ? (
+                    <p className="text-sm" style={{ color: "var(--color-muted)" }}>No items found for this order.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Item</th>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Qty</th>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Unit Cost</th>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bundleLines.map((item) => {
+                            const qty = Number(item.quantity) || 0;
+                            const lineTotal = Number(item.total_price) || 0;
+                            const unitCost = qty > 0 ? lineTotal / qty : lineTotal;
+                            return (
+                              <tr key={item.id} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                                <td className="py-2" style={{ color: "var(--color-text)" }}>{item.item_name}</td>
+                                <td className="py-2" style={{ color: "var(--color-text)" }}>{qty}</td>
+                                <td className="py-2" style={{ color: "var(--color-text)" }}>{formatMoney(unitCost)}</td>
+                                <td className="py-2 font-semibold" style={{ color: "var(--color-forest)" }}>{formatMoney(lineTotal)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Notes</p>
+                  <p className="text-sm" style={{ color: "var(--color-text)", whiteSpace: "pre-wrap" }}>{selectedBundle.notes ? selectedBundle.notes : "-"}</p>
+                  {selectedBundle.notes_mixed && (
+                    <p className="text-xs mt-2" style={{ color: "var(--color-muted)" }}>
+                      Some item-level notes differ. Editing this bundle will resync shared notes.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => setShowEditBundleModal(true)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold"
+                    style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                  >
+                    Edit Bundle
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(getOrderActionId(selectedBundle))}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold"
+                    style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
+                  >
+                    Delete Bundle
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <BundleEditModal
+        isOpen={showEditBundleModal && !!selectedBundle}
+        bundle={selectedBundle ? {
+          bundle_id: selectedBundle.bundle_id,
+          primary_order_id: selectedBundle.primary_order_id,
+          event_id: selectedBundle.event_id,
+          status: selectedBundle.status,
+          name: selectedBundle.name,
+          email: selectedBundle.email,
+          phone_number: selectedBundle.phone_number,
+          pickup_location: selectedBundle.pickup_location,
+          pickup_time_slot: selectedBundle.pickup_time_slot,
+          pickup_address: selectedBundle.pickup_address,
+          pickup_date: selectedBundle.pickup_date,
+          notes: selectedBundle.notes,
+          exclude_email: selectedBundle.exclude_email,
+        } : null}
+        lines={bundleLines}
+        onClose={() => setShowEditBundleModal(false)}
+        onSaved={async () => {
+          await fetchOrders({ suppressErrorToast: true });
+          await refreshSelectedBundleDetails();
+        }}
+        notify={showToast}
+      />
+
       {/* Single delete modal */}
       <Modal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="Delete Order"
+        title="Delete Bundle"
         variant="danger"
         actions={
           <>
@@ -2729,14 +3122,14 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        This order will be permanently deleted. This cannot be undone.
+        This order bundle will be permanently deleted. This cannot be undone.
       </Modal>
 
       {/* Bulk delete modal */}
       <Modal
         isOpen={showBulkDeleteModal}
         onClose={() => setShowBulkDeleteModal(false)}
-        title={`Delete ${selectedIds.size} Order${selectedIds.size !== 1 ? "s" : ""}?`}
+        title={`Delete ${selectedIds.size} Bundle${selectedIds.size !== 1 ? "s" : ""}?`}
         variant="danger"
         actions={
           <>
@@ -2757,14 +3150,14 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        {selectedIds.size} order{selectedIds.size !== 1 ? "s" : ""} will be permanently deleted. This cannot be undone.
+        {selectedIds.size} bundle{selectedIds.size !== 1 ? "s" : ""} will be permanently deleted. This cannot be undone.
       </Modal>
 
       {/* Bulk confirm modal */}
       <Modal
         isOpen={showBulkConfirmModal}
         onClose={() => setShowBulkConfirmModal(false)}
-        title={`Confirm ${selectedIds.size} Order${selectedIds.size !== 1 ? "s" : ""}?`}
+        title={`Confirm ${selectedIds.size} Bundle${selectedIds.size !== 1 ? "s" : ""}?`}
         actions={
           <>
             <button
@@ -2791,7 +3184,7 @@ export default function AdminOrdersPage() {
       <Modal
         isOpen={!!paymentTarget}
         onClose={() => {
-          if (paymentTarget && updatingPayment === paymentTarget.id) return;
+          if (paymentTarget && updatingPayment === getOrderActionId(paymentTarget)) return;
           setPaymentTarget(null);
         }}
         title="Mark Paid"
@@ -2799,7 +3192,7 @@ export default function AdminOrdersPage() {
           <>
             <button
               onClick={() => setPaymentTarget(null)}
-              disabled={!!paymentTarget && updatingPayment === paymentTarget.id}
+              disabled={!!paymentTarget && updatingPayment === getOrderActionId(paymentTarget)}
               className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
               style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
             >
@@ -2819,14 +3212,15 @@ export default function AdminOrdersPage() {
                   return;
                 }
 
-                const ok = await handlePaymentUpdate(target.id, {
+                const targetId = getOrderActionId(target);
+                const ok = await handlePaymentUpdate(targetId, {
                   paid: true,
                   payment_method: paymentMethod,
                   payment_method_other: paymentMethod === "other" ? other : undefined,
                 });
                 if (ok) setPaymentTarget(null);
               }}
-              disabled={!!paymentTarget && updatingPayment === paymentTarget.id}
+              disabled={!!paymentTarget && updatingPayment === getOrderActionId(paymentTarget)}
               className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
             >
@@ -2884,7 +3278,7 @@ export default function AdminOrdersPage() {
       <Modal
         isOpen={!!unpayTarget}
         onClose={() => {
-          if (unpayTarget && updatingPayment === unpayTarget.id) return;
+          if (unpayTarget && updatingPayment === getOrderActionId(unpayTarget)) return;
           setUnpayTarget(null);
         }}
         title="Mark Unpaid"
@@ -2893,7 +3287,7 @@ export default function AdminOrdersPage() {
           <>
             <button
               onClick={() => setUnpayTarget(null)}
-              disabled={!!unpayTarget && updatingPayment === unpayTarget.id}
+              disabled={!!unpayTarget && updatingPayment === getOrderActionId(unpayTarget)}
               className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
               style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
             >
@@ -2903,10 +3297,10 @@ export default function AdminOrdersPage() {
               onClick={async () => {
                 const target = unpayTarget;
                 if (!target) return;
-                const ok = await handlePaymentUpdate(target.id, { paid: false });
+                const ok = await handlePaymentUpdate(getOrderActionId(target), { paid: false });
                 if (ok) setUnpayTarget(null);
               }}
-              disabled={!!unpayTarget && updatingPayment === unpayTarget.id}
+              disabled={!!unpayTarget && updatingPayment === getOrderActionId(unpayTarget)}
               className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
               style={{ background: "#dc2626", color: "white" }}
             >

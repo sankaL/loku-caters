@@ -11,6 +11,7 @@ interface ModalProps {
   actions?: React.ReactNode;
   variant?: "default" | "danger";
   size?: "md" | "lg" | "xl";
+  zIndex?: number;
 }
 
 export default function Modal({
@@ -21,6 +22,7 @@ export default function Modal({
   actions,
   variant = "default",
   size = "md",
+  zIndex = 130,
 }: ModalProps) {
   useEffect(() => {
     if (!isOpen) return;
@@ -49,7 +51,7 @@ export default function Modal({
         position: "fixed",
         inset: 0,
         background: "rgba(0,0,0,0.4)",
-        zIndex: 100,
+        zIndex,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
