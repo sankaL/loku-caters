@@ -83,6 +83,18 @@ interface AdminEvent {
 }
 
 type SortCol = "status" | "total" | "date" | "timeslot";
+type StatusActionKey =
+  | "cancel"
+  | "mark_picked_up"
+  | "mark_no_show"
+  | "normalize_confirmed"
+  | "restore_picked_up"
+  | "restore_no_show";
+type TablePrimaryAction =
+  | { kind: "confirm"; label: string }
+  | { kind: "status"; action: StatusActionKey; label: string }
+  | { kind: "review"; label: string }
+  | null;
 
 const PAGE_SIZE = 15;
 
@@ -104,6 +116,233 @@ const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
   mixed: ["pending", "confirmed", "picked_up", "no_show", "cancelled"],
 };
 
+interface StatusActionSpec {
+  key: StatusActionKey;
+  label: string;
+  tone?: "default" | "danger";
+}
+
+function getReminderUnavailableReason(order: Order): string | null {
+  if (order.status !== "confirmed") return "Only confirmed bundles can be reminded";
+  if (order.reminded) return "Reminder already sent";
+  if (order.exclude_email) return "Email is excluded for this bundle";
+  if (!(order.email ?? "").trim()) return "Customer is missing an email address";
+  return null;
+}
+
+function getMixedBundleActionSpecs(order: Pick<Order, "status_breakdown">): StatusActionSpec[] {
+  const statuses = Object.keys(order.status_breakdown ?? {}).filter((status) => status in ALLOWED_STATUS_TRANSITIONS);
+  if (statuses.length === 0) return [];
+
+  let allowedTargets = new Set(ALLOWED_STATUS_TRANSITIONS[statuses[0]] ?? []);
+  for (const status of statuses.slice(1)) {
+    allowedTargets = new Set((ALLOWED_STATUS_TRANSITIONS[status] ?? []).filter((target) => allowedTargets.has(target)));
+  }
+
+  const actions: StatusActionSpec[] = [];
+  if (allowedTargets.has("confirmed")) {
+    actions.push({ key: "normalize_confirmed", label: "Normalize to Confirmed" });
+  }
+  if (allowedTargets.has("picked_up")) {
+    actions.push({ key: "mark_picked_up", label: "Normalize to Picked Up" });
+  }
+  if (allowedTargets.has("no_show")) {
+    actions.push({ key: "mark_no_show", label: "Normalize to No Show", tone: "danger" });
+  }
+  if (allowedTargets.has("cancelled")) {
+    actions.push({ key: "cancel", label: "Cancel Bundle", tone: "danger" });
+  }
+  return actions;
+}
+
+function getStatusActionSpecs(order: Order, context: "table" | "detail"): StatusActionSpec[] {
+  if (order.status === "pending") {
+    return [{ key: "cancel", label: "Cancel Bundle", tone: "danger" }];
+  }
+  if (order.status === "confirmed") {
+    return [
+      { key: "mark_picked_up", label: "Mark Picked Up" },
+      { key: "mark_no_show", label: "Mark No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "picked_up") {
+    return [
+      { key: "mark_no_show", label: "Correct to No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "no_show") {
+    return [
+      { key: "mark_picked_up", label: "Correct to Picked Up" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "cancelled") {
+    return [
+      { key: "restore_picked_up", label: "Restore to Picked Up" },
+      { key: "restore_no_show", label: "Restore to No Show" },
+    ];
+  }
+  if (order.status === "mixed" && context === "detail") {
+    return getMixedBundleActionSpecs(order);
+  }
+  return [];
+}
+
+function getStatusActionRequest(action: StatusActionKey): { method: "PATCH" | "POST"; endpoint: string; body?: Record<string, string> } {
+  if (action === "normalize_confirmed") {
+    return { method: "PATCH", endpoint: "status", body: { status: "confirmed" } };
+  }
+  if (action === "mark_picked_up") return { method: "POST", endpoint: "actions/mark-picked-up" };
+  if (action === "mark_no_show") return { method: "POST", endpoint: "actions/mark-no-show" };
+  if (action === "cancel") return { method: "POST", endpoint: "actions/cancel" };
+  if (action === "restore_picked_up") return { method: "POST", endpoint: "actions/restore", body: { target_status: "picked_up" } };
+  return { method: "POST", endpoint: "actions/restore", body: { target_status: "no_show" } };
+}
+
+function getStatusActionModalCopy(action: StatusActionKey, order: Pick<Order, "name" | "status">): { title: string; body: string; confirmLabel: string } {
+  if (action === "normalize_confirmed") {
+    return {
+      title: "Normalize to Confirmed",
+      body: `Set every line in ${order.name}'s bundle to confirmed?`,
+      confirmLabel: "Normalize bundle",
+    };
+  }
+
+  if (action === "mark_picked_up") {
+    if (order.status === "no_show") {
+      return {
+        title: "Correct to Picked Up",
+        body: `Mark ${order.name} as picked up instead of no show?`,
+        confirmLabel: "Mark picked up",
+      };
+    }
+    if (order.status === "mixed") {
+      return {
+        title: "Normalize to Picked Up",
+        body: `Set every line in ${order.name}'s bundle to picked up where the transition is allowed?`,
+        confirmLabel: "Normalize bundle",
+      };
+    }
+    return {
+      title: "Mark Picked Up",
+      body: `Confirm that ${order.name}'s bundle was collected?`,
+      confirmLabel: "Mark picked up",
+    };
+  }
+
+  if (action === "mark_no_show") {
+    if (order.status === "picked_up") {
+      return {
+        title: "Correct to No Show",
+        body: `Change ${order.name}'s bundle from picked up to no show?`,
+        confirmLabel: "Mark no show",
+      };
+    }
+    if (order.status === "mixed") {
+      return {
+        title: "Normalize to No Show",
+        body: `Set every line in ${order.name}'s bundle to no show where the transition is allowed?`,
+        confirmLabel: "Normalize bundle",
+      };
+    }
+    return {
+      title: "Mark No Show",
+      body: `Mark ${order.name}'s bundle as no show?`,
+      confirmLabel: "Mark no show",
+    };
+  }
+
+  if (action === "cancel") {
+    return {
+      title: "Cancel Bundle",
+      body: `Cancel ${order.name}'s bundle?`,
+      confirmLabel: "Cancel bundle",
+    };
+  }
+
+  if (action === "restore_picked_up") {
+    return {
+      title: "Restore to Picked Up",
+      body: `Restore ${order.name}'s cancelled bundle to picked up?`,
+      confirmLabel: "Restore bundle",
+    };
+  }
+
+  return {
+    title: "Restore to No Show",
+    body: `Restore ${order.name}'s cancelled bundle to no show?`,
+    confirmLabel: "Restore bundle",
+  };
+}
+
+function getStatusActionSuccessMessage(action: StatusActionKey): string {
+  if (action === "normalize_confirmed") return "Bundle normalized to confirmed";
+  if (action === "mark_picked_up") return "Bundle marked picked up";
+  if (action === "mark_no_show") return "Bundle marked no show";
+  if (action === "cancel") return "Bundle cancelled";
+  if (action === "restore_picked_up") return "Bundle restored to picked up";
+  return "Bundle restored to no show";
+}
+
+function getTablePrimaryAction(order: Order): TablePrimaryAction {
+  if (order.status === "pending") {
+    return { kind: "confirm", label: "Confirm" };
+  }
+  if (order.status === "confirmed") {
+    return { kind: "status", action: "mark_picked_up", label: "Picked Up" };
+  }
+  if (order.status === "no_show") {
+    return { kind: "status", action: "mark_picked_up", label: "Correct Pickup" };
+  }
+  if (order.status === "mixed") {
+    return { kind: "review", label: "Review" };
+  }
+  return null;
+}
+
+function getTableOverflowActions(order: Order): StatusActionSpec[] {
+  if (order.status === "pending") {
+    return [{ key: "cancel", label: "Cancel Bundle", tone: "danger" }];
+  }
+  if (order.status === "confirmed") {
+    return [
+      { key: "mark_picked_up", label: "Mark Picked Up" },
+      { key: "mark_no_show", label: "Mark No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "picked_up") {
+    return [
+      { key: "mark_no_show", label: "Correct to No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "no_show") {
+    return [{ key: "cancel", label: "Cancel Bundle", tone: "danger" }];
+  }
+  if (order.status === "cancelled") {
+    return [
+      { key: "restore_picked_up", label: "Restore to Picked Up" },
+      { key: "restore_no_show", label: "Restore to No Show" },
+    ];
+  }
+  return [];
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const statusStyle = STATUS_STYLES[status] ?? STATUS_STYLES.pending;
+  return (
+    <span
+      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
+      style={{ background: statusStyle.bg, color: statusStyle.color }}
+    >
+      {statusStyle.label}
+    </span>
+  );
+}
+
 function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
   if (!active) {
     return (
@@ -121,12 +360,6 @@ function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
       }
     </svg>
   );
-}
-
-function csvEscape(value: string | number): string {
-  const normalized = String(value).replace(/"/g, "\"\"");
-  if (/[",\n\r]/.test(normalized)) return `"${normalized}"`;
-  return normalized;
 }
 
 const dropdownStyle: React.CSSProperties = {
@@ -192,6 +425,14 @@ const BellIcon = ({ width = 16, height = 16 }: { width?: number; height?: number
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </svg>
+);
+
+const MoreIcon = ({ width = 16, height = 16 }: { width?: number; height?: number }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="5" cy="12" r="1" fill="currentColor" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" />
+    <circle cx="19" cy="12" r="1" fill="currentColor" />
   </svg>
 );
 
@@ -515,6 +756,7 @@ export default function AdminOrdersPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [updatingPayment, setUpdatingPayment] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -527,6 +769,7 @@ export default function AdminOrdersPage() {
   // Single delete modal
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [confirmTarget, setConfirmTarget] = useState<Order | null>(null);
+  const [statusActionTarget, setStatusActionTarget] = useState<{ order: Order; action: StatusActionKey } | null>(null);
 
   // Payment modals
   const [paymentTarget, setPaymentTarget] = useState<Order | null>(null);
@@ -538,8 +781,12 @@ export default function AdminOrdersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [showBulkConfirmModal, setShowBulkConfirmModal] = useState(false);
+  const [showBulkPickedUpModal, setShowBulkPickedUpModal] = useState(false);
+  const [showBulkCancelModal, setShowBulkCancelModal] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkConfirming, setBulkConfirming] = useState(false);
+  const [bulkMarkingPickedUp, setBulkMarkingPickedUp] = useState(false);
+  const [bulkCancelling, setBulkCancelling] = useState(false);
 
   // Add order modal
   const [showAddOrderChoiceModal, setShowAddOrderChoiceModal] = useState(false);
@@ -573,6 +820,8 @@ export default function AdminOrdersPage() {
   const [remindSearch, setRemindSearch] = useState("");
   const [showReminderMenu, setShowReminderMenu] = useState(false);
   const reminderMenuRef = useRef<HTMLDivElement | null>(null);
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const remindLoading = reminderRun.isRunning;
 
   // Payment reminder modal
@@ -613,6 +862,29 @@ export default function AdminOrdersPage() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [showReminderMenu]);
+
+  useEffect(() => {
+    if (!openActionMenuId) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!actionMenuRef.current?.contains(event.target as Node)) {
+        setOpenActionMenuId(null);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenActionMenuId(null);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openActionMenuId]);
 
   const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -960,6 +1232,22 @@ export default function AdminOrdersPage() {
     [paymentReminderRecipients]
   );
   const ineligiblePaymentReminderCount = paymentReminderRecipients.length - eligiblePaymentReminderRecipients.length;
+  const selectedOrders = useMemo(
+    () => orders.filter((order) => selectedIds.has(order.id)),
+    [orders, selectedIds]
+  );
+  const bulkConfirmableOrders = useMemo(
+    () => selectedOrders.filter((order) => order.status === "pending"),
+    [selectedOrders]
+  );
+  const bulkPickedUpOrders = useMemo(
+    () => selectedOrders.filter((order) => order.status === "confirmed"),
+    [selectedOrders]
+  );
+  const bulkCancelableOrders = useMemo(
+    () => selectedOrders.filter((order) => order.status !== "mixed" && ["pending", "confirmed", "picked_up", "no_show"].includes(order.status)),
+    [selectedOrders]
+  );
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -1008,29 +1296,74 @@ export default function AdminOrdersPage() {
     }
   }
 
-  async function handleStatusChange(orderId: string, newStatus: string) {
+  async function handleSendSingleReminder(target: Order): Promise<boolean> {
+    const orderId = getOrderActionId(target);
+    setSendingReminder(orderId);
+    try {
+      const token = await getAdminToken();
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/remind`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to send reminder"));
+      }
+      const data = await res.json() as ReminderSendResponse;
+      if (data.status !== "sent") {
+        showToast(data.message || "Reminder skipped", "error");
+        return false;
+      }
+      showToast("Reminder sent", "success");
+      await fetchOrders();
+      if (selectedBundle?.bundle_id === target.bundle_id) {
+        await fetchBundleDetails(target);
+      }
+      return true;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to send reminder", "error");
+      return false;
+    } finally {
+      setSendingReminder(null);
+    }
+  }
+
+  async function handleStatusAction(
+    order: Order,
+    action: StatusActionKey,
+    options?: { skipRefresh?: boolean; skipToast?: boolean }
+  ): Promise<boolean> {
+    const orderId = getOrderActionId(order);
+    const request = getStatusActionRequest(action);
     setUpdatingStatus(orderId);
     try {
       const token = await getAdminToken();
-      if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/status`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/${request.endpoint}`, {
+        method: request.method,
+        headers: request.body
+          ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+          : { Authorization: `Bearer ${token}` },
+        body: request.body ? JSON.stringify(request.body) : undefined,
       });
       if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to update status"));
+        throw new Error(await getApiErrorMessage(res, "Failed to update bundle status"));
       }
-      setOrders((prev) => {
-        if (filter !== "all" && newStatus !== filter) {
-          return prev.filter((o) => o.id !== orderId);
+      if (!options?.skipToast) {
+        showToast(getStatusActionSuccessMessage(action), "success");
+      }
+      if (!options?.skipRefresh) {
+        await fetchOrders();
+        if (selectedBundle?.bundle_id === order.bundle_id) {
+          await fetchBundleDetails(order);
         }
-        return prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o));
-      });
-      setSelectedBundle((prev) => (prev && getOrderActionId(prev) === orderId ? { ...prev, status: newStatus } : prev));
-      showToast("Status updated", "success");
+      }
+      return true;
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to update status", "error");
+      if (!options?.skipToast) {
+        showToast(err instanceof Error ? err.message : "Failed to update bundle status", "error");
+      }
+      return false;
     } finally {
       setUpdatingStatus(null);
     }
@@ -1199,7 +1532,7 @@ export default function AdminOrdersPage() {
   async function executeBulkConfirm() {
     setBulkConfirming(true);
     setShowBulkConfirmModal(false);
-    const ids = Array.from(selectedIds);
+    const ids = bulkConfirmableOrders.map((order) => getOrderActionId(order));
     try {
       const token = await getAdminToken();
       if (!token) return;
@@ -1227,6 +1560,37 @@ export default function AdminOrdersPage() {
       showToast("Bulk confirm failed", "error");
     } finally {
       setBulkConfirming(false);
+    }
+  }
+
+  async function executeBulkStatusAction(action: "mark_picked_up" | "cancel") {
+    const targetOrders = action === "mark_picked_up" ? bulkPickedUpOrders : bulkCancelableOrders;
+    const setLoadingState = action === "mark_picked_up" ? setBulkMarkingPickedUp : setBulkCancelling;
+    const closeModal = action === "mark_picked_up" ? setShowBulkPickedUpModal : setShowBulkCancelModal;
+    const noun = action === "mark_picked_up" ? "marked picked up" : "cancelled";
+
+    setLoadingState(true);
+    closeModal(false);
+    try {
+      const results = await Promise.allSettled(
+        targetOrders.map((order) => handleStatusAction(order, action, { skipRefresh: true, skipToast: true }))
+      );
+      const succeeded = results.reduce((count, result) => (
+        result.status === "fulfilled" && result.value ? count + 1 : count
+      ), 0);
+      const failed = targetOrders.length - succeeded;
+      setSelectedIds(new Set());
+      await fetchOrders();
+      if (selectedBundle && targetOrders.some((order) => order.bundle_id === selectedBundle.bundle_id)) {
+        await refreshSelectedBundleDetails();
+      }
+      if (failed > 0) {
+        showToast(`Bulk action ${noun} ${succeeded}, failed ${failed}`, "error");
+      } else {
+        showToast(`Bulk action ${noun} ${succeeded} bundle${succeeded !== 1 ? "s" : ""}`, "success");
+      }
+    } finally {
+      setLoadingState(false);
     }
   }
 
@@ -2036,69 +2400,6 @@ export default function AdminOrdersPage() {
     }).format(value);
   }
 
-  function handleExportCsv() {
-    if (sorted.length === 0) {
-      showToast("No bundles to export", "error");
-      return;
-    }
-
-    const headers = [
-      "Bundle ID",
-      "Primary Order ID",
-      "Name",
-      "Email",
-      "Phone",
-      "Item Types",
-      "Items Total",
-      "Event",
-      "Pickup Location",
-      "Pickup Time Slot",
-      "Total Price",
-      "Status",
-      "Paid",
-      "Payment Method",
-      "Payment Method Other",
-      "Created At",
-    ];
-
-    const rows = sorted.map((order) => [
-      order.bundle_id,
-      order.primary_order_id,
-      order.name,
-      order.email ?? "",
-      order.phone_number ?? "",
-      order.line_count,
-      order.quantity_total,
-      eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`,
-      order.pickup_location,
-      order.pickup_time_slot,
-      order.total_price.toFixed(2),
-      order.status,
-      order.paid ? "TRUE" : "FALSE",
-      order.payment_method ?? "",
-      order.payment_method_other ?? "",
-      order.created_at,
-    ]);
-
-    const csv = [headers, ...rows]
-      .map((row) => row.map((value) => csvEscape(value)).join(","))
-      .join("\n");
-
-    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-
-    link.href = url;
-    link.download = `order-bundles-${filter}-${timestamp}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    showToast(`Exported ${sorted.length} bundle${sorted.length === 1 ? "" : "s"}`, "success");
-  }
-
   // Checkbox select-all (current page)
   const pageIds = paginated.map((o) => o.id);
   const allPageSelected = pageIds.length > 0 && pageIds.every((id) => selectedIds.has(id));
@@ -2340,7 +2641,7 @@ export default function AdminOrdersPage() {
           <button
             onClick={() => setShowAddOrderChoiceModal(true)}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
-            style={{ background: "var(--color-forest)", color: "var(--color-cream)", border: "1px solid var(--color-forest)" }}
+            style={{ background: "#F2AF29", color: "#1C1C1A", border: "1px solid #F2AF29" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -2348,7 +2649,10 @@ export default function AdminOrdersPage() {
             Add Order
           </button>
           <button
-            onClick={() => { setShowBulkImportModal(true); setBulkImportRows([]); }}
+            onClick={() => {
+              setBulkImportRows([]);
+              setShowBulkImportModal(true);
+            }}
             className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2"
             style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
           >
@@ -2477,26 +2781,17 @@ export default function AdminOrdersPage() {
             void fetchOrders();
           }}
           className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 w-full sm:w-auto"
-          style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+          style={{
+            background: "#111111",
+            color: "white",
+            border: "1px solid #111111",
+            boxShadow: "0 2px 0 rgba(0,0,0,0.45), 0 8px 16px rgba(0,0,0,0.16)",
+          }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
           </svg>
           Refresh
-        </button>
-
-        <button
-          onClick={handleExportCsv}
-          disabled={loading || sorted.length === 0}
-          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 3v12" />
-            <path d="M7 10l5 5 5-5" />
-            <path d="M4 21h16" />
-          </svg>
-          Export CSV
         </button>
       </div>
 
@@ -2517,14 +2812,36 @@ export default function AdminOrdersPage() {
           style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
         >
           <span className="flex-1">{selectedIds.size} bundle{selectedIds.size !== 1 ? "s" : ""} selected</span>
-          <button
-            onClick={() => setShowBulkConfirmModal(true)}
-            disabled={bulkConfirming}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
-            style={{ background: "rgba(255,255,255,0.15)", color: "var(--color-cream)" }}
-          >
-            {bulkConfirming ? "Confirming..." : "Confirm Selected"}
-          </button>
+          {bulkConfirmableOrders.length > 0 && (
+            <button
+              onClick={() => setShowBulkConfirmModal(true)}
+              disabled={bulkConfirming}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+              style={{ background: "rgba(255,255,255,0.15)", color: "var(--color-cream)" }}
+            >
+              {bulkConfirming ? "Confirming..." : `Confirm (${bulkConfirmableOrders.length})`}
+            </button>
+          )}
+          {bulkPickedUpOrders.length > 0 && (
+            <button
+              onClick={() => setShowBulkPickedUpModal(true)}
+              disabled={bulkMarkingPickedUp}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+              style={{ background: "rgba(255,255,255,0.15)", color: "var(--color-cream)" }}
+            >
+              {bulkMarkingPickedUp ? "Updating..." : `Picked Up (${bulkPickedUpOrders.length})`}
+            </button>
+          )}
+          {bulkCancelableOrders.length > 0 && (
+            <button
+              onClick={() => setShowBulkCancelModal(true)}
+              disabled={bulkCancelling}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+              style={{ background: "rgba(220,38,38,0.3)", color: "#fecaca" }}
+            >
+              {bulkCancelling ? "Cancelling..." : `Cancel (${bulkCancelableOrders.length})`}
+            </button>
+          )}
           <button
             onClick={() => setShowBulkDeleteModal(true)}
             disabled={bulkDeleting}
@@ -2617,21 +2934,24 @@ export default function AdminOrdersPage() {
                       onClick={() => toggleSort("date")}
                       className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
                     >
-                      Date <SortIcon active={sort.col === "date"} dir={sort.dir} />
+                      Order Date <SortIcon active={sort.col === "date"} dir={sort.dir} />
                     </button>
                   </th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Action</th>
+                  <th className={`${thBase} text-right`} style={{ color: "var(--color-muted)" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.map((order, idx) => {
-                  const statusStyle = STATUS_STYLES[order.status] ?? STATUS_STYLES.pending;
                   const actionId = getOrderActionId(order);
                   const isConfirming = confirming === actionId;
+                  const isSendingReminder = sendingReminder === actionId;
                   const isUpdatingStatus = updatingStatus === actionId;
                   const isUpdatingPayment = updatingPayment === actionId;
                   const isDeleting = deleting === actionId;
                   const isSelected = selectedIds.has(order.id);
+                  const primaryAction = getTablePrimaryAction(order);
+                  const overflowActions = getTableOverflowActions(order);
+                  const isActionMenuOpen = openActionMenuId === actionId;
                   return (
                     <tr
                       key={order.id}
@@ -2713,28 +3033,7 @@ export default function AdminOrdersPage() {
                         {formatMoney(order.total_price)}
                       </td>
                       <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
-                        <div className="relative inline-block">
-                          <select
-                            value={order.status}
-                            disabled={isUpdatingStatus}
-                            onChange={(e) => handleStatusChange(actionId, e.target.value)}
-                            className="appearance-none pl-2.5 pr-6 py-1 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-sage)] disabled:opacity-60 transition-opacity"
-                            style={{ background: statusStyle.bg, color: statusStyle.color }}
-                          >
-                            {(ALLOWED_STATUS_TRANSITIONS[order.status] ?? Object.keys(STATUS_STYLES))
-                              .filter((val) => STATUS_STYLES[val])
-                              .map((val) => (
-                                <option key={val} value={val}>
-                                  {STATUS_STYLES[val].label}
-                                </option>
-                              ))}
-                          </select>
-                          <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center" style={{ color: statusStyle.color }}>
-                            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
-                              <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          </span>
-                        </div>
+                        <StatusBadge status={order.status} />
                       </td>
                       <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
@@ -2782,62 +3081,146 @@ export default function AdminOrdersPage() {
                         {formatDate(order.created_at)}
                       </td>
                       <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center flex-wrap gap-2">
-                          {order.status === "pending" && (
-                            <button
-                              onClick={() => setConfirmTarget(order)}
-                              disabled={isConfirming}
-                              className="p-1.5 rounded-lg transition-all disabled:opacity-60"
-                              style={{
-                                background: "var(--color-bark)",
-                                color: "white",
-                                border: "1px solid rgba(28,28,26,0.08)",
-                                boxShadow: "0 2px 0 rgba(88,58,37,0.45), 0 8px 16px rgba(139,94,60,0.22)",
-                              }}
-                              aria-label={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
-                              title={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
-                            >
-                              {isConfirming
-                                ? (
-                                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <circle cx="12" cy="12" r="10" opacity="0.3" />
-                                    <path d="M12 2a10 10 0 0 1 10 10" />
-                                  </svg>
-                                ) : order.exclude_email ? (
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M20 6L9 17l-5-5" />
-                                  </svg>
-                                ) : (
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M4 6h16v12H4z" />
-                                    <path d="m4 7 8 6 8-6" />
-                                  </svg>
-                                )
-                              }
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setDeleteTarget(actionId)}
-                            disabled={isDeleting}
-                            className="p-1.5 rounded-lg transition-all disabled:opacity-60"
-                            style={{ color: "#991b1b", background: "#fee2e2", border: "1px solid #fca5a5" }}
-                            aria-label="Delete bundle"
-                            title="Delete bundle"
-                          >
-                            {isDeleting ? (
-                              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <circle cx="12" cy="12" r="10" opacity="0.3" />
-                                <path d="M12 2a10 10 0 0 1 10 10" />
-                              </svg>
-                            ) : (
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6l-1 14H6L5 6" />
-                                <path d="M10 11v6M14 11v6" />
-                                <path d="M9 6V4h6v2" />
-                              </svg>
+                        <div className="relative flex items-start justify-end" ref={isActionMenuOpen ? actionMenuRef : null}>
+                          <div className="flex items-center gap-2">
+                            {primaryAction?.kind === "confirm" && (
+                              <button
+                                onClick={() => setConfirmTarget(order)}
+                                disabled={isConfirming}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-60"
+                                style={{
+                                  background: "var(--color-bark)",
+                                  color: "white",
+                                  border: "1px solid rgba(28,28,26,0.08)",
+                                  boxShadow: "0 2px 0 rgba(88,58,37,0.45), 0 8px 16px rgba(139,94,60,0.22)",
+                                }}
+                                title={order.exclude_email ? "Confirm bundle without email" : "Confirm and send email"}
+                              >
+                                {isConfirming ? "Confirming..." : primaryAction.label}
+                              </button>
                             )}
-                          </button>
+                            {primaryAction?.kind === "status" && (
+                              <button
+                                onClick={() => setStatusActionTarget({ order, action: primaryAction.action })}
+                                disabled={isUpdatingStatus}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-60"
+                                style={{
+                                  background: primaryAction.action === "mark_picked_up" ? "var(--color-sage)" : "white",
+                                  color: primaryAction.action === "mark_picked_up" ? "white" : "var(--color-text)",
+                                  border: primaryAction.action === "mark_picked_up"
+                                    ? "1px solid var(--color-sage)"
+                                    : "1px solid rgba(28,28,26,0.12)",
+                                  boxShadow: primaryAction.action === "mark_picked_up"
+                                    ? "0 2px 0 rgba(114,145,82,0.45), 0 8px 16px rgba(114,145,82,0.18)"
+                                    : "0 1px 0 rgba(28,28,26,0.06), 0 6px 14px rgba(28,28,26,0.06)",
+                                }}
+                              >
+                                {primaryAction.label}
+                              </button>
+                            )}
+                            {primaryAction?.kind === "review" && (
+                              <button
+                                onClick={() => { void fetchBundleDetails(order); }}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                                style={{
+                                  background: "white",
+                                  color: "var(--color-text)",
+                                  border: "1px solid rgba(28,28,26,0.12)",
+                                  boxShadow: "0 1px 0 rgba(28,28,26,0.06), 0 6px 14px rgba(28,28,26,0.06)",
+                                }}
+                              >
+                                {primaryAction.label}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setOpenActionMenuId((prev) => (prev === actionId ? null : actionId))}
+                              className="h-9 w-9 rounded-xl transition-all flex items-center justify-center"
+                              style={{
+                                background: "white",
+                                color: "var(--color-text)",
+                                border: "1px solid rgba(28,28,26,0.12)",
+                                boxShadow: "0 1px 0 rgba(28,28,26,0.06), 0 6px 14px rgba(28,28,26,0.06)",
+                              }}
+                              aria-label="More actions"
+                              title="More actions"
+                            >
+                              <MoreIcon width={15} height={15} />
+                            </button>
+                          </div>
+                          {isActionMenuOpen && (
+                            <div
+                              className="absolute right-0 top-[calc(100%+0.5rem)] min-w-[220px] rounded-2xl overflow-hidden"
+                              style={{
+                                background: "white",
+                                border: "1px solid var(--color-border)",
+                                boxShadow: "0 18px 36px rgba(28,28,26,0.14)",
+                                zIndex: 40,
+                              }}
+                            >
+                              <button
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  void fetchBundleDetails(order);
+                                }}
+                                className="w-full px-4 py-3 text-left text-sm font-medium transition-colors"
+                                style={{ color: "var(--color-text)", borderBottom: "1px solid var(--color-border)" }}
+                              >
+                                Open Bundle
+                              </button>
+                              {order.status === "confirmed" && (
+                                <button
+                                  onClick={() => {
+                                    setOpenActionMenuId(null);
+                                    void handleSendSingleReminder(order);
+                                  }}
+                                  disabled={isSendingReminder || !!getReminderUnavailableReason(order)}
+                                  className="w-full px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60"
+                                  style={{
+                                    color: "var(--color-text)",
+                                    borderBottom: "1px solid var(--color-border)",
+                                  }}
+                                >
+                                  {isSendingReminder ? "Sending Reminder..." : (order.reminded ? "Reminder Sent" : "Send Reminder")}
+                                </button>
+                              )}
+                              {overflowActions.map((action, index) => (
+                                <button
+                                  key={action.key}
+                                  onClick={() => {
+                                    setOpenActionMenuId(null);
+                                    setStatusActionTarget({ order, action: action.key });
+                                  }}
+                                  disabled={isUpdatingStatus}
+                                  className="w-full px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60"
+                                  style={{
+                                    color: action.key === "mark_picked_up"
+                                      ? "var(--color-sage)"
+                                      : action.tone === "danger"
+                                        ? "#991b1b"
+                                        : "var(--color-text)",
+                                    borderBottom: index === overflowActions.length - 1 ? "none" : "1px solid var(--color-border)",
+                                  }}
+                                >
+                                  {action.label}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  setDeleteTarget(actionId);
+                                }}
+                                disabled={isDeleting}
+                                className="w-full px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60"
+                                style={{
+                                  color: "#991b1b",
+                                  borderTop: overflowActions.length > 0 ? "1px solid var(--color-border)" : "none",
+                                  background: "#fff7f7",
+                                }}
+                              >
+                                {isDeleting ? "Deleting..." : "Delete Bundle"}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2968,33 +3351,48 @@ export default function AdminOrdersPage() {
 
                   <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
                     <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Order Actions</p>
-                    <div className="flex items-center gap-2 flex-wrap mb-2">
-                      <select
-                        value={selectedBundle.status}
-                        disabled={updatingStatus === getOrderActionId(selectedBundle)}
-                        onChange={(event) => {
-                          void handleStatusChange(getOrderActionId(selectedBundle), event.target.value);
-                        }}
-                        className="appearance-none px-2.5 py-1.5 rounded-full text-xs font-semibold border-0"
-                        style={{
-                          background: (STATUS_STYLES[selectedBundle.status] ?? STATUS_STYLES.pending).bg,
-                          color: (STATUS_STYLES[selectedBundle.status] ?? STATUS_STYLES.pending).color,
-                        }}
-                      >
-                        {(ALLOWED_STATUS_TRANSITIONS[selectedBundle.status] ?? Object.keys(STATUS_STYLES))
-                          .filter((value) => value in STATUS_STYLES && value !== "mixed")
-                          .map((value) => (
-                            <option key={value} value={value}>{STATUS_STYLES[value].label}</option>
-                          ))}
-                      </select>
-                      <button
-                        onClick={() => { void handleConfirm(getOrderActionId(selectedBundle)); }}
-                        disabled={selectedBundle.status !== "pending" || confirming === getOrderActionId(selectedBundle)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
-                        style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                      >
-                        {selectedBundle.exclude_email ? "Confirm (No Email)" : "Send Confirmation"}
-                      </button>
+                    <div className="flex items-center gap-2 flex-wrap mb-3">
+                      <StatusBadge status={selectedBundle.status} />
+                      {selectedBundle.status === "pending" && (
+                        <button
+                          onClick={() => setConfirmTarget(selectedBundle)}
+                          disabled={confirming === getOrderActionId(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                        >
+                          {selectedBundle.exclude_email ? "Confirm (No Email)" : "Confirm & Email"}
+                        </button>
+                      )}
+                      {selectedBundle.status === "confirmed" && (
+                        <button
+                          onClick={() => { void handleSendSingleReminder(selectedBundle); }}
+                          disabled={sendingReminder === getOrderActionId(selectedBundle) || !!getReminderUnavailableReason(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{
+                            background: getReminderUnavailableReason(selectedBundle) ? "var(--color-cream)" : "rgba(114,145,82,0.12)",
+                            color: getReminderUnavailableReason(selectedBundle) ? "var(--color-muted)" : "var(--color-forest)",
+                            border: "1px solid var(--color-border)",
+                          }}
+                          title={getReminderUnavailableReason(selectedBundle) ?? "Send pickup reminder"}
+                        >
+                          {sendingReminder === getOrderActionId(selectedBundle) ? "Sending..." : (selectedBundle.reminded ? "Reminder Sent" : "Send Reminder")}
+                        </button>
+                      )}
+                      {getStatusActionSpecs(selectedBundle, "detail").map((action) => (
+                        <button
+                          key={action.key}
+                          onClick={() => setStatusActionTarget({ order: selectedBundle, action: action.key })}
+                          disabled={updatingStatus === getOrderActionId(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{
+                            background: action.tone === "danger" ? "#fee2e2" : "white",
+                            color: action.tone === "danger" ? "#991b1b" : "var(--color-text)",
+                            border: action.tone === "danger" ? "1px solid #fca5a5" : "1px solid var(--color-border)",
+                          }}
+                        >
+                          {action.label}
+                        </button>
+                      ))}
                       {selectedBundle.paid ? (
                         <button
                           onClick={() => setUnpayTarget(selectedBundle)}
@@ -3014,6 +3412,11 @@ export default function AdminOrdersPage() {
                         </button>
                       )}
                     </div>
+                    {selectedBundle.status === "mixed" && (
+                      <p className="text-xs mb-2" style={{ color: "var(--color-muted)" }}>
+                        Mixed bundles do not expose quick actions in the table. Review the bundle here before normalizing it.
+                      </p>
+                    )}
                     <p className="text-xs" style={{ color: "var(--color-muted)" }}>
                       Payment: {selectedBundle.paid ? "Paid" : "Unpaid"}{selectedBundle.payment_method ? ` (${selectedBundle.payment_method}${selectedBundle.payment_method_other ? `: ${selectedBundle.payment_method_other}` : ""})` : ""}
                     </p>
@@ -3203,6 +3606,46 @@ export default function AdminOrdersPage() {
           : `This will send the confirmation email to ${confirmTarget?.name ?? "this customer"} and mark the bundle as confirmed.`}
       </Modal>
 
+      <Modal
+        isOpen={!!statusActionTarget}
+        onClose={() => {
+          if (statusActionTarget && updatingStatus === getOrderActionId(statusActionTarget.order)) return;
+          setStatusActionTarget(null);
+        }}
+        title={statusActionTarget ? getStatusActionModalCopy(statusActionTarget.action, statusActionTarget.order).title : "Update Bundle Status"}
+        variant={statusActionTarget?.action === "cancel" || statusActionTarget?.action === "mark_no_show" ? "danger" : "default"}
+        actions={
+          <>
+            <button
+              onClick={() => setStatusActionTarget(null)}
+              disabled={!!statusActionTarget && updatingStatus === getOrderActionId(statusActionTarget.order)}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = statusActionTarget;
+                if (!target) return;
+                const ok = await handleStatusAction(target.order, target.action);
+                if (ok) setStatusActionTarget(null);
+              }}
+              disabled={!!statusActionTarget && updatingStatus === getOrderActionId(statusActionTarget.order)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{
+                background: statusActionTarget?.action === "cancel" || statusActionTarget?.action === "mark_no_show" ? "#dc2626" : "var(--color-forest)",
+                color: "white",
+              }}
+            >
+              {statusActionTarget ? getStatusActionModalCopy(statusActionTarget.action, statusActionTarget.order).confirmLabel : "Confirm"}
+            </button>
+          </>
+        }
+      >
+        {statusActionTarget ? getStatusActionModalCopy(statusActionTarget.action, statusActionTarget.order).body : ""}
+      </Modal>
+
       {/* Bulk delete modal */}
       <Modal
         isOpen={showBulkDeleteModal}
@@ -3235,7 +3678,7 @@ export default function AdminOrdersPage() {
       <Modal
         isOpen={showBulkConfirmModal}
         onClose={() => setShowBulkConfirmModal(false)}
-        title={`Confirm ${selectedIds.size} Bundle${selectedIds.size !== 1 ? "s" : ""}?`}
+        title={`Confirm ${bulkConfirmableOrders.length} Bundle${bulkConfirmableOrders.length !== 1 ? "s" : ""}?`}
         actions={
           <>
             <button
@@ -3255,7 +3698,60 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed (orders with Email Excluded will be confirmed without email).
+        Confirmation emails will be sent to {bulkConfirmableOrders.length} customer{bulkConfirmableOrders.length !== 1 ? "s" : ""} and their bundles will be marked as confirmed (bundles with Email Excluded will be confirmed without email).
+      </Modal>
+
+      <Modal
+        isOpen={showBulkPickedUpModal}
+        onClose={() => setShowBulkPickedUpModal(false)}
+        title={`Mark ${bulkPickedUpOrders.length} Bundle${bulkPickedUpOrders.length !== 1 ? "s" : ""} Picked Up?`}
+        actions={
+          <>
+            <button
+              onClick={() => setShowBulkPickedUpModal(false)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => { void executeBulkStatusAction("mark_picked_up"); }}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Mark picked up
+            </button>
+          </>
+        }
+      >
+        This will mark {bulkPickedUpOrders.length} confirmed bundle{bulkPickedUpOrders.length !== 1 ? "s" : ""} as picked up.
+      </Modal>
+
+      <Modal
+        isOpen={showBulkCancelModal}
+        onClose={() => setShowBulkCancelModal(false)}
+        title={`Cancel ${bulkCancelableOrders.length} Bundle${bulkCancelableOrders.length !== 1 ? "s" : ""}?`}
+        variant="danger"
+        actions={
+          <>
+            <button
+              onClick={() => setShowBulkCancelModal(false)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Keep bundles
+            </button>
+            <button
+              onClick={() => { void executeBulkStatusAction("cancel"); }}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "#dc2626", color: "white" }}
+            >
+              Cancel bundles
+            </button>
+          </>
+        }
+      >
+        This will cancel {bulkCancelableOrders.length} selected bundle{bulkCancelableOrders.length !== 1 ? "s" : ""}. Mixed bundles are excluded from this bulk action.
       </Modal>
 
       {/* Mark paid modal */}

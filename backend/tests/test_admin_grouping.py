@@ -17,9 +17,15 @@ from routers.admin import (  # noqa: E402
     _already_confirmed_response,
     _project_order_bundle,
     _reset_group_payment_state,
+    _validate_bundle_status_transition,
     _validate_group_order_payload,
+    RestoreStatusAction,
+    admin_cancel_order,
     admin_delete_order_bundle,
     admin_list_orders,
+    admin_mark_order_no_show,
+    admin_mark_order_picked_up,
+    admin_restore_order,
 )
 
 
@@ -141,6 +147,19 @@ class AdminGroupingTests(unittest.TestCase):
         self.assertEqual(exc_context.exception.status_code, 400)
         self.assertIn("pickup_location", str(exc_context.exception.detail))
 
+    def test_validate_group_order_payload_rejects_mixed_status_bundles(self):
+        existing = [
+            make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED),
+            make_order(id="order-2", group_id="bundle-1", status=OrderStatus.PICKED_UP),
+        ]
+        body = make_body()
+
+        with self.assertRaises(HTTPException) as exc_context:
+            _validate_group_order_payload(existing, body)
+
+        self.assertEqual(exc_context.exception.status_code, 409)
+        self.assertEqual(exc_context.exception.detail, "Cannot add items to a mixed-status bundle")
+
     def test_reset_group_payment_state_clears_bundle_payment_flags(self):
         orders = [
             make_order(id="order-1", paid=True, payment_method="cash"),
@@ -180,6 +199,18 @@ class AdminGroupingTests(unittest.TestCase):
         ]
 
         self.assertIsNone(_already_confirmed_response(group_orders[0], group_orders))
+
+    def test_validate_bundle_status_transition_checks_all_group_lines(self):
+        group_orders = [
+            make_order(id="order-1", status=OrderStatus.CONFIRMED),
+            make_order(id="order-2", status=OrderStatus.PICKED_UP),
+        ]
+
+        with self.assertRaises(HTTPException) as exc_context:
+            _validate_bundle_status_transition(group_orders, OrderStatus.CONFIRMED)
+
+        self.assertEqual(exc_context.exception.status_code, 409)
+        self.assertEqual(exc_context.exception.detail, "Invalid status transition")
 
     def test_project_order_bundle_computes_primary_aggregates_and_mixed_flags(self):
         first_time = datetime(2026, 3, 20, 10, 0, tzinfo=timezone.utc)
@@ -282,6 +313,61 @@ class AdminGroupingTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["bundle_id"], "bundle-1")
         self.assertEqual(rows[0]["status"], "mixed")
+
+    def test_mark_picked_up_action_updates_group(self):
+        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        db = FakeSession([first, second])
+
+        result = admin_mark_order_picked_up("order-1", db=db, _={})
+
+        self.assertEqual(result["status"], OrderStatus.PICKED_UP)
+        self.assertEqual(first.status, OrderStatus.PICKED_UP)
+        self.assertEqual(second.status, OrderStatus.PICKED_UP)
+
+    def test_mark_no_show_action_updates_group(self):
+        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        db = FakeSession([first, second])
+
+        result = admin_mark_order_no_show("order-1", db=db, _={})
+
+        self.assertEqual(result["status"], OrderStatus.NO_SHOW)
+        self.assertEqual(first.status, OrderStatus.NO_SHOW)
+        self.assertEqual(second.status, OrderStatus.NO_SHOW)
+
+    def test_cancel_action_allows_mixed_bundle_when_all_lines_can_cancel(self):
+        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.PICKED_UP)
+        db = FakeSession([first, second])
+
+        result = admin_cancel_order("order-1", db=db, _={})
+
+        self.assertEqual(result["status"], OrderStatus.CANCELLED)
+        self.assertEqual(first.status, OrderStatus.CANCELLED)
+        self.assertEqual(second.status, OrderStatus.CANCELLED)
+
+    def test_restore_action_requires_cancelled_bundle(self):
+        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CANCELLED)
+        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        db = FakeSession([first, second])
+
+        with self.assertRaises(HTTPException) as exc_context:
+            admin_restore_order("order-1", RestoreStatusAction(target_status=OrderStatus.PICKED_UP), db=db, _={})
+
+        self.assertEqual(exc_context.exception.status_code, 409)
+        self.assertEqual(exc_context.exception.detail, "Only cancelled orders can be restored")
+
+    def test_restore_action_reopens_cancelled_group(self):
+        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CANCELLED)
+        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CANCELLED)
+        db = FakeSession([first, second])
+
+        result = admin_restore_order("order-1", RestoreStatusAction(target_status=OrderStatus.NO_SHOW), db=db, _={})
+
+        self.assertEqual(result["status"], OrderStatus.NO_SHOW)
+        self.assertEqual(first.status, OrderStatus.NO_SHOW)
+        self.assertEqual(second.status, OrderStatus.NO_SHOW)
 
     def test_admin_delete_order_bundle_rolls_back_on_commit_failure(self):
         first = make_order(id="order-1", group_id="bundle-1")

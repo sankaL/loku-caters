@@ -87,15 +87,6 @@ interface BundleEditModalProps {
   notify: (message: string, type: "success" | "error") => void;
 }
 
-function statusPatchSteps(targetStatus: string): string[] {
-  if (targetStatus === "pending") return [];
-  if (targetStatus === "confirmed") return ["confirmed"];
-  if (targetStatus === "picked_up") return ["confirmed", "picked_up"];
-  if (targetStatus === "no_show") return ["confirmed", "no_show"];
-  if (targetStatus === "cancelled") return ["cancelled"];
-  return [];
-}
-
 export default function BundleEditModal({
   isOpen,
   bundle,
@@ -322,7 +313,6 @@ export default function BundleEditModal({
       };
 
       const existingRows = [...lines];
-      const targetStatus = primaryLine.status;
       const lockedItemIds = new Set(editLegacyItems.map((item) => item.id));
       const lockedExistingRows = existingRows.filter((row) => lockedItemIds.has(row.item_id));
       const desiredEditableLines = desiredLines.filter((line) => !line.item.is_locked);
@@ -350,6 +340,10 @@ export default function BundleEditModal({
       let updatedCount = 0;
       let addedCount = 0;
       let removedCount = 0;
+
+      if (createLines.length > 0 && bundle.status === "mixed") {
+        throw new Error("Mixed-status bundles must be normalized before adding new lines");
+      }
 
       for (const assignment of assignments) {
         const unitPrice = isRandomOrder ? (editLinePrices[assignment.line.item.id] ?? assignment.line.item.price) : undefined;
@@ -386,18 +380,7 @@ export default function BundleEditModal({
         if (!response.ok) {
           throw new Error(await getApiErrorMessage(response, "Failed to create order item"));
         }
-        const createdRow = (await response.json()) as { id: string };
-
-        for (const status of statusPatchSteps(targetStatus)) {
-          const statusRes = await fetch(`${API_URL}/api/admin/orders/${createdRow.id}/status`, {
-            method: "PATCH",
-            headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ status }),
-          });
-          if (!statusRes.ok) {
-            throw new Error(await getApiErrorMessage(statusRes, "Failed to inherit order status"));
-          }
-        }
+        await response.json();
 
         addedCount += 1;
       }
