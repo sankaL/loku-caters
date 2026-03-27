@@ -8,6 +8,7 @@ import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import ItemQuantityPicker from "@/components/admin/orders/ItemQuantityPicker";
+import BundleEditModal from "@/components/admin/orders/BundleEditModal";
 import {
   getMinimumOrderQuantity,
   linesFromQuantities,
@@ -15,6 +16,40 @@ import {
 } from "@/lib/orderLineUtils";
 
 interface Order {
+  id: string;
+  bundle_id: string;
+  primary_order_id: string;
+  event_id: number;
+  group_id: string | null;
+  name: string;
+  email: string | null;
+  phone_number: string | null;
+  item_name?: string;
+  item_id?: string;
+  quantity?: number;
+  line_count: number;
+  quantity_total: number;
+  pickup_location: string;
+  pickup_time_slot: string;
+  pickup_address?: string | null;
+  pickup_date?: string | null;
+  total_price: number;
+  base_total_price?: number;
+  discount_total?: number;
+  pricing_meta?: Record<string, unknown>;
+  status: string;
+  status_breakdown?: Record<string, number>;
+  reminded: boolean;
+  paid: boolean;
+  payment_method: string | null;
+  payment_method_other: string | null;
+  notes?: string | null;
+  notes_mixed?: boolean;
+  exclude_email?: boolean;
+  created_at: string;
+}
+
+interface OrderLine {
   id: string;
   event_id: number;
   group_id: string | null;
@@ -27,11 +62,11 @@ interface Order {
   pickup_location: string;
   pickup_time_slot: string;
   pickup_address?: string | null;
+  pickup_date?: string | null;
   total_price: number;
-  pricing_meta?: Record<string, unknown>;
   status: string;
-  reminded: boolean;
   paid: boolean;
+  reminded: boolean;
   payment_method: string | null;
   payment_method_other: string | null;
   notes?: string | null;
@@ -48,6 +83,18 @@ interface AdminEvent {
 }
 
 type SortCol = "status" | "total" | "date" | "timeslot";
+type StatusActionKey =
+  | "cancel"
+  | "mark_picked_up"
+  | "mark_no_show"
+  | "normalize_confirmed"
+  | "restore_picked_up"
+  | "restore_no_show";
+type TablePrimaryAction =
+  | { kind: "confirm"; label: string }
+  | { kind: "status"; action: StatusActionKey; label: string }
+  | { kind: "review"; label: string }
+  | null;
 
 const PAGE_SIZE = 15;
 
@@ -57,6 +104,7 @@ const STATUS_STYLES: Record<string, { bg: string; color: string; label: string }
   picked_up: { bg: "#e0e7ff", color: "#3730a3", label: "Picked Up" },
   no_show:   { bg: "#fee2e2", color: "#991b1b", label: "No Show" },
   cancelled: { bg: "#f3f4f6", color: "#374151", label: "Cancelled" },
+  mixed: { bg: "#ede9fe", color: "#5b21b6", label: "Mixed" },
 };
 
 const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
@@ -65,7 +113,235 @@ const ALLOWED_STATUS_TRANSITIONS: Record<string, string[]> = {
   picked_up: ["picked_up", "no_show", "cancelled"],
   no_show: ["no_show", "picked_up", "cancelled"],
   cancelled: ["cancelled", "picked_up", "no_show"],
+  mixed: ["pending", "confirmed", "picked_up", "no_show", "cancelled"],
 };
+
+interface StatusActionSpec {
+  key: StatusActionKey;
+  label: string;
+  tone?: "default" | "danger";
+}
+
+function getReminderUnavailableReason(order: Order): string | null {
+  if (order.status !== "confirmed") return "Only confirmed bundles can be reminded";
+  if (order.reminded) return "Reminder already sent";
+  if (order.exclude_email) return "Email is excluded for this bundle";
+  if (!(order.email ?? "").trim()) return "Customer is missing an email address";
+  return null;
+}
+
+function getMixedBundleActionSpecs(order: Pick<Order, "status_breakdown">): StatusActionSpec[] {
+  const statuses = Object.keys(order.status_breakdown ?? {}).filter((status) => status in ALLOWED_STATUS_TRANSITIONS);
+  if (statuses.length === 0) return [];
+
+  let allowedTargets = new Set(ALLOWED_STATUS_TRANSITIONS[statuses[0]] ?? []);
+  for (const status of statuses.slice(1)) {
+    allowedTargets = new Set((ALLOWED_STATUS_TRANSITIONS[status] ?? []).filter((target) => allowedTargets.has(target)));
+  }
+
+  const actions: StatusActionSpec[] = [];
+  if (allowedTargets.has("confirmed")) {
+    actions.push({ key: "normalize_confirmed", label: "Normalize to Confirmed" });
+  }
+  if (allowedTargets.has("picked_up")) {
+    actions.push({ key: "mark_picked_up", label: "Normalize to Picked Up" });
+  }
+  if (allowedTargets.has("no_show")) {
+    actions.push({ key: "mark_no_show", label: "Normalize to No Show", tone: "danger" });
+  }
+  if (allowedTargets.has("cancelled")) {
+    actions.push({ key: "cancel", label: "Cancel Bundle", tone: "danger" });
+  }
+  return actions;
+}
+
+function getStatusActionSpecs(order: Order, context: "table" | "detail"): StatusActionSpec[] {
+  if (order.status === "pending") {
+    return [{ key: "cancel", label: "Cancel Bundle", tone: "danger" }];
+  }
+  if (order.status === "confirmed") {
+    return [
+      { key: "mark_picked_up", label: "Mark Picked Up" },
+      { key: "mark_no_show", label: "Mark No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "picked_up") {
+    return [
+      { key: "mark_no_show", label: "Correct to No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "no_show") {
+    return [
+      { key: "mark_picked_up", label: "Correct to Picked Up" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "cancelled") {
+    return [
+      { key: "restore_picked_up", label: "Restore to Picked Up" },
+      { key: "restore_no_show", label: "Restore to No Show" },
+    ];
+  }
+  if (order.status === "mixed" && context === "detail") {
+    return getMixedBundleActionSpecs(order);
+  }
+  return [];
+}
+
+function getStatusActionRequest(action: StatusActionKey): { method: "PATCH" | "POST"; endpoint: string; body?: Record<string, string> } {
+  if (action === "normalize_confirmed") {
+    return { method: "PATCH", endpoint: "status", body: { status: "confirmed" } };
+  }
+  if (action === "mark_picked_up") return { method: "POST", endpoint: "actions/mark-picked-up" };
+  if (action === "mark_no_show") return { method: "POST", endpoint: "actions/mark-no-show" };
+  if (action === "cancel") return { method: "POST", endpoint: "actions/cancel" };
+  if (action === "restore_picked_up") return { method: "POST", endpoint: "actions/restore", body: { target_status: "picked_up" } };
+  return { method: "POST", endpoint: "actions/restore", body: { target_status: "no_show" } };
+}
+
+function getStatusActionModalCopy(action: StatusActionKey, order: Pick<Order, "name" | "status">): { title: string; body: string; confirmLabel: string } {
+  if (action === "normalize_confirmed") {
+    return {
+      title: "Normalize to Confirmed",
+      body: `Set every line in ${order.name}'s bundle to confirmed?`,
+      confirmLabel: "Normalize bundle",
+    };
+  }
+
+  if (action === "mark_picked_up") {
+    if (order.status === "no_show") {
+      return {
+        title: "Correct to Picked Up",
+        body: `Mark ${order.name} as picked up instead of no show?`,
+        confirmLabel: "Mark picked up",
+      };
+    }
+    if (order.status === "mixed") {
+      return {
+        title: "Normalize to Picked Up",
+        body: `Set every line in ${order.name}'s bundle to picked up where the transition is allowed?`,
+        confirmLabel: "Normalize bundle",
+      };
+    }
+    return {
+      title: "Mark Picked Up",
+      body: `Confirm that ${order.name}'s bundle was collected?`,
+      confirmLabel: "Mark picked up",
+    };
+  }
+
+  if (action === "mark_no_show") {
+    if (order.status === "picked_up") {
+      return {
+        title: "Correct to No Show",
+        body: `Change ${order.name}'s bundle from picked up to no show?`,
+        confirmLabel: "Mark no show",
+      };
+    }
+    if (order.status === "mixed") {
+      return {
+        title: "Normalize to No Show",
+        body: `Set every line in ${order.name}'s bundle to no show where the transition is allowed?`,
+        confirmLabel: "Normalize bundle",
+      };
+    }
+    return {
+      title: "Mark No Show",
+      body: `Mark ${order.name}'s bundle as no show?`,
+      confirmLabel: "Mark no show",
+    };
+  }
+
+  if (action === "cancel") {
+    return {
+      title: "Cancel Bundle",
+      body: `Cancel ${order.name}'s bundle?`,
+      confirmLabel: "Cancel bundle",
+    };
+  }
+
+  if (action === "restore_picked_up") {
+    return {
+      title: "Restore to Picked Up",
+      body: `Restore ${order.name}'s cancelled bundle to picked up?`,
+      confirmLabel: "Restore bundle",
+    };
+  }
+
+  return {
+    title: "Restore to No Show",
+    body: `Restore ${order.name}'s cancelled bundle to no show?`,
+    confirmLabel: "Restore bundle",
+  };
+}
+
+function getStatusActionSuccessMessage(action: StatusActionKey): string {
+  if (action === "normalize_confirmed") return "Bundle normalized to confirmed";
+  if (action === "mark_picked_up") return "Bundle marked picked up";
+  if (action === "mark_no_show") return "Bundle marked no show";
+  if (action === "cancel") return "Bundle cancelled";
+  if (action === "restore_picked_up") return "Bundle restored to picked up";
+  return "Bundle restored to no show";
+}
+
+function getTablePrimaryAction(order: Order): TablePrimaryAction {
+  if (order.status === "pending") {
+    return { kind: "confirm", label: "Confirm" };
+  }
+  if (order.status === "confirmed") {
+    return { kind: "status", action: "mark_picked_up", label: "Picked Up" };
+  }
+  if (order.status === "no_show") {
+    return { kind: "status", action: "mark_picked_up", label: "Correct Pickup" };
+  }
+  if (order.status === "mixed") {
+    return { kind: "review", label: "Review" };
+  }
+  return null;
+}
+
+function getTableOverflowActions(order: Order): StatusActionSpec[] {
+  if (order.status === "pending") {
+    return [{ key: "cancel", label: "Cancel Bundle", tone: "danger" }];
+  }
+  if (order.status === "confirmed") {
+    return [
+      { key: "mark_picked_up", label: "Mark Picked Up" },
+      { key: "mark_no_show", label: "Mark No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "picked_up") {
+    return [
+      { key: "mark_no_show", label: "Correct to No Show", tone: "danger" },
+      { key: "cancel", label: "Cancel Bundle", tone: "danger" },
+    ];
+  }
+  if (order.status === "no_show") {
+    return [{ key: "cancel", label: "Cancel Bundle", tone: "danger" }];
+  }
+  if (order.status === "cancelled") {
+    return [
+      { key: "restore_picked_up", label: "Restore to Picked Up" },
+      { key: "restore_no_show", label: "Restore to No Show" },
+    ];
+  }
+  return [];
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const statusStyle = STATUS_STYLES[status] ?? STATUS_STYLES.pending;
+  return (
+    <span
+      className="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold"
+      style={{ background: statusStyle.bg, color: statusStyle.color }}
+    >
+      {statusStyle.label}
+    </span>
+  );
+}
 
 function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
   if (!active) {
@@ -84,12 +360,6 @@ function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
       }
     </svg>
   );
-}
-
-function csvEscape(value: string | number): string {
-  const normalized = String(value).replace(/"/g, "\"\"");
-  if (/[",\n\r]/.test(normalized)) return `"${normalized}"`;
-  return normalized;
 }
 
 const dropdownStyle: React.CSSProperties = {
@@ -123,17 +393,8 @@ function SelectChevron() {
   );
 }
 
-const BanknoteIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="2" y="6" width="20" height="12" rx="2" />
-    <circle cx="12" cy="12" r="2" />
-    <path d="M6 12h.01M18 12h.01" />
-  </svg>
-);
-
-const CashIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+const CashIcon = ({ width = 24, height = 24 }: { width?: number; height?: number }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox="0 0 24 24"
     fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="2" y="6" width="20" height="12" rx="2" />
     <circle cx="12" cy="12" r="2" />
@@ -141,8 +402,8 @@ const CashIcon = () => (
   </svg>
 );
 
-const EtransferIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+const EtransferIcon = ({ width = 24, height = 24 }: { width?: number; height?: number }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox="0 0 24 24"
     fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="2" y="5" width="20" height="14" rx="2" />
     <path d="M2 10h20" />
@@ -151,8 +412,8 @@ const EtransferIcon = () => (
   </svg>
 );
 
-const OtherPayIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+const OtherPayIcon = ({ width = 24, height = 24 }: { width?: number; height?: number }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox="0 0 24 24"
     fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <circle cx="12" cy="12" r="10" />
     <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
@@ -164,6 +425,14 @@ const BellIcon = ({ width = 16, height = 16 }: { width?: number; height?: number
   <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
     <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+  </svg>
+);
+
+const MoreIcon = ({ width = 16, height = 16 }: { width?: number; height?: number }) => (
+  <svg width={width} height={height} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <circle cx="5" cy="12" r="1" fill="currentColor" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" />
+    <circle cx="19" cy="12" r="1" fill="currentColor" />
   </svg>
 );
 
@@ -392,6 +661,45 @@ function getPaymentReminderUnavailableReason(order: Order): string | null {
   return null;
 }
 
+function getPaymentMethodLabel(
+  order: Pick<Order, "paid" | "payment_method" | "payment_method_other">
+): string | null {
+  if (!order.paid) return null;
+  if (order.payment_method === "cash") return "Cash";
+  if (order.payment_method === "etransfer") return "E-transfer";
+  if (order.payment_method === "other") {
+    const details = (order.payment_method_other ?? "").trim();
+    return details ? `Other: ${details}` : "Other";
+  }
+  const fallback = (order.payment_method ?? "").trim();
+  return fallback || "Method not set";
+}
+
+function PaymentMethodBadge({ order }: { order: Pick<Order, "paid" | "payment_method" | "payment_method_other"> }) {
+  const label = getPaymentMethodLabel(order);
+  if (!order.paid || !label) return null;
+
+  let icon = <OtherPayIcon width={16} height={16} />;
+  if (order.payment_method === "cash") icon = <CashIcon width={16} height={16} />;
+  if (order.payment_method === "etransfer") icon = <EtransferIcon width={16} height={16} />;
+
+  return (
+    <div
+      className="h-8 min-w-8 px-2 rounded-xl flex items-center justify-center border"
+      style={{
+        background: "white",
+        color: "var(--color-text)",
+        borderColor: "rgba(28,28,26,0.12)",
+        boxShadow: "0 1px 0 rgba(28,28,26,0.08), 0 4px 10px rgba(28,28,26,0.08)",
+      }}
+      title={label}
+      aria-label={label}
+    >
+      {icon}
+    </div>
+  );
+}
+
 function formatPickupLabel(order: Pick<Order, "pickup_location" | "pickup_time_slot" | "pickup_address">): string {
   const location = (order.pickup_location ?? "").trim();
   const timeSlot = (order.pickup_time_slot ?? "").trim();
@@ -400,8 +708,8 @@ function formatPickupLabel(order: Pick<Order, "pickup_location" | "pickup_time_s
   return address ? `${base} - ${address}` : base;
 }
 
-function getPaymentReminderRecipientKey(order: Pick<Order, "id" | "group_id">): string {
-  return order.group_id ? `group:${order.group_id}` : `order:${order.id}`;
+function getPaymentReminderRecipientKey(order: Pick<Order, "bundle_id">): string {
+  return `bundle:${order.bundle_id}`;
 }
 
 function normalizeCsvHeader(value: string): string {
@@ -433,7 +741,13 @@ function getTimeSlotStartMinutes(slot: string): number {
 
 export default function AdminOrdersPage() {
   const router = useRouter();
+  const [highlightBundleParam, setHighlightBundleParam] = useState<string | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [bundleLines, setBundleLines] = useState<OrderLine[]>([]);
+  const [selectedBundle, setSelectedBundle] = useState<Order | null>(null);
+  const [loadingBundleDetails, setLoadingBundleDetails] = useState(false);
+  const [showBundleDetailsModal, setShowBundleDetailsModal] = useState(false);
+  const [showEditBundleModal, setShowEditBundleModal] = useState(false);
   const [filter, setFilter] = useState<string>("all");
   const [paymentFilter, setPaymentFilter] = useState<string>("all");
   const [eventFilter, setEventFilter] = useState<string>("all");
@@ -442,6 +756,7 @@ export default function AdminOrdersPage() {
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState<string | null>(null);
+  const [sendingReminder, setSendingReminder] = useState<string | null>(null);
   const [updatingStatus, setUpdatingStatus] = useState<string | null>(null);
   const [updatingPayment, setUpdatingPayment] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -453,6 +768,8 @@ export default function AdminOrdersPage() {
 
   // Single delete modal
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<Order | null>(null);
+  const [statusActionTarget, setStatusActionTarget] = useState<{ order: Order; action: StatusActionKey } | null>(null);
 
   // Payment modals
   const [paymentTarget, setPaymentTarget] = useState<Order | null>(null);
@@ -464,8 +781,12 @@ export default function AdminOrdersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [showBulkConfirmModal, setShowBulkConfirmModal] = useState(false);
+  const [showBulkPickedUpModal, setShowBulkPickedUpModal] = useState(false);
+  const [showBulkCancelModal, setShowBulkCancelModal] = useState(false);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [bulkConfirming, setBulkConfirming] = useState(false);
+  const [bulkMarkingPickedUp, setBulkMarkingPickedUp] = useState(false);
+  const [bulkCancelling, setBulkCancelling] = useState(false);
 
   // Add order modal
   const [showAddOrderChoiceModal, setShowAddOrderChoiceModal] = useState(false);
@@ -497,6 +818,10 @@ export default function AdminOrdersPage() {
   const [remindSelections, setRemindSelections] = useState<Set<string>>(new Set());
   const [reminderRun, setReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
   const [remindSearch, setRemindSearch] = useState("");
+  const [showReminderMenu, setShowReminderMenu] = useState(false);
+  const reminderMenuRef = useRef<HTMLDivElement | null>(null);
+  const [openActionMenuId, setOpenActionMenuId] = useState<string | null>(null);
+  const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const remindLoading = reminderRun.isRunning;
 
   // Payment reminder modal
@@ -504,7 +829,6 @@ export default function AdminOrdersPage() {
   const [paymentRemindSelections, setPaymentRemindSelections] = useState<Set<string>>(new Set());
   const [paymentReminderRun, setPaymentReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
   const [paymentRemindSearch, setPaymentRemindSearch] = useState("");
-  const [paymentReminderTarget, setPaymentReminderTarget] = useState<Order | null>(null);
   const paymentReminderLoading = paymentReminderRun.isRunning;
 
   // Reset selection when filter/orders change
@@ -516,10 +840,56 @@ export default function AdminOrdersPage() {
     setLocationFilter("all");
   }, [eventFilter]);
 
-  const showToast = (message: string, type: "success" | "error") => {
+  useEffect(() => {
+    if (!showReminderMenu) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!reminderMenuRef.current?.contains(event.target as Node)) {
+        setShowReminderMenu(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowReminderMenu(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showReminderMenu]);
+
+  useEffect(() => {
+    if (!openActionMenuId) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!actionMenuRef.current?.contains(event.target as Node)) {
+        setOpenActionMenuId(null);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenActionMenuId(null);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [openActionMenuId]);
+
+  const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
     setTimeout(() => setToast(null), 4000);
-  };
+  }, []);
 
   // Fetch all events for label + filtering
   useEffect(() => {
@@ -538,7 +908,7 @@ export default function AdminOrdersPage() {
       }
     }
     loadEvents();
-  }, []);
+  }, [showToast]);
 
   useEffect(() => {
     async function loadCatalogs() {
@@ -662,6 +1032,7 @@ export default function AdminOrdersPage() {
       const token = await getAdminToken();
       if (!token) return false;
       const qs = new URLSearchParams();
+      qs.set("view", "bundle");
       if (filter !== "all") qs.set("status", filter);
       if (paymentFilter === "paid") qs.set("paid", "true");
       if (paymentFilter === "unpaid") qs.set("paid", "false");
@@ -671,7 +1042,8 @@ export default function AdminOrdersPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to fetch orders");
-      setOrders(await res.json());
+      const rows = (await res.json()) as Order[];
+      setOrders(Array.isArray(rows) ? rows : []);
       setPage(1);
       return true;
     } catch {
@@ -682,10 +1054,58 @@ export default function AdminOrdersPage() {
     } finally {
       setLoading(false);
     }
-  }, [filter, paymentFilter, eventFilter]);
+  }, [eventFilter, filter, paymentFilter, showToast]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setHighlightBundleParam(params.get("highlight_bundle"));
+  }, []);
+
+  const fetchBundleDetails = useCallback(async (bundle: Order) => {
+    setLoadingBundleDetails(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/bundles/${encodeURIComponent(bundle.bundle_id)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to load bundle details"));
+      }
+      const payload = (await res.json()) as { bundle?: Order; lines?: OrderLine[] };
+      const nextBundle = payload.bundle ?? bundle;
+      setSelectedBundle(nextBundle);
+      setBundleLines(Array.isArray(payload.lines) ? payload.lines : []);
+      setShowBundleDetailsModal(true);
+      return true;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to load bundle details", "error");
+      return false;
+    } finally {
+      setLoadingBundleDetails(false);
+    }
+  }, [showToast]);
+
+  useEffect(() => {
+    const highlightBundle = highlightBundleParam;
+    if (!highlightBundle || orders.length === 0 || showBundleDetailsModal) return;
+    const matched = orders.find((order) => order.bundle_id === highlightBundle);
+    if (!matched) return;
+    void (async () => {
+      const opened = await fetchBundleDetails(matched);
+      if (!opened) return;
+      const nextParams = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+      nextParams.delete("highlight_bundle");
+      nextParams.delete("order_id");
+      const query = nextParams.toString();
+      router.replace(`/admin/orders${query ? `?${query}` : ""}`, { scroll: false });
+      setHighlightBundleParam(null);
+    })();
+  }, [fetchBundleDetails, highlightBundleParam, orders, router, showBundleDetailsModal]);
 
   const eventLabelById = useMemo(() => {
     const map = new Map<number, string>();
@@ -797,7 +1217,7 @@ export default function AdminOrdersPage() {
       seenRecipientKeys.add(recipientKey);
       recipients.push({
         recipientKey,
-        orderId: order.id,
+        orderId: getOrderActionId(order),
         name: order.name,
         email: (order.email ?? "").trim(),
         pickupLabel: formatPickupLabel(order),
@@ -812,6 +1232,22 @@ export default function AdminOrdersPage() {
     [paymentReminderRecipients]
   );
   const ineligiblePaymentReminderCount = paymentReminderRecipients.length - eligiblePaymentReminderRecipients.length;
+  const selectedOrders = useMemo(
+    () => orders.filter((order) => selectedIds.has(order.id)),
+    [orders, selectedIds]
+  );
+  const bulkConfirmableOrders = useMemo(
+    () => selectedOrders.filter((order) => order.status === "pending"),
+    [selectedOrders]
+  );
+  const bulkPickedUpOrders = useMemo(
+    () => selectedOrders.filter((order) => order.status === "confirmed"),
+    [selectedOrders]
+  );
+  const bulkCancelableOrders = useMemo(
+    () => selectedOrders.filter((order) => order.status !== "mixed" && ["pending", "confirmed", "picked_up", "no_show"].includes(order.status)),
+    [selectedOrders]
+  );
 
   const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const paginated = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -823,6 +1259,10 @@ export default function AdminOrdersPage() {
       : { col, dir: "asc" }
     );
     setPage(1);
+  }
+
+  function getOrderActionId(order: Pick<Order, "id" | "primary_order_id">): string {
+    return (order.primary_order_id ?? "").trim() || order.id;
   }
 
   async function handleConfirm(orderId: string) {
@@ -846,6 +1286,9 @@ export default function AdminOrdersPage() {
         showToast("Order confirmed, but email failed to send", "error");
       }
       await fetchOrders();
+      if (selectedBundle && getOrderActionId(selectedBundle) === orderId) {
+        await fetchBundleDetails(selectedBundle);
+      }
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to send email", "error");
     } finally {
@@ -853,28 +1296,74 @@ export default function AdminOrdersPage() {
     }
   }
 
-  async function handleStatusChange(orderId: string, newStatus: string) {
+  async function handleSendSingleReminder(target: Order): Promise<boolean> {
+    const orderId = getOrderActionId(target);
+    setSendingReminder(orderId);
+    try {
+      const token = await getAdminToken();
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/remind`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) {
+        throw new Error(await getApiErrorMessage(res, "Failed to send reminder"));
+      }
+      const data = await res.json() as ReminderSendResponse;
+      if (data.status !== "sent") {
+        showToast(data.message || "Reminder skipped", "error");
+        return false;
+      }
+      showToast("Reminder sent", "success");
+      await fetchOrders();
+      if (selectedBundle?.bundle_id === target.bundle_id) {
+        await fetchBundleDetails(target);
+      }
+      return true;
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Failed to send reminder", "error");
+      return false;
+    } finally {
+      setSendingReminder(null);
+    }
+  }
+
+  async function handleStatusAction(
+    order: Order,
+    action: StatusActionKey,
+    options?: { skipRefresh?: boolean; skipToast?: boolean }
+  ): Promise<boolean> {
+    const orderId = getOrderActionId(order);
+    const request = getStatusActionRequest(action);
     setUpdatingStatus(orderId);
     try {
       const token = await getAdminToken();
-      if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/status`, {
-        method: "PATCH",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ status: newStatus }),
+      if (!token) return false;
+      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}/${request.endpoint}`, {
+        method: request.method,
+        headers: request.body
+          ? { Authorization: `Bearer ${token}`, "Content-Type": "application/json" }
+          : { Authorization: `Bearer ${token}` },
+        body: request.body ? JSON.stringify(request.body) : undefined,
       });
       if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to update status"));
+        throw new Error(await getApiErrorMessage(res, "Failed to update bundle status"));
       }
-      setOrders((prev) => {
-        if (filter !== "all" && newStatus !== filter) {
-          return prev.filter((o) => o.id !== orderId);
+      if (!options?.skipToast) {
+        showToast(getStatusActionSuccessMessage(action), "success");
+      }
+      if (!options?.skipRefresh) {
+        await fetchOrders();
+        if (selectedBundle?.bundle_id === order.bundle_id) {
+          await fetchBundleDetails(order);
         }
-        return prev.map((o) => (o.id === orderId ? { ...o, status: newStatus } : o));
-      });
-      showToast("Status updated", "success");
+      }
+      return true;
     } catch (err) {
-      showToast(err instanceof Error ? err.message : "Failed to update status", "error");
+      if (!options?.skipToast) {
+        showToast(err instanceof Error ? err.message : "Failed to update bundle status", "error");
+      }
+      return false;
     } finally {
       setUpdatingStatus(null);
     }
@@ -917,6 +1406,16 @@ export default function AdminOrdersPage() {
             : o
         );
       });
+      setSelectedBundle((prev) => (
+        prev && getOrderActionId(prev) === orderId
+          ? {
+            ...prev,
+            paid: nextPaid,
+            payment_method: data.payment_method ?? null,
+            payment_method_other: data.payment_method_other ?? null,
+          }
+          : prev
+      ));
 
       showToast(nextPaid ? "Marked paid" : "Marked unpaid", "success");
       return true;
@@ -928,20 +1427,56 @@ export default function AdminOrdersPage() {
     }
   }
 
+  function openMarkPaidModal(order: Order) {
+    setPaymentTarget(order);
+    setPaymentMethod("cash");
+    setPaymentMethodOther("");
+  }
+
+  async function handleSendSinglePaymentReminder(target: Order): Promise<boolean> {
+    const items = buildPaymentReminderItems([target.id]);
+    if (items.length === 0) {
+      showToast("Payment reminder is not available for this order", "error");
+      return false;
+    }
+
+    setPaymentTarget(null);
+    setPaymentRemindSearch("");
+    setPaymentRemindSelections(new Set());
+    setPaymentReminderRun(EMPTY_REMINDER_RUN);
+    setShowPaymentRemindModal(true);
+
+    await executeQueueRun({
+      itemsToTrack: items,
+      orderIdsToProcess: items.map((item) => item.orderId),
+      setRun: setPaymentReminderRun,
+      sendAttempt: sendPaymentReminderAttempt,
+      intervalMs: PAYMENT_REMINDER_SEND_INTERVAL_MS,
+      noun: "payment reminder",
+    });
+    return true;
+  }
+
   async function executeDelete(orderId: string) {
     setDeleting(orderId);
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/orders/${orderId}`, {
+      const bundleId = orders.find((order) => order.id === orderId)?.bundle_id ?? orderId;
+      const res = await fetch(`${API_URL}/api/admin/orders/bundles/${encodeURIComponent(bundleId)}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to delete order"));
+        throw new Error(await getApiErrorMessage(res, "Failed to delete order bundle"));
       }
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
-      showToast("Order deleted", "success");
+      setOrders((prev) => prev.filter((order) => order.bundle_id !== bundleId));
+      if (selectedBundle?.bundle_id === bundleId) {
+        setShowBundleDetailsModal(false);
+        setSelectedBundle(null);
+        setBundleLines([]);
+      }
+      showToast("Order bundle deleted", "success");
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to delete order", "error");
     } finally {
@@ -956,26 +1491,36 @@ export default function AdminOrdersPage() {
     try {
       const token = await getAdminToken();
       if (!token) return;
+      const selectedBundles = Array.from(
+        new Set(
+          ids.map((id) => orders.find((order) => order.id === id)?.bundle_id ?? id)
+        )
+      );
       const results = await Promise.allSettled(
-        ids.map(async (id) => {
-          const res = await fetch(`${API_URL}/api/admin/orders/${id}`, {
+        selectedBundles.map(async (bundleId) => {
+          const res = await fetch(`${API_URL}/api/admin/orders/bundles/${encodeURIComponent(bundleId)}`, {
             method: "DELETE",
             headers: { Authorization: `Bearer ${token}` },
           });
-          return { id, ok: res.ok };
+          return { bundleId, ok: res.ok };
         })
       );
       const succeededIds = results.flatMap((result) =>
-        result.status === "fulfilled" && result.value.ok ? [result.value.id] : []
+        result.status === "fulfilled" && result.value.ok ? [result.value.bundleId] : []
       );
       const succeededSet = new Set(succeededIds);
-      setOrders((prev) => prev.filter((o) => !succeededSet.has(o.id)));
+      setOrders((prev) => prev.filter((order) => !succeededSet.has(order.bundle_id)));
+      if (selectedBundle && succeededSet.has(selectedBundle.bundle_id)) {
+        setShowBundleDetailsModal(false);
+        setSelectedBundle(null);
+        setBundleLines([]);
+      }
       setSelectedIds(new Set());
-      const failed = ids.length - succeededIds.length;
+      const failed = selectedBundles.length - succeededIds.length;
       if (failed > 0) {
         showToast(`Deleted ${succeededIds.length}, failed ${failed}`, "error");
       } else {
-        showToast(`Deleted ${succeededIds.length} order${succeededIds.length !== 1 ? "s" : ""}`, "success");
+        showToast(`Deleted ${succeededIds.length} bundle${succeededIds.length !== 1 ? "s" : ""}`, "success");
       }
     } catch {
       showToast("Bulk delete failed", "error");
@@ -987,7 +1532,7 @@ export default function AdminOrdersPage() {
   async function executeBulkConfirm() {
     setBulkConfirming(true);
     setShowBulkConfirmModal(false);
-    const ids = Array.from(selectedIds);
+    const ids = bulkConfirmableOrders.map((order) => getOrderActionId(order));
     try {
       const token = await getAdminToken();
       if (!token) return;
@@ -1018,6 +1563,37 @@ export default function AdminOrdersPage() {
     }
   }
 
+  async function executeBulkStatusAction(action: "mark_picked_up" | "cancel") {
+    const targetOrders = action === "mark_picked_up" ? bulkPickedUpOrders : bulkCancelableOrders;
+    const setLoadingState = action === "mark_picked_up" ? setBulkMarkingPickedUp : setBulkCancelling;
+    const closeModal = action === "mark_picked_up" ? setShowBulkPickedUpModal : setShowBulkCancelModal;
+    const noun = action === "mark_picked_up" ? "marked picked up" : "cancelled";
+
+    setLoadingState(true);
+    closeModal(false);
+    try {
+      const results = await Promise.allSettled(
+        targetOrders.map((order) => handleStatusAction(order, action, { skipRefresh: true, skipToast: true }))
+      );
+      const succeeded = results.reduce((count, result) => (
+        result.status === "fulfilled" && result.value ? count + 1 : count
+      ), 0);
+      const failed = targetOrders.length - succeeded;
+      setSelectedIds(new Set());
+      await fetchOrders();
+      if (selectedBundle && targetOrders.some((order) => order.bundle_id === selectedBundle.bundle_id)) {
+        await refreshSelectedBundleDetails();
+      }
+      if (failed > 0) {
+        showToast(`Bulk action ${noun} ${succeeded}, failed ${failed}`, "error");
+      } else {
+        showToast(`Bulk action ${noun} ${succeeded} bundle${succeeded !== 1 ? "s" : ""}`, "success");
+      }
+    } finally {
+      setLoadingState(false);
+    }
+  }
+
   function closeRemindModal() {
     if (remindLoading) return;
     setShowRemindModal(false);
@@ -1027,6 +1603,7 @@ export default function AdminOrdersPage() {
   }
 
   function openRemindModal() {
+    setShowReminderMenu(false);
     setRemindSelections(new Set(eligibleReminderOrders.map((o) => o.id)));
     setRemindSearch("");
     setReminderRun(EMPTY_REMINDER_RUN);
@@ -1042,10 +1619,25 @@ export default function AdminOrdersPage() {
   }
 
   function openPaymentRemindModal() {
+    setShowReminderMenu(false);
     setPaymentRemindSelections(new Set(eligiblePaymentReminderRecipients.map((recipient) => recipient.orderId)));
     setPaymentRemindSearch("");
     setPaymentReminderRun(EMPTY_REMINDER_RUN);
     setShowPaymentRemindModal(true);
+  }
+
+  function closeBundleDetailsModal() {
+    if (loadingBundleDetails) return;
+    setShowBundleDetailsModal(false);
+    setSelectedBundle(null);
+    setBundleLines([]);
+    setShowEditBundleModal(false);
+  }
+
+  async function refreshSelectedBundleDetails() {
+    if (!selectedBundle) return;
+    const refreshed = orders.find((order) => order.bundle_id === selectedBundle.bundle_id) ?? selectedBundle;
+    await fetchBundleDetails(refreshed);
   }
 
   function buildReminderItems(orderIds: string[]): ReminderQueueItem[] {
@@ -1473,33 +2065,6 @@ export default function AdminOrdersPage() {
     });
   }
 
-  async function handleConfirmSinglePaymentReminder() {
-    const target = paymentReminderTarget;
-    if (!target) return;
-
-    const items = buildPaymentReminderItems([target.id]);
-    if (items.length === 0) {
-      showToast("Payment reminder is not available for this order", "error");
-      setPaymentReminderTarget(null);
-      return;
-    }
-
-    setPaymentReminderTarget(null);
-    setPaymentRemindSearch("");
-    setPaymentRemindSelections(new Set());
-    setPaymentReminderRun(EMPTY_REMINDER_RUN);
-    setShowPaymentRemindModal(true);
-
-    await executeQueueRun({
-      itemsToTrack: items,
-      orderIdsToProcess: items.map((item) => item.orderId),
-      setRun: setPaymentReminderRun,
-      sendAttempt: sendPaymentReminderAttempt,
-      intervalMs: PAYMENT_REMINDER_SEND_INTERVAL_MS,
-      noun: "payment reminder",
-    });
-  }
-
   async function handleAddOrder(e: React.FormEvent) {
     e.preventDefault();
     if (addModalEventId === null) {
@@ -1528,6 +2093,7 @@ export default function AdminOrdersPage() {
     try {
       const token = await getAdminToken();
       if (!token) return;
+      const groupId = selectedLines.length > 1 ? crypto.randomUUID() : null;
 
       const createResults = await Promise.allSettled(
         selectedLines.map(async ({ item, qty }) => {
@@ -1539,10 +2105,11 @@ export default function AdminOrdersPage() {
               item_id: item.id,
               quantity: qty,
               event_id: addModalEventId,
+              group_id: groupId,
             }),
           });
           if (!res.ok) {
-            throw new Error(await getApiErrorMessage(res, `Failed to create line for ${item.name}`));
+            throw new Error(await getApiErrorMessage(res, `Failed to create item for ${item.name}`));
           }
           return true;
         })
@@ -1560,12 +2127,12 @@ export default function AdminOrdersPage() {
             nextQuantities[item.id] = qty;
           }
           setAddOrderQuantities(nextQuantities);
-          setAddOrderItemsError("Some lines were created. Only failed lines remain selected for retry.");
+          setAddOrderItemsError("Some items were created. Only failed items remain selected for retry.");
         }
       }
 
       if (failed === 0) {
-        showToast(`Created ${succeeded} order line${succeeded !== 1 ? "s" : ""}`, "success");
+        showToast(`Created ${succeeded} order item${succeeded !== 1 ? "s" : ""}`, "success");
         setShowAddOrderModal(false);
         setAddOrderForm(EMPTY_ADD_FORM);
         setAddOrderQuantities({});
@@ -1657,7 +2224,7 @@ export default function AdminOrdersPage() {
             }),
           });
           if (!res.ok) {
-            throw new Error(await getApiErrorMessage(res, `Failed to create line for ${item.name}`));
+            throw new Error(await getApiErrorMessage(res, `Failed to create item for ${item.name}`));
           }
           return true;
         })
@@ -1675,12 +2242,12 @@ export default function AdminOrdersPage() {
             nextQuantities[item.id] = qty;
           }
           setRandomOrderQuantities(nextQuantities);
-          setRandomOrderItemsError("Some lines were created. Only failed lines remain selected for retry.");
+          setRandomOrderItemsError("Some items were created. Only failed items remain selected for retry.");
         }
       }
 
       if (failed === 0) {
-        showToast(`Created ${succeeded} random request line${succeeded !== 1 ? "s" : ""}`, "success");
+        showToast(`Created ${succeeded} random request item${succeeded !== 1 ? "s" : ""}`, "success");
         resetRandomOrderModalState();
         return;
       }
@@ -1824,65 +2391,13 @@ export default function AdminOrdersPage() {
     });
   }
 
-  function handleExportCsv() {
-    if (sorted.length === 0) {
-      showToast("No orders to export", "error");
-      return;
-    }
-
-    const headers = [
-      "Order ID",
-      "Name",
-      "Email",
-      "Phone",
-      "Item",
-      "Event",
-      "Quantity",
-      "Pickup Location",
-      "Pickup Time Slot",
-      "Total Price",
-      "Status",
-      "Paid",
-      "Payment Method",
-      "Payment Method Other",
-      "Created At",
-    ];
-
-    const rows = sorted.map((order) => [
-      order.id,
-      order.name,
-      order.email ?? "",
-      order.phone_number ?? "",
-      order.item_name,
-      eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`,
-      order.quantity,
-      order.pickup_location,
-      order.pickup_time_slot,
-      order.total_price.toFixed(2),
-      order.status,
-      order.paid ? "TRUE" : "FALSE",
-      order.payment_method ?? "",
-      order.payment_method_other ?? "",
-      order.created_at,
-    ]);
-
-    const csv = [headers, ...rows]
-      .map((row) => row.map((value) => csvEscape(value)).join(","))
-      .join("\n");
-
-    const blob = new Blob(["\uFEFF", csv], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    const timestamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-
-    link.href = url;
-    link.download = `orders-${filter}-${timestamp}.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-
-    showToast(`Exported ${sorted.length} order${sorted.length === 1 ? "" : "s"}`, "success");
+  function formatMoney(value: number) {
+    return new Intl.NumberFormat("en-CA", {
+      style: "currency",
+      currency: CURRENCY,
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }).format(value);
   }
 
   // Checkbox select-all (current page)
@@ -1922,7 +2437,7 @@ export default function AdminOrdersPage() {
     });
   }
 
-  const thBase = "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider";
+  const thBase = "px-3 md:px-4 py-3 text-left text-[11px] md:text-xs font-semibold uppercase tracking-wider";
 
   // Time slots for selected location in the add order form
   const addOrderTimeSlots = useMemo(() => {
@@ -2077,29 +2592,56 @@ export default function AdminOrdersPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={openPaymentRemindModal}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
-            style={{ background: "white", color: "var(--color-bark)", border: "1px solid var(--color-border)" }}
-          >
-            <BellIcon width={14} height={14} />
-            Payment Reminder
-          </button>
-          <button
-            onClick={openRemindModal}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
-            style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </svg>
-            Remind
-          </button>
+          <div className="relative" ref={reminderMenuRef}>
+            <button
+              onClick={() => setShowReminderMenu((prev) => !prev)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
+              style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+              aria-haspopup="menu"
+              aria-expanded={showReminderMenu}
+            >
+              <BellIcon width={14} height={14} />
+              Remind
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {showReminderMenu && (
+              <div
+                role="menu"
+                className="absolute right-0 mt-2 w-56 rounded-2xl p-2"
+                style={{
+                  background: "white",
+                  border: "1px solid var(--color-border)",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.12)",
+                  zIndex: 20,
+                }}
+              >
+                <button
+                  onClick={openRemindModal}
+                  className="w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium"
+                  style={{ color: "var(--color-text)" }}
+                  role="menuitem"
+                >
+                  <BellIcon width={15} height={15} />
+                  Pickup reminder
+                </button>
+                <button
+                  onClick={openPaymentRemindModal}
+                  className="w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium"
+                  style={{ color: "var(--color-text)" }}
+                  role="menuitem"
+                >
+                  <BellIcon width={15} height={15} />
+                  Payment reminder
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowAddOrderChoiceModal(true)}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
-            style={{ background: "var(--color-forest)", color: "var(--color-cream)", border: "1px solid var(--color-forest)" }}
+            style={{ background: "#F2AF29", color: "#1C1C1A", border: "1px solid #F2AF29" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
@@ -2107,7 +2649,10 @@ export default function AdminOrdersPage() {
             Add Order
           </button>
           <button
-            onClick={() => { setShowBulkImportModal(true); setBulkImportRows([]); }}
+            onClick={() => {
+              setBulkImportRows([]);
+              setShowBulkImportModal(true);
+            }}
             className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2"
             style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
           >
@@ -2236,26 +2781,17 @@ export default function AdminOrdersPage() {
             void fetchOrders();
           }}
           className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 w-full sm:w-auto"
-          style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+          style={{
+            background: "#111111",
+            color: "white",
+            border: "1px solid #111111",
+            boxShadow: "0 2px 0 rgba(0,0,0,0.45), 0 8px 16px rgba(0,0,0,0.16)",
+          }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
           </svg>
           Refresh
-        </button>
-
-        <button
-          onClick={handleExportCsv}
-          disabled={loading || sorted.length === 0}
-          className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center justify-center gap-2 w-full sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-          style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 3v12" />
-            <path d="M7 10l5 5 5-5" />
-            <path d="M4 21h16" />
-          </svg>
-          Export CSV
         </button>
       </div>
 
@@ -2264,7 +2800,7 @@ export default function AdminOrdersPage() {
         <p className="text-xs mb-3" style={{ color: "var(--color-muted)" }}>
           {search
             ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""} for "${search}"`
-            : `${filtered.length} order${filtered.length !== 1 ? "s" : ""}`}
+            : `${filtered.length} bundle${filtered.length !== 1 ? "s" : ""}`}
           {totalPages > 1 && ` - page ${page} of ${totalPages}`}
         </p>
       )}
@@ -2275,15 +2811,37 @@ export default function AdminOrdersPage() {
           className="flex items-center gap-3 px-4 py-3 rounded-xl mb-3 text-sm font-medium"
           style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
         >
-          <span className="flex-1">{selectedIds.size} order{selectedIds.size !== 1 ? "s" : ""} selected</span>
-          <button
-            onClick={() => setShowBulkConfirmModal(true)}
-            disabled={bulkConfirming}
-            className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
-            style={{ background: "rgba(255,255,255,0.15)", color: "var(--color-cream)" }}
-          >
-            {bulkConfirming ? "Confirming..." : "Confirm Selected"}
-          </button>
+          <span className="flex-1">{selectedIds.size} bundle{selectedIds.size !== 1 ? "s" : ""} selected</span>
+          {bulkConfirmableOrders.length > 0 && (
+            <button
+              onClick={() => setShowBulkConfirmModal(true)}
+              disabled={bulkConfirming}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+              style={{ background: "rgba(255,255,255,0.15)", color: "var(--color-cream)" }}
+            >
+              {bulkConfirming ? "Confirming..." : `Confirm (${bulkConfirmableOrders.length})`}
+            </button>
+          )}
+          {bulkPickedUpOrders.length > 0 && (
+            <button
+              onClick={() => setShowBulkPickedUpModal(true)}
+              disabled={bulkMarkingPickedUp}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+              style={{ background: "rgba(255,255,255,0.15)", color: "var(--color-cream)" }}
+            >
+              {bulkMarkingPickedUp ? "Updating..." : `Picked Up (${bulkPickedUpOrders.length})`}
+            </button>
+          )}
+          {bulkCancelableOrders.length > 0 && (
+            <button
+              onClick={() => setShowBulkCancelModal(true)}
+              disabled={bulkCancelling}
+              className="px-3 py-1.5 rounded-lg text-xs font-semibold transition-all disabled:opacity-60"
+              style={{ background: "rgba(220,38,38,0.3)", color: "#fecaca" }}
+            >
+              {bulkCancelling ? "Cancelling..." : `Cancel (${bulkCancelableOrders.length})`}
+            </button>
+          )}
           <button
             onClick={() => setShowBulkDeleteModal(true)}
             disabled={bulkDeleting}
@@ -2317,15 +2875,15 @@ export default function AdminOrdersPage() {
         ) : paginated.length === 0 ? (
           <div className="text-center py-16">
             <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-              {search ? `No orders match "${search}".` : "No orders found."}
+              {search ? `No bundles match "${search}".` : "No bundles found."}
             </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[760px] lg:min-w-0 text-sm">
               <thead>
                 <tr style={{ background: "var(--color-cream)", borderBottom: "1px solid var(--color-border)" }}>
-                  <th className="px-4 py-3 w-10">
+                  <th className="px-3 md:px-4 py-3 w-10">
                     <input
                       ref={selectAllRef}
                       type="checkbox"
@@ -2336,16 +2894,14 @@ export default function AdminOrdersPage() {
                     />
                   </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Name</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Item</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Event</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Location</th>
+                  <th className={`${thBase} hidden lg:table-cell`} style={{ color: "var(--color-muted)" }}>Contact</th>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Items</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
                     <button
                       onClick={() => toggleSort("timeslot")}
                       className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
                     >
-                      Time Slot <SortIcon active={sort.col === "timeslot"} dir={sort.dir} />
+                      Pickup <SortIcon active={sort.col === "timeslot"} dir={sort.dir} />
                     </button>
                   </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
@@ -2364,9 +2920,8 @@ export default function AdminOrdersPage() {
                       Status <SortIcon active={sort.col === "status"} dir={sort.dir} />
                     </button>
                   </th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Paid</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Method</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Payment</th>
+                  <th className={`${thBase} hidden xl:table-cell`} style={{ color: "var(--color-muted)" }}>
                     <span className="flex items-center gap-1 uppercase tracking-wider font-semibold" title="Reminded">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -2374,34 +2929,33 @@ export default function AdminOrdersPage() {
                       </svg>
                     </span>
                   </th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                  <th className={`${thBase} hidden md:table-cell`} style={{ color: "var(--color-muted)" }}>
                     <button
                       onClick={() => toggleSort("date")}
                       className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
                     >
-                      Date <SortIcon active={sort.col === "date"} dir={sort.dir} />
+                      Order Date <SortIcon active={sort.col === "date"} dir={sort.dir} />
                     </button>
                   </th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Action</th>
+                  <th className={`${thBase} text-right`} style={{ color: "var(--color-muted)" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {paginated.map((order, idx) => {
-                  const statusStyle = STATUS_STYLES[order.status] ?? STATUS_STYLES.pending;
-                  const isConfirming = confirming === order.id;
-                  const isUpdatingStatus = updatingStatus === order.id;
-                  const isUpdatingPayment = updatingPayment === order.id;
-                  const isDeleting = deleting === order.id;
+                  const actionId = getOrderActionId(order);
+                  const isConfirming = confirming === actionId;
+                  const isSendingReminder = sendingReminder === actionId;
+                  const isUpdatingStatus = updatingStatus === actionId;
+                  const isUpdatingPayment = updatingPayment === actionId;
+                  const isDeleting = deleting === actionId;
                   const isSelected = selectedIds.has(order.id);
-                  const paymentReminderDisabledReason = getPaymentReminderUnavailableReason(order);
-                  const canSendPaymentReminder = !paymentReminderDisabledReason;
-                  const paymentReminderTitle = order.paid
-                    ? "Payment reminder is only available for unpaid orders"
-                    : paymentReminderDisabledReason ?? "Send payment reminder";
+                  const primaryAction = getTablePrimaryAction(order);
+                  const overflowActions = getTableOverflowActions(order);
+                  const isActionMenuOpen = openActionMenuId === actionId;
                   return (
                     <tr
                       key={order.id}
-                      onClick={() => router.push(`/admin/orders/${order.id}`)}
+                      onClick={() => { void fetchBundleDetails(order); }}
                       className="cursor-pointer transition-colors"
                       style={{
                         borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none",
@@ -2414,7 +2968,7 @@ export default function AdminOrdersPage() {
                         (e.currentTarget as HTMLTableRowElement).style.background = isSelected ? "rgba(114,145,82,0.06)" : "transparent";
                       }}
                     >
-                      <td className="px-4 py-3 w-10" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 md:px-4 py-3 w-10 align-top" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -2423,10 +2977,24 @@ export default function AdminOrdersPage() {
                           aria-label={`Select order ${order.id}`}
                         />
                       </td>
-                      <td className="px-4 py-3 font-medium" style={{ color: "var(--color-text)" }}>
-                        {order.name}
+                      <td className="px-3 md:px-4 py-3 font-medium align-top" style={{ color: "var(--color-text)" }}>
+                        <div>{order.name}</div>
+                        <div className="lg:hidden mt-1 space-y-1 text-xs font-normal" style={{ color: "var(--color-muted)" }}>
+                          {(order.email || !order.exclude_email) && (
+                            <div className="break-all">{order.email ?? "-"}</div>
+                          )}
+                          {order.phone_number && <div>{order.phone_number}</div>}
+                          {order.exclude_email && (
+                            <span
+                              className="inline-flex text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                              style={{ background: "#f3f4f6", color: "#374151", border: "1px solid var(--color-border)" }}
+                            >
+                              Email Excluded
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-muted)" }}>
+                      <td className="hidden lg:table-cell px-4 py-3 align-top" style={{ color: "var(--color-muted)" }}>
                         <div className="flex items-center gap-2 flex-wrap">
                           {(order.email || !order.exclude_email) && (
                             <span>{order.email ?? "-"}</span>
@@ -2444,132 +3012,58 @@ export default function AdminOrdersPage() {
                           <div className="text-xs">{order.phone_number}</div>
                         )}
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        {order.item_name} x{order.quantity}
-                      </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        <span className="block" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        <div>{order.pickup_location}</div>
-                        {order.pickup_address && (
-                          <div className="text-xs" style={{ color: "var(--color-muted)" }}>
-                            {order.pickup_address}
-                          </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 whitespace-nowrap" style={{ color: "var(--color-text)" }}>
-                        {order.pickup_time_slot}
-                      </td>
-                      <td className="px-4 py-3 font-semibold" style={{ color: "var(--color-forest)" }}>
-                        ${order.total_price.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="relative inline-block">
-                          <select
-                            value={order.status}
-                            disabled={isUpdatingStatus}
-                            onChange={(e) => handleStatusChange(order.id, e.target.value)}
-                            className="appearance-none pl-2.5 pr-6 py-1 rounded-full text-xs font-semibold border-0 cursor-pointer focus:outline-none focus:ring-2 focus:ring-[var(--color-sage)] disabled:opacity-60 transition-opacity"
-                            style={{ background: statusStyle.bg, color: statusStyle.color }}
-                          >
-                            {(ALLOWED_STATUS_TRANSITIONS[order.status] ?? Object.keys(STATUS_STYLES))
-                              .filter((val) => STATUS_STYLES[val])
-                              .map((val) => (
-                                <option key={val} value={val}>
-                                  {STATUS_STYLES[val].label}
-                                </option>
-                              ))}
-                          </select>
-                          <span className="pointer-events-none absolute inset-y-0 right-1.5 flex items-center" style={{ color: statusStyle.color }}>
-                            <svg width="10" height="10" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
-                              <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
-                          </span>
+                      <td className="px-3 md:px-4 py-3 align-top" style={{ color: "var(--color-text)" }}>
+                        <div className="text-lg font-semibold" style={{ lineHeight: 1.1 }}>
+                          {order.quantity_total}
                         </div>
                       </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
-                          {!order.paid && (
-                            <button
-                              onClick={() => setPaymentReminderTarget(order)}
-                              disabled={isUpdatingPayment || !canSendPaymentReminder}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              style={{
-                                background: canSendPaymentReminder ? "var(--color-cream)" : "#f3f4f6",
-                                color: canSendPaymentReminder ? "var(--color-bark)" : "#9ca3af",
-                                border: "1px solid var(--color-border)",
-                              }}
-                              aria-label="Send payment reminder"
-                              title={paymentReminderTitle}
-                            >
-                              <BellIcon width={15} height={15} />
-                            </button>
+                      <td className="px-3 md:px-4 py-3 align-top" style={{ color: "var(--color-text)", minWidth: 220 }}>
+                        <div className="font-medium" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`}
+                        </div>
+                        <div className="mt-0.5">{order.pickup_location}</div>
+                        <div className="text-xs" style={{ color: "var(--color-muted)" }}>
+                          <span>{order.pickup_time_slot}</span>
+                          {order.pickup_address && (
+                            <span> | {order.pickup_address}</span>
                           )}
-                          <span
-                            className="text-[10px] py-0.5 rounded-full font-semibold text-center inline-block"
-                            style={{
-                              width: "3.5rem",
-                              background: order.paid ? "var(--color-sage)" : "var(--color-cream)",
-                              color: order.paid ? "white" : "var(--color-muted)",
-                              border: "1px solid var(--color-border)",
+                        </div>
+                      </td>
+                      <td className="px-3 md:px-4 py-3 font-semibold align-top whitespace-nowrap" style={{ color: "var(--color-forest)" }}>
+                        {formatMoney(order.total_price)}
+                      </td>
+                      <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
+                        <StatusBadge status={order.status} />
+                      </td>
+                      <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              if (order.paid) {
+                                setUnpayTarget(order);
+                                return;
+                              }
+                              openMarkPaidModal(order);
                             }}
+                            disabled={isUpdatingPayment}
+                            className="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all disabled:opacity-60"
+                            style={{
+                              background: order.paid ? "var(--color-success-bg)" : "var(--color-error-bg)",
+                              color: order.paid ? "var(--color-success-text)" : "var(--color-error-text)",
+                              borderColor: order.paid ? "var(--color-success-border)" : "var(--color-error-border)",
+                              boxShadow: order.paid
+                                ? "0 2px 0 var(--color-success-border), 0 8px 16px rgba(6,95,70,0.12)"
+                                : "0 2px 0 var(--color-error-border), 0 8px 16px rgba(153,27,27,0.12)",
+                            }}
+                            aria-label={order.paid ? "Open mark unpaid dialog" : "Open mark paid dialog"}
+                            title={order.paid ? "Mark as unpaid" : "Mark as paid"}
                           >
                             {order.paid ? "Paid" : "Unpaid"}
-                          </span>
-
-                          {order.paid ? (
-                            <button
-                              onClick={() => setUnpayTarget(order)}
-                              disabled={isUpdatingPayment}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              style={{ background: "#dc2626", color: "white" }}
-                              aria-label="Mark order unpaid"
-                              title="Mark as unpaid"
-                            >
-                              <BanknoteIcon />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setPaymentTarget(order);
-                                setPaymentMethod("cash");
-                                setPaymentMethodOther("");
-                              }}
-                              disabled={isUpdatingPayment || order.status === "pending"}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              style={{ background: "var(--color-sage)", color: "white" }}
-                              aria-label="Mark order paid"
-                              title={order.status === "pending" ? "Confirm order first" : "Mark as paid"}
-                            >
-                              <BanknoteIcon />
-                            </button>
-                          )}
+                          </button>
+                          <PaymentMethodBadge order={order} />
                         </div>
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        {!order.paid ? (
-                          <span style={{ color: "var(--color-muted)" }}>-</span>
-                        ) : order.payment_method === "cash" ? (
-                          "Cash"
-                        ) : order.payment_method === "etransfer" ? (
-                          "E-transfer"
-                        ) : order.payment_method === "other" ? (
-                          <div className="leading-tight">
-                            <div>Other</div>
-                            {order.payment_method_other && (
-                              <div className="text-xs" style={{ color: "var(--color-muted)" }}>
-                                {order.payment_method_other}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{ color: "var(--color-muted)" }}>{order.payment_method ?? "-"}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center" title={order.reminded ? "Reminder sent" : "Not reminded"}>
+                      <td className="hidden xl:table-cell px-4 py-3 text-center align-top" title={order.reminded ? "Reminder sent" : "Not reminded"}>
                         {order.reminded ? (
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -2583,61 +3077,150 @@ export default function AdminOrdersPage() {
                           </svg>
                         )}
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: "var(--color-muted)" }}>
+                      <td className="hidden md:table-cell px-4 py-3 whitespace-nowrap text-xs align-top" style={{ color: "var(--color-muted)" }}>
                         {formatDate(order.created_at)}
                       </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
-                          {order.status === "pending" && (
-                            <button
-                              onClick={() => handleConfirm(order.id)}
-                              disabled={isConfirming}
-                              className="p-1.5 rounded-lg transition-all disabled:opacity-60"
-                              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                              aria-label={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
-                              title={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
-                            >
-                              {isConfirming
-                                ? (
-                                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                    <circle cx="12" cy="12" r="10" opacity="0.3" />
-                                    <path d="M12 2a10 10 0 0 1 10 10" />
-                                  </svg>
-                                ) : order.exclude_email ? (
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M20 6L9 17l-5-5" />
-                                  </svg>
-                                ) : (
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                    <path d="M4 6h16v12H4z" />
-                                    <path d="m4 7 8 6 8-6" />
-                                  </svg>
-                                )
-                              }
-                            </button>
-                          )}
-                          <button
-                            onClick={() => setDeleteTarget(order.id)}
-                            disabled={isDeleting}
-                            className="p-1.5 rounded-lg transition-all disabled:opacity-60"
-                            style={{ color: "#991b1b", background: "#fee2e2", border: "1px solid #fca5a5" }}
-                            aria-label="Delete order"
-                            title="Delete order"
-                          >
-                            {isDeleting ? (
-                              <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                                <circle cx="12" cy="12" r="10" opacity="0.3" />
-                                <path d="M12 2a10 10 0 0 1 10 10" />
-                              </svg>
-                            ) : (
-                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6" />
-                                <path d="M19 6l-1 14H6L5 6" />
-                                <path d="M10 11v6M14 11v6" />
-                                <path d="M9 6V4h6v2" />
-                              </svg>
+                      <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
+                        <div className="relative flex items-start justify-end" ref={isActionMenuOpen ? actionMenuRef : null}>
+                          <div className="flex items-center gap-2">
+                            {primaryAction?.kind === "confirm" && (
+                              <button
+                                onClick={() => setConfirmTarget(order)}
+                                disabled={isConfirming}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-60"
+                                style={{
+                                  background: "var(--color-bark)",
+                                  color: "white",
+                                  border: "1px solid rgba(28,28,26,0.08)",
+                                  boxShadow: "0 2px 0 rgba(88,58,37,0.45), 0 8px 16px rgba(139,94,60,0.22)",
+                                }}
+                                title={order.exclude_email ? "Confirm bundle without email" : "Confirm and send email"}
+                              >
+                                {isConfirming ? "Confirming..." : primaryAction.label}
+                              </button>
                             )}
-                          </button>
+                            {primaryAction?.kind === "status" && (
+                              <button
+                                onClick={() => setStatusActionTarget({ order, action: primaryAction.action })}
+                                disabled={isUpdatingStatus}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:opacity-60"
+                                style={{
+                                  background: primaryAction.action === "mark_picked_up" ? "var(--color-sage)" : "white",
+                                  color: primaryAction.action === "mark_picked_up" ? "white" : "var(--color-text)",
+                                  border: primaryAction.action === "mark_picked_up"
+                                    ? "1px solid var(--color-sage)"
+                                    : "1px solid rgba(28,28,26,0.12)",
+                                  boxShadow: primaryAction.action === "mark_picked_up"
+                                    ? "0 2px 0 rgba(114,145,82,0.45), 0 8px 16px rgba(114,145,82,0.18)"
+                                    : "0 1px 0 rgba(28,28,26,0.06), 0 6px 14px rgba(28,28,26,0.06)",
+                                }}
+                              >
+                                {primaryAction.label}
+                              </button>
+                            )}
+                            {primaryAction?.kind === "review" && (
+                              <button
+                                onClick={() => { void fetchBundleDetails(order); }}
+                                className="px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                                style={{
+                                  background: "white",
+                                  color: "var(--color-text)",
+                                  border: "1px solid rgba(28,28,26,0.12)",
+                                  boxShadow: "0 1px 0 rgba(28,28,26,0.06), 0 6px 14px rgba(28,28,26,0.06)",
+                                }}
+                              >
+                                {primaryAction.label}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => setOpenActionMenuId((prev) => (prev === actionId ? null : actionId))}
+                              className="h-9 w-9 rounded-xl transition-all flex items-center justify-center"
+                              style={{
+                                background: "white",
+                                color: "var(--color-text)",
+                                border: "1px solid rgba(28,28,26,0.12)",
+                                boxShadow: "0 1px 0 rgba(28,28,26,0.06), 0 6px 14px rgba(28,28,26,0.06)",
+                              }}
+                              aria-label="More actions"
+                              title="More actions"
+                            >
+                              <MoreIcon width={15} height={15} />
+                            </button>
+                          </div>
+                          {isActionMenuOpen && (
+                            <div
+                              className="absolute right-0 top-[calc(100%+0.5rem)] min-w-[220px] rounded-2xl overflow-hidden"
+                              style={{
+                                background: "white",
+                                border: "1px solid var(--color-border)",
+                                boxShadow: "0 18px 36px rgba(28,28,26,0.14)",
+                                zIndex: 40,
+                              }}
+                            >
+                              <button
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  void fetchBundleDetails(order);
+                                }}
+                                className="w-full px-4 py-3 text-left text-sm font-medium transition-colors"
+                                style={{ color: "var(--color-text)", borderBottom: "1px solid var(--color-border)" }}
+                              >
+                                Open Bundle
+                              </button>
+                              {order.status === "confirmed" && (
+                                <button
+                                  onClick={() => {
+                                    setOpenActionMenuId(null);
+                                    void handleSendSingleReminder(order);
+                                  }}
+                                  disabled={isSendingReminder || !!getReminderUnavailableReason(order)}
+                                  className="w-full px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60"
+                                  style={{
+                                    color: "var(--color-text)",
+                                    borderBottom: "1px solid var(--color-border)",
+                                  }}
+                                >
+                                  {isSendingReminder ? "Sending Reminder..." : (order.reminded ? "Reminder Sent" : "Send Reminder")}
+                                </button>
+                              )}
+                              {overflowActions.map((action, index) => (
+                                <button
+                                  key={action.key}
+                                  onClick={() => {
+                                    setOpenActionMenuId(null);
+                                    setStatusActionTarget({ order, action: action.key });
+                                  }}
+                                  disabled={isUpdatingStatus}
+                                  className="w-full px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60"
+                                  style={{
+                                    color: action.key === "mark_picked_up"
+                                      ? "var(--color-sage)"
+                                      : action.tone === "danger"
+                                        ? "#991b1b"
+                                        : "var(--color-text)",
+                                    borderBottom: index === overflowActions.length - 1 ? "none" : "1px solid var(--color-border)",
+                                  }}
+                                >
+                                  {action.label}
+                                </button>
+                              ))}
+                              <button
+                                onClick={() => {
+                                  setOpenActionMenuId(null);
+                                  setDeleteTarget(actionId);
+                                }}
+                                disabled={isDeleting}
+                                className="w-full px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60"
+                                style={{
+                                  color: "#991b1b",
+                                  borderTop: overflowActions.length > 0 ? "1px solid var(--color-border)" : "none",
+                                  background: "#fff7f7",
+                                }}
+                              >
+                                {isDeleting ? "Deleting..." : "Delete Bundle"}
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -2700,11 +3283,263 @@ export default function AdminOrdersPage() {
         </div>
       )}
 
+      {showBundleDetailsModal && selectedBundle && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.4)",
+            zIndex: 110,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px",
+          }}
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeBundleDetailsModal();
+          }}
+        >
+          <div
+            style={{
+              background: "white",
+              borderRadius: "24px",
+              border: "1px solid var(--color-border)",
+              maxWidth: "900px",
+              width: "100%",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              padding: "24px",
+              boxShadow: "0 20px 60px rgba(0,0,0,0.15)",
+            }}
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 mb-5">
+              <div>
+                <h2 className="text-2xl font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+                  Order Bundle
+                </h2>
+                <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>
+                  Bundle: {selectedBundle.bundle_id}
+                </p>
+              </div>
+              <button
+                onClick={closeBundleDetailsModal}
+                className="w-9 h-9 rounded-lg"
+                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}
+                aria-label="Close details"
+              >
+                X
+              </button>
+            </div>
+
+            {loadingBundleDetails ? (
+              <div className="flex justify-center py-12">
+                <svg className="animate-spin" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" opacity="0.3" />
+                  <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
+                </svg>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Customer Details</p>
+                    <p className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>{selectedBundle.name}</p>
+                    <p className="text-sm" style={{ color: "var(--color-muted)" }}>{selectedBundle.email ?? "-"}</p>
+                    <p className="text-sm" style={{ color: "var(--color-muted)" }}>{selectedBundle.phone_number ?? "-"}</p>
+                  </div>
+
+                  <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                    <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Order Actions</p>
+                    <div className="flex items-center gap-2 flex-wrap mb-3">
+                      <StatusBadge status={selectedBundle.status} />
+                      {selectedBundle.status === "pending" && (
+                        <button
+                          onClick={() => setConfirmTarget(selectedBundle)}
+                          disabled={confirming === getOrderActionId(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                        >
+                          {selectedBundle.exclude_email ? "Confirm (No Email)" : "Confirm & Email"}
+                        </button>
+                      )}
+                      {selectedBundle.status === "confirmed" && (
+                        <button
+                          onClick={() => { void handleSendSingleReminder(selectedBundle); }}
+                          disabled={sendingReminder === getOrderActionId(selectedBundle) || !!getReminderUnavailableReason(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{
+                            background: getReminderUnavailableReason(selectedBundle) ? "var(--color-cream)" : "rgba(114,145,82,0.12)",
+                            color: getReminderUnavailableReason(selectedBundle) ? "var(--color-muted)" : "var(--color-forest)",
+                            border: "1px solid var(--color-border)",
+                          }}
+                          title={getReminderUnavailableReason(selectedBundle) ?? "Send pickup reminder"}
+                        >
+                          {sendingReminder === getOrderActionId(selectedBundle) ? "Sending..." : (selectedBundle.reminded ? "Reminder Sent" : "Send Reminder")}
+                        </button>
+                      )}
+                      {getStatusActionSpecs(selectedBundle, "detail").map((action) => (
+                        <button
+                          key={action.key}
+                          onClick={() => setStatusActionTarget({ order: selectedBundle, action: action.key })}
+                          disabled={updatingStatus === getOrderActionId(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{
+                            background: action.tone === "danger" ? "#fee2e2" : "white",
+                            color: action.tone === "danger" ? "#991b1b" : "var(--color-text)",
+                            border: action.tone === "danger" ? "1px solid #fca5a5" : "1px solid var(--color-border)",
+                          }}
+                        >
+                          {action.label}
+                        </button>
+                      ))}
+                      {selectedBundle.paid ? (
+                        <button
+                          onClick={() => setUnpayTarget(selectedBundle)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold"
+                          style={{ background: "#dc2626", color: "white" }}
+                        >
+                          Mark Unpaid
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => openMarkPaidModal(selectedBundle)}
+                          disabled={selectedBundle.status === "pending"}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
+                          style={{ background: "var(--color-sage)", color: "white" }}
+                        >
+                          Mark Paid
+                        </button>
+                      )}
+                    </div>
+                    {selectedBundle.status === "mixed" && (
+                      <p className="text-xs mb-2" style={{ color: "var(--color-muted)" }}>
+                        Mixed bundles do not expose quick actions in the table. Review the bundle here before normalizing it.
+                      </p>
+                    )}
+                    <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                      Payment: {selectedBundle.paid ? "Paid" : "Unpaid"}{selectedBundle.payment_method ? ` (${selectedBundle.payment_method}${selectedBundle.payment_method_other ? `: ${selectedBundle.payment_method_other}` : ""})` : ""}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Order Details</p>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                    <div><span style={{ color: "var(--color-muted)" }}>Event:</span><div style={{ color: "var(--color-text)" }}>{eventLabelById.get(selectedBundle.event_id) ?? `Event ${selectedBundle.event_id}`}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Items:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.quantity_total}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Item Types:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.line_count}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Total:</span><div style={{ color: "var(--color-forest)", fontWeight: 700 }}>{formatMoney(selectedBundle.total_price)}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Location:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.pickup_location}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Time Slot:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.pickup_time_slot}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Address:</span><div style={{ color: "var(--color-text)" }}>{selectedBundle.pickup_address ?? "-"}</div></div>
+                    <div><span style={{ color: "var(--color-muted)" }}>Date Placed:</span><div style={{ color: "var(--color-text)" }}>{formatDate(selectedBundle.created_at)}</div></div>
+                  </div>
+                  {selectedBundle.status === "mixed" && selectedBundle.status_breakdown && (
+                    <p className="text-xs mt-2" style={{ color: "var(--color-muted)" }}>
+                      Mixed status: {Object.entries(selectedBundle.status_breakdown).map(([status, count]) => `${status}: ${count}`).join(", ")}
+                    </p>
+                  )}
+                </div>
+
+                <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Items Ordered</p>
+                  {bundleLines.length === 0 ? (
+                    <p className="text-sm" style={{ color: "var(--color-muted)" }}>No items found for this order.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Item</th>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Qty</th>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Unit Cost</th>
+                            <th className="text-left font-semibold py-2" style={{ color: "var(--color-muted)" }}>Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {bundleLines.map((item) => {
+                            const qty = Number(item.quantity) || 0;
+                            const lineTotal = Number(item.total_price) || 0;
+                            const unitCost = qty > 0 ? lineTotal / qty : lineTotal;
+                            return (
+                              <tr key={item.id} style={{ borderBottom: "1px solid var(--color-border)" }}>
+                                <td className="py-2" style={{ color: "var(--color-text)" }}>{item.item_name}</td>
+                                <td className="py-2" style={{ color: "var(--color-text)" }}>{qty}</td>
+                                <td className="py-2" style={{ color: "var(--color-text)" }}>{formatMoney(unitCost)}</td>
+                                <td className="py-2 font-semibold" style={{ color: "var(--color-forest)" }}>{formatMoney(lineTotal)}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-2xl p-4" style={{ border: "1px solid var(--color-border)", background: "white" }}>
+                  <p className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "var(--color-sage)" }}>Notes</p>
+                  <p className="text-sm" style={{ color: "var(--color-text)", whiteSpace: "pre-wrap" }}>{selectedBundle.notes ? selectedBundle.notes : "-"}</p>
+                  {selectedBundle.notes_mixed && (
+                    <p className="text-xs mt-2" style={{ color: "var(--color-muted)" }}>
+                      Some item-level notes differ. Editing this bundle will resync shared notes.
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => setShowEditBundleModal(true)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold"
+                    style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                  >
+                    Edit Bundle
+                  </button>
+                  <button
+                    onClick={() => setDeleteTarget(getOrderActionId(selectedBundle))}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold"
+                    style={{ background: "#fee2e2", color: "#991b1b", border: "1px solid #fca5a5" }}
+                  >
+                    Delete Bundle
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <BundleEditModal
+        isOpen={showEditBundleModal && !!selectedBundle}
+        bundle={selectedBundle ? {
+          bundle_id: selectedBundle.bundle_id,
+          primary_order_id: selectedBundle.primary_order_id,
+          event_id: selectedBundle.event_id,
+          status: selectedBundle.status,
+          name: selectedBundle.name,
+          email: selectedBundle.email,
+          phone_number: selectedBundle.phone_number,
+          pickup_location: selectedBundle.pickup_location,
+          pickup_time_slot: selectedBundle.pickup_time_slot,
+          pickup_address: selectedBundle.pickup_address,
+          pickup_date: selectedBundle.pickup_date,
+          notes: selectedBundle.notes,
+          exclude_email: selectedBundle.exclude_email,
+        } : null}
+        lines={bundleLines}
+        onClose={() => setShowEditBundleModal(false)}
+        onSaved={async () => {
+          await fetchOrders({ suppressErrorToast: true });
+          await refreshSelectedBundleDetails();
+        }}
+        notify={showToast}
+      />
+
       {/* Single delete modal */}
       <Modal
         isOpen={!!deleteTarget}
         onClose={() => setDeleteTarget(null)}
-        title="Delete Order"
+        title="Delete Bundle"
         variant="danger"
         actions={
           <>
@@ -2729,14 +3564,93 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        This order will be permanently deleted. This cannot be undone.
+        This order bundle will be permanently deleted. This cannot be undone.
+      </Modal>
+
+      <Modal
+        isOpen={!!confirmTarget}
+        onClose={() => {
+          if (confirmTarget && confirming === getOrderActionId(confirmTarget)) return;
+          setConfirmTarget(null);
+        }}
+        title={confirmTarget?.exclude_email ? "Confirm Order Without Email" : "Send Confirmation Email"}
+        actions={
+          <>
+            <button
+              onClick={() => setConfirmTarget(null)}
+              disabled={!!confirmTarget && confirming === getOrderActionId(confirmTarget)}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = confirmTarget;
+                if (!target) return;
+                const orderId = getOrderActionId(target);
+                await handleConfirm(orderId);
+                setConfirmTarget(null);
+              }}
+              disabled={!!confirmTarget && confirming === getOrderActionId(confirmTarget)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-bark)", color: "white" }}
+            >
+              {confirmTarget?.exclude_email ? "Confirm order" : "Send email"}
+            </button>
+          </>
+        }
+      >
+        {confirmTarget?.exclude_email
+          ? `This will mark ${confirmTarget.name} as confirmed without sending an email because email is excluded for this bundle.`
+          : `This will send the confirmation email to ${confirmTarget?.name ?? "this customer"} and mark the bundle as confirmed.`}
+      </Modal>
+
+      <Modal
+        isOpen={!!statusActionTarget}
+        onClose={() => {
+          if (statusActionTarget && updatingStatus === getOrderActionId(statusActionTarget.order)) return;
+          setStatusActionTarget(null);
+        }}
+        title={statusActionTarget ? getStatusActionModalCopy(statusActionTarget.action, statusActionTarget.order).title : "Update Bundle Status"}
+        variant={statusActionTarget?.action === "cancel" || statusActionTarget?.action === "mark_no_show" ? "danger" : "default"}
+        actions={
+          <>
+            <button
+              onClick={() => setStatusActionTarget(null)}
+              disabled={!!statusActionTarget && updatingStatus === getOrderActionId(statusActionTarget.order)}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = statusActionTarget;
+                if (!target) return;
+                const ok = await handleStatusAction(target.order, target.action);
+                if (ok) setStatusActionTarget(null);
+              }}
+              disabled={!!statusActionTarget && updatingStatus === getOrderActionId(statusActionTarget.order)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{
+                background: statusActionTarget?.action === "cancel" || statusActionTarget?.action === "mark_no_show" ? "#dc2626" : "var(--color-forest)",
+                color: "white",
+              }}
+            >
+              {statusActionTarget ? getStatusActionModalCopy(statusActionTarget.action, statusActionTarget.order).confirmLabel : "Confirm"}
+            </button>
+          </>
+        }
+      >
+        {statusActionTarget ? getStatusActionModalCopy(statusActionTarget.action, statusActionTarget.order).body : ""}
       </Modal>
 
       {/* Bulk delete modal */}
       <Modal
         isOpen={showBulkDeleteModal}
         onClose={() => setShowBulkDeleteModal(false)}
-        title={`Delete ${selectedIds.size} Order${selectedIds.size !== 1 ? "s" : ""}?`}
+        title={`Delete ${selectedIds.size} Bundle${selectedIds.size !== 1 ? "s" : ""}?`}
         variant="danger"
         actions={
           <>
@@ -2757,14 +3671,14 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        {selectedIds.size} order{selectedIds.size !== 1 ? "s" : ""} will be permanently deleted. This cannot be undone.
+        {selectedIds.size} bundle{selectedIds.size !== 1 ? "s" : ""} will be permanently deleted. This cannot be undone.
       </Modal>
 
       {/* Bulk confirm modal */}
       <Modal
         isOpen={showBulkConfirmModal}
         onClose={() => setShowBulkConfirmModal(false)}
-        title={`Confirm ${selectedIds.size} Order${selectedIds.size !== 1 ? "s" : ""}?`}
+        title={`Confirm ${bulkConfirmableOrders.length} Bundle${bulkConfirmableOrders.length !== 1 ? "s" : ""}?`}
         actions={
           <>
             <button
@@ -2784,14 +3698,67 @@ export default function AdminOrdersPage() {
           </>
         }
       >
-        Confirmation emails will be sent to {selectedIds.size} customer{selectedIds.size !== 1 ? "s" : ""} and their orders will be marked as confirmed (orders with Email Excluded will be confirmed without email).
+        Confirmation emails will be sent to {bulkConfirmableOrders.length} customer{bulkConfirmableOrders.length !== 1 ? "s" : ""} and their bundles will be marked as confirmed (bundles with Email Excluded will be confirmed without email).
+      </Modal>
+
+      <Modal
+        isOpen={showBulkPickedUpModal}
+        onClose={() => setShowBulkPickedUpModal(false)}
+        title={`Mark ${bulkPickedUpOrders.length} Bundle${bulkPickedUpOrders.length !== 1 ? "s" : ""} Picked Up?`}
+        actions={
+          <>
+            <button
+              onClick={() => setShowBulkPickedUpModal(false)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => { void executeBulkStatusAction("mark_picked_up"); }}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Mark picked up
+            </button>
+          </>
+        }
+      >
+        This will mark {bulkPickedUpOrders.length} confirmed bundle{bulkPickedUpOrders.length !== 1 ? "s" : ""} as picked up.
+      </Modal>
+
+      <Modal
+        isOpen={showBulkCancelModal}
+        onClose={() => setShowBulkCancelModal(false)}
+        title={`Cancel ${bulkCancelableOrders.length} Bundle${bulkCancelableOrders.length !== 1 ? "s" : ""}?`}
+        variant="danger"
+        actions={
+          <>
+            <button
+              onClick={() => setShowBulkCancelModal(false)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Keep bundles
+            </button>
+            <button
+              onClick={() => { void executeBulkStatusAction("cancel"); }}
+              className="px-4 py-2 rounded-xl text-sm font-semibold"
+              style={{ background: "#dc2626", color: "white" }}
+            >
+              Cancel bundles
+            </button>
+          </>
+        }
+      >
+        This will cancel {bulkCancelableOrders.length} selected bundle{bulkCancelableOrders.length !== 1 ? "s" : ""}. Mixed bundles are excluded from this bulk action.
       </Modal>
 
       {/* Mark paid modal */}
       <Modal
         isOpen={!!paymentTarget}
         onClose={() => {
-          if (paymentTarget && updatingPayment === paymentTarget.id) return;
+          if (paymentTarget && updatingPayment === getOrderActionId(paymentTarget)) return;
           setPaymentTarget(null);
         }}
         title="Mark Paid"
@@ -2799,34 +3766,46 @@ export default function AdminOrdersPage() {
           <>
             <button
               onClick={() => setPaymentTarget(null)}
-              disabled={!!paymentTarget && updatingPayment === paymentTarget.id}
+              disabled={!!paymentTarget && updatingPayment === getOrderActionId(paymentTarget)}
               className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
               style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
             >
               Cancel
             </button>
+            {paymentTarget && !getPaymentReminderUnavailableReason(paymentTarget) && (
+              <button
+                onClick={() => { void handleSendSinglePaymentReminder(paymentTarget); }}
+                disabled={paymentReminderLoading || updatingPayment === getOrderActionId(paymentTarget)}
+                className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+                style={{ background: "white", color: "var(--color-bark)", border: "1px solid var(--color-border)" }}
+              >
+                Send payment reminder
+              </button>
+            )}
             <button
               onClick={async () => {
                 const target = paymentTarget;
                 if (!target) return;
-                if (target.status === "pending") {
-                  showToast("Confirm the order before marking it paid", "error");
-                  return;
-                }
                 const other = paymentMethodOther.trim();
                 if (paymentMethod === "other" && !other) {
                   showToast("Enter payment details for Other", "error");
                   return;
                 }
 
-                const ok = await handlePaymentUpdate(target.id, {
+                const targetId = getOrderActionId(target);
+                const ok = await handlePaymentUpdate(targetId, {
                   paid: true,
                   payment_method: paymentMethod,
                   payment_method_other: paymentMethod === "other" ? other : undefined,
                 });
                 if (ok) setPaymentTarget(null);
               }}
-              disabled={!!paymentTarget && updatingPayment === paymentTarget.id}
+              disabled={
+                !!paymentTarget && (
+                  updatingPayment === getOrderActionId(paymentTarget) ||
+                  paymentTarget.status === "pending"
+                )
+              }
               className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
             >
@@ -2839,6 +3818,19 @@ export default function AdminOrdersPage() {
           <p style={{ color: "var(--color-muted)" }}>
             Set payment information for <span className="font-semibold" style={{ color: "var(--color-text)" }}>{paymentTarget?.name ?? "this order"}</span>.
           </p>
+
+          {paymentTarget?.status === "pending" && (
+            <div
+              className="rounded-xl px-3 py-2 text-sm"
+              style={{
+                background: "var(--color-warning-bg)",
+                color: "var(--color-warning-text)",
+                border: "1px solid var(--color-warning-border)",
+              }}
+            >
+              Confirm the order before marking it paid.
+            </div>
+          )}
 
           <div className="flex gap-2">
             {(["cash", "etransfer", "other"] as const).map((method) => {
@@ -2884,7 +3876,7 @@ export default function AdminOrdersPage() {
       <Modal
         isOpen={!!unpayTarget}
         onClose={() => {
-          if (unpayTarget && updatingPayment === unpayTarget.id) return;
+          if (unpayTarget && updatingPayment === getOrderActionId(unpayTarget)) return;
           setUnpayTarget(null);
         }}
         title="Mark Unpaid"
@@ -2893,7 +3885,7 @@ export default function AdminOrdersPage() {
           <>
             <button
               onClick={() => setUnpayTarget(null)}
-              disabled={!!unpayTarget && updatingPayment === unpayTarget.id}
+              disabled={!!unpayTarget && updatingPayment === getOrderActionId(unpayTarget)}
               className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
               style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
             >
@@ -2903,10 +3895,10 @@ export default function AdminOrdersPage() {
               onClick={async () => {
                 const target = unpayTarget;
                 if (!target) return;
-                const ok = await handlePaymentUpdate(target.id, { paid: false });
+                const ok = await handlePaymentUpdate(getOrderActionId(target), { paid: false });
                 if (ok) setUnpayTarget(null);
               }}
-              disabled={!!unpayTarget && updatingPayment === unpayTarget.id}
+              disabled={!!unpayTarget && updatingPayment === getOrderActionId(unpayTarget)}
               className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
               style={{ background: "#dc2626", color: "white" }}
             >
@@ -2916,37 +3908,6 @@ export default function AdminOrdersPage() {
         }
       >
         This will set paid to false and clear the payment method.
-      </Modal>
-
-      <Modal
-        isOpen={!!paymentReminderTarget}
-        onClose={() => {
-          if (paymentReminderLoading) return;
-          setPaymentReminderTarget(null);
-        }}
-        title="Send Payment Reminder"
-        actions={
-          <>
-            <button
-              onClick={() => setPaymentReminderTarget(null)}
-              disabled={paymentReminderLoading}
-              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
-              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => { void handleConfirmSinglePaymentReminder(); }}
-              disabled={paymentReminderLoading}
-              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
-              style={{ background: "var(--color-bark)", color: "var(--color-cream)" }}
-            >
-              Send reminder
-            </button>
-          </>
-        }
-      >
-        This will send an automated payment reminder email to {paymentReminderTarget?.name ?? "this customer"} for the selected unpaid order bundle. If payment has already been resolved, the email copy will instruct them to ignore it.
       </Modal>
 
       {/* Add Order Type Modal */}

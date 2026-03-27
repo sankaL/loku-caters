@@ -131,6 +131,10 @@ class StatusUpdate(BaseModel):
     status: str
 
 
+class RestoreStatusAction(BaseModel):
+    target_status: Literal[OrderStatus.PICKED_UP, OrderStatus.NO_SHOW]
+
+
 ALLOWED_PAYMENT_METHODS = {"cash", "etransfer", "other"}
 
 
@@ -962,6 +966,106 @@ def _order_dict(order: Order) -> dict:
     }
 
 
+def _bundle_sort_key(order: Order) -> tuple[datetime, str]:
+    created_at = getattr(order, "created_at", None)
+    if created_at is None:
+        created_at = datetime.min.replace(tzinfo=timezone.utc)
+    return created_at, str(order.id)
+
+
+def _bundle_id_for_order(order: Order) -> str:
+    group_id = _normalize_group_text(getattr(order, "group_id", None))
+    return group_id if group_id is not None else str(order.id)
+
+
+def _build_bundle_status_breakdown(orders: list[Order]) -> dict[str, int]:
+    breakdown: dict[str, int] = {}
+    for order in orders:
+        status = str(getattr(order, "status", "") or "").strip()
+        if not status:
+            continue
+        breakdown[status] = breakdown.get(status, 0) + 1
+    return breakdown
+
+
+def _project_order_bundle(orders: list[Order]) -> dict[str, Any]:
+    if not orders:
+        raise ValueError("orders must not be empty")
+
+    sorted_orders = sorted(orders, key=_bundle_sort_key)
+    primary = sorted_orders[0]
+    bundle_id = _bundle_id_for_order(primary)
+    breakdown = _build_bundle_status_breakdown(sorted_orders)
+    unique_statuses = set(breakdown.keys())
+    status = sorted(unique_statuses)[0] if len(unique_statuses) == 1 else "mixed"
+
+    normalized_notes = [_normalize_group_text(getattr(order, "notes", None)) for order in sorted_orders]
+    primary_notes = normalized_notes[0]
+    notes_mixed = any(note != primary_notes for note in normalized_notes[1:])
+
+    return {
+        "id": primary.id,
+        "bundle_id": bundle_id,
+        "group_id": primary.group_id,
+        "primary_order_id": primary.id,
+        "event_id": int(primary.event_id) if getattr(primary, "event_id", None) is not None else None,
+        "name": primary.name,
+        "email": primary.email,
+        "phone_number": primary.phone_number,
+        "pickup_location": primary.pickup_location,
+        "pickup_time_slot": primary.pickup_time_slot,
+        "pickup_address": getattr(primary, "pickup_address", None),
+        "pickup_date": primary.pickup_date.isoformat() if getattr(primary, "pickup_date", None) is not None else None,
+        "line_count": len(sorted_orders),
+        "quantity_total": int(sum(int(getattr(order, "quantity", 0) or 0) for order in sorted_orders)),
+        "base_total_price": round(sum(float(getattr(order, "base_total_price", 0) or 0) for order in sorted_orders), 2),
+        "discount_total": round(sum(float(getattr(order, "discount_total", 0) or 0) for order in sorted_orders), 2),
+        "total_price": round(sum(float(getattr(order, "total_price", 0) or 0) for order in sorted_orders), 2),
+        "status": status,
+        "status_breakdown": breakdown,
+        "reminded": all(bool(getattr(order, "reminded", False)) for order in sorted_orders),
+        "paid": all(bool(getattr(order, "paid", False)) for order in sorted_orders),
+        "payment_method": primary.payment_method,
+        "payment_method_other": primary.payment_method_other,
+        "notes": primary_notes,
+        "notes_mixed": notes_mixed,
+        "exclude_email": bool(primary.exclude_email),
+        "created_at": primary.created_at.isoformat() if primary.created_at else None,
+    }
+
+
+def _orders_to_bundle_rows(orders: list[Order]) -> list[dict[str, Any]]:
+    grouped: dict[str, list[Order]] = {}
+    for order in orders:
+        grouped.setdefault(_bundle_id_for_order(order), []).append(order)
+
+    bundle_rows = [_project_order_bundle(group_orders) for group_orders in grouped.values()]
+    bundle_rows.sort(
+        key=lambda row: (
+            row.get("created_at") or "",
+            str(row.get("primary_order_id") or ""),
+        ),
+        reverse=True,
+    )
+    return bundle_rows
+
+
+def _find_orders_for_bundle_id(db: Session, bundle_id: str) -> list[Order]:
+    grouped = (
+        db.query(Order)
+        .filter(Order.group_id == bundle_id)
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .all()
+    )
+    if grouped:
+        return grouped
+
+    single = db.query(Order).filter(Order.id == bundle_id).first()
+    if single is None:
+        return []
+    return [single]
+
+
 def _get_reminder_context(db: Session, orders: list[Order]) -> tuple[dict[int, Event], str, dict]:
     event_ids = sorted({int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None})
     events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
@@ -1005,6 +1109,10 @@ def _validate_group_order_payload(existing_group_orders: list[Order], body: Admi
     if not existing_group_orders:
         return
 
+    existing_statuses = {order.status for order in existing_group_orders}
+    if len(existing_statuses) > 1:
+        raise HTTPException(status_code=409, detail="Cannot add items to a mixed-status bundle")
+
     first_order = existing_group_orders[0]
     mismatched_fields: list[str] = []
     shared_fields = (
@@ -1045,6 +1153,47 @@ def _already_confirmed_response(order: Order, group_orders: list[Order]) -> Opti
         "email_sent": False,
         "email_suppressed": any(group_order.exclude_email for group_order in group_orders),
     }
+
+
+def _validate_bundle_status_transition(
+    group_orders: list[Order],
+    target_status: str,
+    *,
+    invalid_detail: str = "Invalid status transition",
+) -> None:
+    if target_status not in OrderStatus.ALL:
+        raise HTTPException(status_code=400, detail="Invalid status")
+    if not group_orders:
+        raise HTTPException(status_code=409, detail="Order bundle is empty")
+
+    for group_order in group_orders:
+        allowed = ALLOWED_STATUS_TRANSITIONS.get(group_order.status)
+        if allowed is None or target_status not in allowed:
+            raise HTTPException(status_code=409, detail=invalid_detail)
+
+
+def _apply_bundle_status(
+    order: Order,
+    group_orders: list[Order],
+    target_status: str,
+    db: Session,
+) -> dict[str, Any]:
+    for group_order in group_orders:
+        group_order.status = target_status
+    db.commit()
+    return {
+        "success": True,
+        "order_id": order.id,
+        "status": target_status,
+    }
+
+
+def _get_inherited_bundle_status(existing_group_orders: list[Order]) -> str:
+    # _validate_group_order_payload must run before this helper so mixed bundles
+    # are rejected before a new line inherits the first line's status.
+    if not existing_group_orders:
+        return OrderStatus.PENDING
+    return existing_group_orders[0].status
 
 
 def _reminder_result(order: Order, *, status: str, message: str) -> dict:
@@ -1484,7 +1633,7 @@ def admin_create_order(
         else []
     )
     _validate_group_order_payload(existing_group_orders, body)
-    inherited_status = existing_group_orders[0].status if existing_group_orders else OrderStatus.PENDING
+    inherited_status = _get_inherited_bundle_status(existing_group_orders)
     inherited_paid = False
     inherited_payment_method = None
     inherited_payment_method_other = None
@@ -1566,9 +1715,26 @@ def admin_list_orders(
     event_id: Optional[int] = Query(None),
     paid: Optional[bool] = Query(None),
     email: Optional[str] = Query(None),
+    view: Optional[Literal["bundle"]] = Query(None),
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
+    if view == "bundle":
+        query = db.query(Order)
+        if event_id is not None:
+            query = query.filter(Order.event_id == event_id)
+        if email is not None:
+            query = query.filter(Order.email == email)
+
+        bundle_rows = _orders_to_bundle_rows(
+            query.order_by(Order.created_at.asc(), Order.id.asc()).all()
+        )
+        if status:
+            bundle_rows = [row for row in bundle_rows if str(row.get("status") or "") == status]
+        if paid is not None:
+            bundle_rows = [row for row in bundle_rows if bool(row.get("paid")) == bool(paid)]
+        return bundle_rows
+
     query = db.query(Order)
     if status:
         query = query.filter(Order.status == status)
@@ -1580,6 +1746,46 @@ def admin_list_orders(
         query = query.filter(Order.email == email)
     orders = query.order_by(Order.created_at.desc()).all()
     return [_order_dict(o) for o in orders]
+
+
+@router.get("/orders/bundles/{bundle_id}")
+def admin_get_order_bundle(
+    bundle_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    orders = _find_orders_for_bundle_id(db, bundle_id)
+    if not orders:
+        raise HTTPException(status_code=404, detail="Order bundle not found")
+
+    sorted_orders = sorted(orders, key=_bundle_sort_key)
+    return {
+        "bundle": _project_order_bundle(sorted_orders),
+        "lines": [_order_dict(order) for order in sorted_orders],
+    }
+
+
+@router.delete("/orders/bundles/{bundle_id}")
+def admin_delete_order_bundle(
+    bundle_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    orders = _find_orders_for_bundle_id(db, bundle_id)
+    if not orders:
+        raise HTTPException(status_code=404, detail="Order bundle not found")
+
+    try:
+        for order in orders:
+            db.delete(order)
+        db.commit()
+    except Exception:
+        rollback = getattr(db, "rollback", None)
+        if callable(rollback):
+            rollback()
+        raise
+
+    return {"success": True, "deleted": len(orders), "bundle_id": bundle_id}
 
 
 @router.post("/orders/remind")
@@ -1816,8 +2022,11 @@ def admin_confirm_order(
     already_confirmed = _already_confirmed_response(order, group_orders)
     if already_confirmed is not None:
         return already_confirmed
-    if any(group_order.status not in {OrderStatus.PENDING, OrderStatus.CONFIRMED} for group_order in group_orders):
-        raise HTTPException(status_code=409, detail="Only pending orders can be confirmed")
+    _validate_bundle_status_transition(
+        group_orders,
+        OrderStatus.CONFIRMED,
+        invalid_detail="Only pending orders can be confirmed",
+    )
 
     email_sent = False
     email_suppressed = any(group_order.exclude_email for group_order in group_orders)
@@ -1852,17 +2061,73 @@ def admin_confirm_order(
             email_sent = False
             print(f"[email] Failed to send confirmation to {order.email}: {exc}")
 
-    for group_order in group_orders:
-        group_order.status = OrderStatus.CONFIRMED
-    db.commit()
+    result = _apply_bundle_status(order, group_orders, OrderStatus.CONFIRMED, db)
+    result["email_sent"] = email_sent
+    result["email_suppressed"] = email_suppressed
+    return result
 
-    return {
-        "success": True,
-        "order_id": order_id,
-        "status": order.status,
-        "email_sent": email_sent,
-        "email_suppressed": email_suppressed,
-    }
+
+@router.post("/orders/{order_id}/actions/mark-picked-up")
+def admin_mark_order_picked_up(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    group_orders = _get_order_group_rows(db, order)
+    _validate_bundle_status_transition(group_orders, OrderStatus.PICKED_UP)
+    return _apply_bundle_status(order, group_orders, OrderStatus.PICKED_UP, db)
+
+
+@router.post("/orders/{order_id}/actions/mark-no-show")
+def admin_mark_order_no_show(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    group_orders = _get_order_group_rows(db, order)
+    _validate_bundle_status_transition(group_orders, OrderStatus.NO_SHOW)
+    return _apply_bundle_status(order, group_orders, OrderStatus.NO_SHOW, db)
+
+
+@router.post("/orders/{order_id}/actions/cancel")
+def admin_cancel_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    group_orders = _get_order_group_rows(db, order)
+    _validate_bundle_status_transition(group_orders, OrderStatus.CANCELLED)
+    return _apply_bundle_status(order, group_orders, OrderStatus.CANCELLED, db)
+
+
+@router.post("/orders/{order_id}/actions/restore")
+def admin_restore_order(
+    order_id: str,
+    body: RestoreStatusAction,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    order = db.query(Order).filter(Order.id == order_id).first()
+    if order is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    group_orders = _get_order_group_rows(db, order)
+    if any(group_order.status != OrderStatus.CANCELLED for group_order in group_orders):
+        raise HTTPException(status_code=409, detail="Only cancelled orders can be restored")
+    _validate_bundle_status_transition(group_orders, body.target_status, invalid_detail="Invalid restore target")
+    return _apply_bundle_status(order, group_orders, body.target_status, db)
 
 
 @router.patch("/orders/{order_id}/status")
@@ -1872,23 +2137,13 @@ def update_order_status(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    if body.status not in OrderStatus.ALL:
-        raise HTTPException(status_code=400, detail="Invalid status")
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    allowed = ALLOWED_STATUS_TRANSITIONS.get(order.status)
-    if allowed is None:
-        raise HTTPException(status_code=409, detail="Invalid current status")
-    if body.status not in allowed:
-        raise HTTPException(status_code=409, detail="Invalid status transition")
-
     group_orders = _get_order_group_rows(db, order)
-    for group_order in group_orders:
-        group_order.status = body.status
-    db.commit()
-    return {"success": True, "status": order.status}
+    _validate_bundle_status_transition(group_orders, body.status)
+    return _apply_bundle_status(order, group_orders, body.status, db)
 
 
 @router.patch("/orders/{order_id}/payment")
