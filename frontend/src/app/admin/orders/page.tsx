@@ -160,17 +160,8 @@ function SelectChevron() {
   );
 }
 
-const BanknoteIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-    fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <rect x="2" y="6" width="20" height="12" rx="2" />
-    <circle cx="12" cy="12" r="2" />
-    <path d="M6 12h.01M18 12h.01" />
-  </svg>
-);
-
-const CashIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+const CashIcon = ({ width = 24, height = 24 }: { width?: number; height?: number }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox="0 0 24 24"
     fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="2" y="6" width="20" height="12" rx="2" />
     <circle cx="12" cy="12" r="2" />
@@ -178,8 +169,8 @@ const CashIcon = () => (
   </svg>
 );
 
-const EtransferIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+const EtransferIcon = ({ width = 24, height = 24 }: { width?: number; height?: number }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox="0 0 24 24"
     fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <rect x="2" y="5" width="20" height="14" rx="2" />
     <path d="M2 10h20" />
@@ -188,8 +179,8 @@ const EtransferIcon = () => (
   </svg>
 );
 
-const OtherPayIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"
+const OtherPayIcon = ({ width = 24, height = 24 }: { width?: number; height?: number }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width={width} height={height} viewBox="0 0 24 24"
     fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <circle cx="12" cy="12" r="10" />
     <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
@@ -429,6 +420,45 @@ function getPaymentReminderUnavailableReason(order: Order): string | null {
   return null;
 }
 
+function getPaymentMethodLabel(
+  order: Pick<Order, "paid" | "payment_method" | "payment_method_other">
+): string | null {
+  if (!order.paid) return null;
+  if (order.payment_method === "cash") return "Cash";
+  if (order.payment_method === "etransfer") return "E-transfer";
+  if (order.payment_method === "other") {
+    const details = (order.payment_method_other ?? "").trim();
+    return details ? `Other: ${details}` : "Other";
+  }
+  const fallback = (order.payment_method ?? "").trim();
+  return fallback || "Method not set";
+}
+
+function PaymentMethodBadge({ order }: { order: Pick<Order, "paid" | "payment_method" | "payment_method_other"> }) {
+  const label = getPaymentMethodLabel(order);
+  if (!order.paid || !label) return null;
+
+  let icon = <OtherPayIcon width={16} height={16} />;
+  if (order.payment_method === "cash") icon = <CashIcon width={16} height={16} />;
+  if (order.payment_method === "etransfer") icon = <EtransferIcon width={16} height={16} />;
+
+  return (
+    <div
+      className="h-8 min-w-8 px-2 rounded-xl flex items-center justify-center border"
+      style={{
+        background: "white",
+        color: "var(--color-text)",
+        borderColor: "rgba(28,28,26,0.12)",
+        boxShadow: "0 1px 0 rgba(28,28,26,0.08), 0 4px 10px rgba(28,28,26,0.08)",
+      }}
+      title={label}
+      aria-label={label}
+    >
+      {icon}
+    </div>
+  );
+}
+
 function formatPickupLabel(order: Pick<Order, "pickup_location" | "pickup_time_slot" | "pickup_address">): string {
   const location = (order.pickup_location ?? "").trim();
   const timeSlot = (order.pickup_time_slot ?? "").trim();
@@ -496,6 +526,7 @@ export default function AdminOrdersPage() {
 
   // Single delete modal
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<Order | null>(null);
 
   // Payment modals
   const [paymentTarget, setPaymentTarget] = useState<Order | null>(null);
@@ -540,6 +571,8 @@ export default function AdminOrdersPage() {
   const [remindSelections, setRemindSelections] = useState<Set<string>>(new Set());
   const [reminderRun, setReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
   const [remindSearch, setRemindSearch] = useState("");
+  const [showReminderMenu, setShowReminderMenu] = useState(false);
+  const reminderMenuRef = useRef<HTMLDivElement | null>(null);
   const remindLoading = reminderRun.isRunning;
 
   // Payment reminder modal
@@ -547,7 +580,6 @@ export default function AdminOrdersPage() {
   const [paymentRemindSelections, setPaymentRemindSelections] = useState<Set<string>>(new Set());
   const [paymentReminderRun, setPaymentReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
   const [paymentRemindSearch, setPaymentRemindSearch] = useState("");
-  const [paymentReminderTarget, setPaymentReminderTarget] = useState<Order | null>(null);
   const paymentReminderLoading = paymentReminderRun.isRunning;
 
   // Reset selection when filter/orders change
@@ -558,6 +590,29 @@ export default function AdminOrdersPage() {
   useEffect(() => {
     setLocationFilter("all");
   }, [eventFilter]);
+
+  useEffect(() => {
+    if (!showReminderMenu) return;
+
+    function handlePointerDown(event: MouseEvent) {
+      if (!reminderMenuRef.current?.contains(event.target as Node)) {
+        setShowReminderMenu(false);
+      }
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setShowReminderMenu(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showReminderMenu]);
 
   const showToast = useCallback((message: string, type: "success" | "error") => {
     setToast({ message, type });
@@ -1039,6 +1094,36 @@ export default function AdminOrdersPage() {
     }
   }
 
+  function openMarkPaidModal(order: Order) {
+    setPaymentTarget(order);
+    setPaymentMethod("cash");
+    setPaymentMethodOther("");
+  }
+
+  async function handleSendSinglePaymentReminder(target: Order): Promise<boolean> {
+    const items = buildPaymentReminderItems([target.id]);
+    if (items.length === 0) {
+      showToast("Payment reminder is not available for this order", "error");
+      return false;
+    }
+
+    setPaymentTarget(null);
+    setPaymentRemindSearch("");
+    setPaymentRemindSelections(new Set());
+    setPaymentReminderRun(EMPTY_REMINDER_RUN);
+    setShowPaymentRemindModal(true);
+
+    await executeQueueRun({
+      itemsToTrack: items,
+      orderIdsToProcess: items.map((item) => item.orderId),
+      setRun: setPaymentReminderRun,
+      sendAttempt: sendPaymentReminderAttempt,
+      intervalMs: PAYMENT_REMINDER_SEND_INTERVAL_MS,
+      noun: "payment reminder",
+    });
+    return true;
+  }
+
   async function executeDelete(orderId: string) {
     setDeleting(orderId);
     try {
@@ -1154,6 +1239,7 @@ export default function AdminOrdersPage() {
   }
 
   function openRemindModal() {
+    setShowReminderMenu(false);
     setRemindSelections(new Set(eligibleReminderOrders.map((o) => o.id)));
     setRemindSearch("");
     setReminderRun(EMPTY_REMINDER_RUN);
@@ -1169,6 +1255,7 @@ export default function AdminOrdersPage() {
   }
 
   function openPaymentRemindModal() {
+    setShowReminderMenu(false);
     setPaymentRemindSelections(new Set(eligiblePaymentReminderRecipients.map((recipient) => recipient.orderId)));
     setPaymentRemindSearch("");
     setPaymentReminderRun(EMPTY_REMINDER_RUN);
@@ -1614,33 +1701,6 @@ export default function AdminOrdersPage() {
     });
   }
 
-  async function handleConfirmSinglePaymentReminder() {
-    const target = paymentReminderTarget;
-    if (!target) return;
-
-    const items = buildPaymentReminderItems([target.id]);
-    if (items.length === 0) {
-      showToast("Payment reminder is not available for this order", "error");
-      setPaymentReminderTarget(null);
-      return;
-    }
-
-    setPaymentReminderTarget(null);
-    setPaymentRemindSearch("");
-    setPaymentRemindSelections(new Set());
-    setPaymentReminderRun(EMPTY_REMINDER_RUN);
-    setShowPaymentRemindModal(true);
-
-    await executeQueueRun({
-      itemsToTrack: items,
-      orderIdsToProcess: items.map((item) => item.orderId),
-      setRun: setPaymentReminderRun,
-      sendAttempt: sendPaymentReminderAttempt,
-      intervalMs: PAYMENT_REMINDER_SEND_INTERVAL_MS,
-      noun: "payment reminder",
-    });
-  }
-
   async function handleAddOrder(e: React.FormEvent) {
     e.preventDefault();
     if (addModalEventId === null) {
@@ -2076,7 +2136,7 @@ export default function AdminOrdersPage() {
     });
   }
 
-  const thBase = "px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider";
+  const thBase = "px-3 md:px-4 py-3 text-left text-[11px] md:text-xs font-semibold uppercase tracking-wider";
 
   // Time slots for selected location in the add order form
   const addOrderTimeSlots = useMemo(() => {
@@ -2231,25 +2291,52 @@ export default function AdminOrdersPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={openPaymentRemindModal}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
-            style={{ background: "white", color: "var(--color-bark)", border: "1px solid var(--color-border)" }}
-          >
-            <BellIcon width={14} height={14} />
-            Payment Reminder
-          </button>
-          <button
-            onClick={openRemindModal}
-            className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
-            style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
-              <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-            </svg>
-            Remind
-          </button>
+          <div className="relative" ref={reminderMenuRef}>
+            <button
+              onClick={() => setShowReminderMenu((prev) => !prev)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
+              style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
+              aria-haspopup="menu"
+              aria-expanded={showReminderMenu}
+            >
+              <BellIcon width={14} height={14} />
+              Remind
+              <svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M5 7.5L10 12.5L15 7.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            {showReminderMenu && (
+              <div
+                role="menu"
+                className="absolute right-0 mt-2 w-56 rounded-2xl p-2"
+                style={{
+                  background: "white",
+                  border: "1px solid var(--color-border)",
+                  boxShadow: "0 20px 40px rgba(0,0,0,0.12)",
+                  zIndex: 20,
+                }}
+              >
+                <button
+                  onClick={openRemindModal}
+                  className="w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium"
+                  style={{ color: "var(--color-text)" }}
+                  role="menuitem"
+                >
+                  <BellIcon width={15} height={15} />
+                  Pickup reminder
+                </button>
+                <button
+                  onClick={openPaymentRemindModal}
+                  className="w-full flex items-center gap-3 rounded-xl px-3 py-2 text-left text-sm font-medium"
+                  style={{ color: "var(--color-text)" }}
+                  role="menuitem"
+                >
+                  <BellIcon width={15} height={15} />
+                  Payment reminder
+                </button>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setShowAddOrderChoiceModal(true)}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
@@ -2476,10 +2563,10 @@ export default function AdminOrdersPage() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="w-full min-w-[760px] lg:min-w-0 text-sm">
               <thead>
                 <tr style={{ background: "var(--color-cream)", borderBottom: "1px solid var(--color-border)" }}>
-                  <th className="px-4 py-3 w-10">
+                  <th className="px-3 md:px-4 py-3 w-10">
                     <input
                       ref={selectAllRef}
                       type="checkbox"
@@ -2490,16 +2577,14 @@ export default function AdminOrdersPage() {
                     />
                   </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Name</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Contact</th>
+                  <th className={`${thBase} hidden lg:table-cell`} style={{ color: "var(--color-muted)" }}>Contact</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>Items</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Event</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Location</th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
                     <button
                       onClick={() => toggleSort("timeslot")}
                       className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
                     >
-                      Time Slot <SortIcon active={sort.col === "timeslot"} dir={sort.dir} />
+                      Pickup <SortIcon active={sort.col === "timeslot"} dir={sort.dir} />
                     </button>
                   </th>
                   <th className={thBase} style={{ color: "var(--color-muted)" }}>
@@ -2518,9 +2603,8 @@ export default function AdminOrdersPage() {
                       Status <SortIcon active={sort.col === "status"} dir={sort.dir} />
                     </button>
                   </th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Paid</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Method</th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                  <th className={thBase} style={{ color: "var(--color-muted)" }}>Payment</th>
+                  <th className={`${thBase} hidden xl:table-cell`} style={{ color: "var(--color-muted)" }}>
                     <span className="flex items-center gap-1 uppercase tracking-wider font-semibold" title="Reminded">
                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -2528,7 +2612,7 @@ export default function AdminOrdersPage() {
                       </svg>
                     </span>
                   </th>
-                  <th className={thBase} style={{ color: "var(--color-muted)" }}>
+                  <th className={`${thBase} hidden md:table-cell`} style={{ color: "var(--color-muted)" }}>
                     <button
                       onClick={() => toggleSort("date")}
                       className="flex items-center gap-1 uppercase tracking-wider font-semibold hover:opacity-70 transition-opacity"
@@ -2548,11 +2632,6 @@ export default function AdminOrdersPage() {
                   const isUpdatingPayment = updatingPayment === actionId;
                   const isDeleting = deleting === actionId;
                   const isSelected = selectedIds.has(order.id);
-                  const paymentReminderDisabledReason = getPaymentReminderUnavailableReason(order);
-                  const canSendPaymentReminder = !paymentReminderDisabledReason;
-                  const paymentReminderTitle = order.paid
-                    ? "Payment reminder is only available for unpaid orders"
-                    : paymentReminderDisabledReason ?? "Send payment reminder";
                   return (
                     <tr
                       key={order.id}
@@ -2569,7 +2648,7 @@ export default function AdminOrdersPage() {
                         (e.currentTarget as HTMLTableRowElement).style.background = isSelected ? "rgba(114,145,82,0.06)" : "transparent";
                       }}
                     >
-                      <td className="px-4 py-3 w-10" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 md:px-4 py-3 w-10 align-top" onClick={(e) => e.stopPropagation()}>
                         <input
                           type="checkbox"
                           checked={isSelected}
@@ -2578,10 +2657,24 @@ export default function AdminOrdersPage() {
                           aria-label={`Select order ${order.id}`}
                         />
                       </td>
-                      <td className="px-4 py-3 font-medium" style={{ color: "var(--color-text)" }}>
-                        {order.name}
+                      <td className="px-3 md:px-4 py-3 font-medium align-top" style={{ color: "var(--color-text)" }}>
+                        <div>{order.name}</div>
+                        <div className="lg:hidden mt-1 space-y-1 text-xs font-normal" style={{ color: "var(--color-muted)" }}>
+                          {(order.email || !order.exclude_email) && (
+                            <div className="break-all">{order.email ?? "-"}</div>
+                          )}
+                          {order.phone_number && <div>{order.phone_number}</div>}
+                          {order.exclude_email && (
+                            <span
+                              className="inline-flex text-[10px] px-2 py-0.5 rounded-full font-semibold"
+                              style={{ background: "#f3f4f6", color: "#374151", border: "1px solid var(--color-border)" }}
+                            >
+                              Email Excluded
+                            </span>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-muted)" }}>
+                      <td className="hidden lg:table-cell px-4 py-3 align-top" style={{ color: "var(--color-muted)" }}>
                         <div className="flex items-center gap-2 flex-wrap">
                           {(order.email || !order.exclude_email) && (
                             <span>{order.email ?? "-"}</span>
@@ -2599,31 +2692,27 @@ export default function AdminOrdersPage() {
                           <div className="text-xs">{order.phone_number}</div>
                         )}
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
+                      <td className="px-3 md:px-4 py-3 align-top" style={{ color: "var(--color-text)" }}>
                         <div className="text-lg font-semibold" style={{ lineHeight: 1.1 }}>
                           {order.quantity_total}
                         </div>
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        <span className="block" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <td className="px-3 md:px-4 py-3 align-top" style={{ color: "var(--color-text)", minWidth: 220 }}>
+                        <div className="font-medium" style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                           {eventLabelById.get(order.event_id) ?? `Event ${order.event_id}`}
-                        </span>
+                        </div>
+                        <div className="mt-0.5">{order.pickup_location}</div>
+                        <div className="text-xs" style={{ color: "var(--color-muted)" }}>
+                          <span>{order.pickup_time_slot}</span>
+                          {order.pickup_address && (
+                            <span> | {order.pickup_address}</span>
+                          )}
+                        </div>
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        <div>{order.pickup_location}</div>
-                        {order.pickup_address && (
-                          <div className="text-xs" style={{ color: "var(--color-muted)" }}>
-                            {order.pickup_address}
-                          </div>
-                        )}
+                      <td className="px-3 md:px-4 py-3 font-semibold align-top whitespace-nowrap" style={{ color: "var(--color-forest)" }}>
+                        {formatMoney(order.total_price)}
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap" style={{ color: "var(--color-text)" }}>
-                        {order.pickup_time_slot}
-                      </td>
-                      <td className="px-4 py-3 font-semibold" style={{ color: "var(--color-forest)" }}>
-                        ${order.total_price.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
                         <div className="relative inline-block">
                           <select
                             value={order.status}
@@ -2647,86 +2736,35 @@ export default function AdminOrdersPage() {
                           </span>
                         </div>
                       </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                      <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
                         <div className="flex items-center gap-2">
-                          {!order.paid && (
-                            <button
-                              onClick={() => setPaymentReminderTarget(order)}
-                              disabled={isUpdatingPayment || !canSendPaymentReminder}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              style={{
-                                background: canSendPaymentReminder ? "var(--color-cream)" : "#f3f4f6",
-                                color: canSendPaymentReminder ? "var(--color-bark)" : "#9ca3af",
-                                border: "1px solid var(--color-border)",
-                              }}
-                              aria-label="Send payment reminder"
-                              title={paymentReminderTitle}
-                            >
-                              <BellIcon width={15} height={15} />
-                            </button>
-                          )}
-                          <span
-                            className="text-[10px] py-0.5 rounded-full font-semibold text-center inline-block"
-                            style={{
-                              width: "3.5rem",
-                              background: order.paid ? "var(--color-sage)" : "var(--color-cream)",
-                              color: order.paid ? "white" : "var(--color-muted)",
-                              border: "1px solid var(--color-border)",
+                          <button
+                            onClick={() => {
+                              if (order.paid) {
+                                setUnpayTarget(order);
+                                return;
+                              }
+                              openMarkPaidModal(order);
                             }}
+                            disabled={isUpdatingPayment}
+                            className="px-3.5 py-1.5 rounded-full text-xs font-semibold border transition-all disabled:opacity-60"
+                            style={{
+                              background: order.paid ? "var(--color-success-bg)" : "var(--color-error-bg)",
+                              color: order.paid ? "var(--color-success-text)" : "var(--color-error-text)",
+                              borderColor: order.paid ? "var(--color-success-border)" : "var(--color-error-border)",
+                              boxShadow: order.paid
+                                ? "0 2px 0 var(--color-success-border), 0 8px 16px rgba(6,95,70,0.12)"
+                                : "0 2px 0 var(--color-error-border), 0 8px 16px rgba(153,27,27,0.12)",
+                            }}
+                            aria-label={order.paid ? "Open mark unpaid dialog" : "Open mark paid dialog"}
+                            title={order.paid ? "Mark as unpaid" : "Mark as paid"}
                           >
                             {order.paid ? "Paid" : "Unpaid"}
-                          </span>
-
-                          {order.paid ? (
-                            <button
-                              onClick={() => setUnpayTarget(order)}
-                              disabled={isUpdatingPayment}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              style={{ background: "#dc2626", color: "white" }}
-                              aria-label="Mark order unpaid"
-                              title="Mark as unpaid"
-                            >
-                              <BanknoteIcon />
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => {
-                                setPaymentTarget(order);
-                                setPaymentMethod("cash");
-                                setPaymentMethodOther("");
-                              }}
-                              disabled={isUpdatingPayment || order.status === "pending"}
-                              className="w-8 h-8 flex items-center justify-center rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                              style={{ background: "var(--color-sage)", color: "white" }}
-                              aria-label="Mark order paid"
-                              title={order.status === "pending" ? "Confirm order first" : "Mark as paid"}
-                            >
-                              <BanknoteIcon />
-                            </button>
-                          )}
+                          </button>
+                          <PaymentMethodBadge order={order} />
                         </div>
                       </td>
-                      <td className="px-4 py-3" style={{ color: "var(--color-text)" }}>
-                        {!order.paid ? (
-                          <span style={{ color: "var(--color-muted)" }}>-</span>
-                        ) : order.payment_method === "cash" ? (
-                          "Cash"
-                        ) : order.payment_method === "etransfer" ? (
-                          "E-transfer"
-                        ) : order.payment_method === "other" ? (
-                          <div className="leading-tight">
-                            <div>Other</div>
-                            {order.payment_method_other && (
-                              <div className="text-xs" style={{ color: "var(--color-muted)" }}>
-                                {order.payment_method_other}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span style={{ color: "var(--color-muted)" }}>{order.payment_method ?? "-"}</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-3 text-center" title={order.reminded ? "Reminder sent" : "Not reminded"}>
+                      <td className="hidden xl:table-cell px-4 py-3 text-center align-top" title={order.reminded ? "Reminder sent" : "Not reminded"}>
                         {order.reminded ? (
                           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
@@ -2740,17 +2778,22 @@ export default function AdminOrdersPage() {
                           </svg>
                         )}
                       </td>
-                      <td className="px-4 py-3 whitespace-nowrap text-xs" style={{ color: "var(--color-muted)" }}>
+                      <td className="hidden md:table-cell px-4 py-3 whitespace-nowrap text-xs align-top" style={{ color: "var(--color-muted)" }}>
                         {formatDate(order.created_at)}
                       </td>
-                      <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                        <div className="flex items-center gap-2">
+                      <td className="px-3 md:px-4 py-3 align-top" onClick={(e) => e.stopPropagation()}>
+                        <div className="flex items-center flex-wrap gap-2">
                           {order.status === "pending" && (
                             <button
-                              onClick={() => handleConfirm(actionId)}
+                              onClick={() => setConfirmTarget(order)}
                               disabled={isConfirming}
                               className="p-1.5 rounded-lg transition-all disabled:opacity-60"
-                              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                              style={{
+                                background: "var(--color-bark)",
+                                color: "white",
+                                border: "1px solid rgba(28,28,26,0.08)",
+                                boxShadow: "0 2px 0 rgba(88,58,37,0.45), 0 8px 16px rgba(139,94,60,0.22)",
+                              }}
                               aria-label={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
                               title={order.exclude_email ? "Confirm order without email" : "Send confirmation"}
                             >
@@ -2962,11 +3005,7 @@ export default function AdminOrdersPage() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => {
-                            setPaymentTarget(selectedBundle);
-                            setPaymentMethod("cash");
-                            setPaymentMethodOther("");
-                          }}
+                          onClick={() => openMarkPaidModal(selectedBundle)}
                           disabled={selectedBundle.status === "pending"}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
                           style={{ background: "var(--color-sage)", color: "white" }}
@@ -3125,6 +3164,45 @@ export default function AdminOrdersPage() {
         This order bundle will be permanently deleted. This cannot be undone.
       </Modal>
 
+      <Modal
+        isOpen={!!confirmTarget}
+        onClose={() => {
+          if (confirmTarget && confirming === getOrderActionId(confirmTarget)) return;
+          setConfirmTarget(null);
+        }}
+        title={confirmTarget?.exclude_email ? "Confirm Order Without Email" : "Send Confirmation Email"}
+        actions={
+          <>
+            <button
+              onClick={() => setConfirmTarget(null)}
+              disabled={!!confirmTarget && confirming === getOrderActionId(confirmTarget)}
+              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = confirmTarget;
+                if (!target) return;
+                const orderId = getOrderActionId(target);
+                await handleConfirm(orderId);
+                setConfirmTarget(null);
+              }}
+              disabled={!!confirmTarget && confirming === getOrderActionId(confirmTarget)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-bark)", color: "white" }}
+            >
+              {confirmTarget?.exclude_email ? "Confirm order" : "Send email"}
+            </button>
+          </>
+        }
+      >
+        {confirmTarget?.exclude_email
+          ? `This will mark ${confirmTarget.name} as confirmed without sending an email because email is excluded for this bundle.`
+          : `This will send the confirmation email to ${confirmTarget?.name ?? "this customer"} and mark the bundle as confirmed.`}
+      </Modal>
+
       {/* Bulk delete modal */}
       <Modal
         isOpen={showBulkDeleteModal}
@@ -3198,14 +3276,20 @@ export default function AdminOrdersPage() {
             >
               Cancel
             </button>
+            {paymentTarget && !getPaymentReminderUnavailableReason(paymentTarget) && (
+              <button
+                onClick={() => { void handleSendSinglePaymentReminder(paymentTarget); }}
+                disabled={paymentReminderLoading || updatingPayment === getOrderActionId(paymentTarget)}
+                className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
+                style={{ background: "white", color: "var(--color-bark)", border: "1px solid var(--color-border)" }}
+              >
+                Send payment reminder
+              </button>
+            )}
             <button
               onClick={async () => {
                 const target = paymentTarget;
                 if (!target) return;
-                if (target.status === "pending") {
-                  showToast("Confirm the order before marking it paid", "error");
-                  return;
-                }
                 const other = paymentMethodOther.trim();
                 if (paymentMethod === "other" && !other) {
                   showToast("Enter payment details for Other", "error");
@@ -3220,7 +3304,12 @@ export default function AdminOrdersPage() {
                 });
                 if (ok) setPaymentTarget(null);
               }}
-              disabled={!!paymentTarget && updatingPayment === getOrderActionId(paymentTarget)}
+              disabled={
+                !!paymentTarget && (
+                  updatingPayment === getOrderActionId(paymentTarget) ||
+                  paymentTarget.status === "pending"
+                )
+              }
               className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
             >
@@ -3233,6 +3322,19 @@ export default function AdminOrdersPage() {
           <p style={{ color: "var(--color-muted)" }}>
             Set payment information for <span className="font-semibold" style={{ color: "var(--color-text)" }}>{paymentTarget?.name ?? "this order"}</span>.
           </p>
+
+          {paymentTarget?.status === "pending" && (
+            <div
+              className="rounded-xl px-3 py-2 text-sm"
+              style={{
+                background: "var(--color-warning-bg)",
+                color: "var(--color-warning-text)",
+                border: "1px solid var(--color-warning-border)",
+              }}
+            >
+              Confirm the order before marking it paid.
+            </div>
+          )}
 
           <div className="flex gap-2">
             {(["cash", "etransfer", "other"] as const).map((method) => {
@@ -3310,37 +3412,6 @@ export default function AdminOrdersPage() {
         }
       >
         This will set paid to false and clear the payment method.
-      </Modal>
-
-      <Modal
-        isOpen={!!paymentReminderTarget}
-        onClose={() => {
-          if (paymentReminderLoading) return;
-          setPaymentReminderTarget(null);
-        }}
-        title="Send Payment Reminder"
-        actions={
-          <>
-            <button
-              onClick={() => setPaymentReminderTarget(null)}
-              disabled={paymentReminderLoading}
-              className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
-              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-            >
-              Cancel
-            </button>
-            <button
-              onClick={() => { void handleConfirmSinglePaymentReminder(); }}
-              disabled={paymentReminderLoading}
-              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
-              style={{ background: "var(--color-bark)", color: "var(--color-cream)" }}
-            >
-              Send reminder
-            </button>
-          </>
-        }
-      >
-        This will send an automated payment reminder email to {paymentReminderTarget?.name ?? "this customer"} for the selected unpaid order bundle. If payment has already been resolved, the email copy will instruct them to ignore it.
       </Modal>
 
       {/* Add Order Type Modal */}
