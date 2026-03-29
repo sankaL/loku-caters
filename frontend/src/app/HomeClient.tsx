@@ -1,108 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
-import StarRating from "@/components/ui/StarRating";
+import ReviewTicker from "@/components/ui/ReviewTicker";
+import type { PublicReview } from "@/components/ui/ReviewTicker";
 import { API_URL } from "@/config/event";
 import type { EventConfig } from "@/config/event";
-
-interface PublicReview {
-  id: string;
-  name: string | null;
-  message: string | null;
-  rating: number | null;
-  created_at: string | null;
-}
-
-function ReviewCard({ review }: { review: PublicReview }) {
-  return (
-    <div
-      style={{
-        background: "white",
-        border: "1px solid var(--color-border)",
-        borderRadius: 24,
-        padding: "28px 24px",
-        minWidth: 290,
-        maxWidth: 340,
-        flexShrink: 0,
-        display: "flex",
-        flexDirection: "column",
-        gap: 14,
-        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
-      }}
-    >
-      {review.rating && <StarRating value={review.rating} size={18} mode="display" />}
-      {review.message && (
-        <p
-          style={{
-            color: "var(--color-text)",
-            fontSize: 14,
-            lineHeight: 1.65,
-            margin: 0,
-            display: "-webkit-box",
-            WebkitLineClamp: 4,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
-          &ldquo;{review.message}&rdquo;
-        </p>
-      )}
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
-        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--color-forest)" }}>
-          {review.name || "Happy Customer"}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function ReviewTicker({ reviews }: { reviews: PublicReview[] }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const [paused, setPaused] = useState(false);
-  const animationRef = useRef<number | null>(null);
-  const displayReviews = reviews.length > 0 ? [...reviews, ...reviews] : [];
-
-  const tick = useCallback(() => {
-    if (scrollRef.current && !paused) {
-      scrollRef.current.scrollLeft += 0.5;
-      const halfWidth = scrollRef.current.scrollWidth / 2;
-      if (scrollRef.current.scrollLeft >= halfWidth) {
-        scrollRef.current.scrollLeft = 0;
-      }
-    }
-    animationRef.current = requestAnimationFrame(tick);
-  }, [paused]);
-
-  useEffect(() => {
-    animationRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (animationRef.current) cancelAnimationFrame(animationRef.current);
-    };
-  }, [tick]);
-
-  if (reviews.length === 0) return null;
-
-  return (
-    <div
-      ref={scrollRef}
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
-      style={{
-        display: "flex",
-        gap: 20,
-        overflowX: "hidden",
-        paddingBottom: 8,
-        maskImage: "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
-        WebkitMaskImage: "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
-      }}
-    >
-      {displayReviews.map((review, idx) => (
-        <ReviewCard key={`${review.id}-${idx}`} review={review} />
-      ))}
-    </div>
-  );
-}
 
 export default function HomeClient({ eventConfig }: { eventConfig: EventConfig | null }) {
   const hasActiveEvent = Boolean(eventConfig);
