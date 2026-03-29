@@ -10,6 +10,9 @@ router = APIRouter(prefix="/api/feedback", tags=["feedback"])
 
 @router.post("", response_model=FeedbackResponse, status_code=201)
 def create_feedback(feedback_in: FeedbackCreate, db: Session = Depends(get_db)):
+    if feedback_in.origin == "admin_submission":
+        raise HTTPException(status_code=403, detail="Invalid feedback origin")
+
     try:
         normalized = normalize_feedback_create(feedback_in)
     except ValueError as exc:

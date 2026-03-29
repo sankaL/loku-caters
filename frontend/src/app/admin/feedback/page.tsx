@@ -6,6 +6,7 @@ import { API_URL } from "@/config/event";
 import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
+import StarRating from "@/components/ui/StarRating";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,8 +19,19 @@ interface FeedbackMetric {
   pct: number;
 }
 
-type FeedbackOrigin = "contact_us" | "events_page_non_customer" | "events_page_customer" | "event_reminder_email" | "reviews_page";
+type FeedbackOrigin = "contact_us" | "events_page_non_customer" | "events_page_customer" | "event_reminder_email" | "reviews_page" | "admin_submission";
 type FeedbackType = "general_question" | "feedback" | "collaboration" | "other";
+
+interface AdminFeedbackFormState {
+  feedback_type: FeedbackType;
+  name: string;
+  contact: string;
+  order_id: string;
+  message: string;
+  other_details: string;
+  rating: number;
+  show_in_reviews: boolean;
+}
 
 interface FeedbackItem {
   id: string;
@@ -107,6 +119,12 @@ const ORIGIN_STYLES: Record<FeedbackOrigin, { bg: string; color: string; border:
     border: "1px solid #fcd34d",
     label: "Reviews Page",
   },
+  admin_submission: {
+    bg: "#ecfdf3",
+    color: "#166534",
+    border: "1px solid #bbf7d0",
+    label: "Admin Submission",
+  },
 };
 
 const TYPE_STYLES: Record<FeedbackType, { bg: string; color: string; border: string; label: string }> = {
@@ -136,6 +154,111 @@ const TYPE_STYLES: Record<FeedbackType, { bg: string; color: string; border: str
   },
 };
 
+const PRE_ORDER_REASON_OPTIONS = [
+  { value: "price_too_high", label: "Price too high" },
+  { value: "location_not_convenient", label: "Pickup location not convenient" },
+  { value: "dietary_needs", label: "Food does not meet dietary needs" },
+  { value: "not_available", label: "Not available on the event date" },
+  { value: "different_menu", label: "Prefer a different menu item" },
+  { value: "prefer_delivery", label: "Prefer delivery over pickup" },
+  { value: "not_interested", label: "Not interested at this time" },
+  { value: "other", label: "Other" },
+] as const;
+
+const EMPTY_REASON_METRICS: FeedbackMetric[] = PRE_ORDER_REASON_OPTIONS.map((option) => ({
+  reason: option.value,
+  label: option.label,
+  count: 0,
+  pct: 0,
+}));
+
+type AdminFeedbackFieldErrors = Partial<Record<"name" | "contact" | "order_id" | "message" | "other_details", string>>;
+
+type AdminFeedbackTypeConfig = {
+  title: string;
+  description: string;
+  messageLabel: string;
+  messagePlaceholder: string;
+  showContact: boolean;
+  contactRequired: boolean;
+  contactLabel: string;
+  contactPlaceholder: string;
+  showOrderId: boolean;
+  showOtherDetails: boolean;
+  otherDetailsLabel: string;
+  otherDetailsPlaceholder: string;
+};
+
+const ADMIN_FEEDBACK_TYPE_CONFIG: Record<FeedbackType, AdminFeedbackTypeConfig> = {
+  general_question: {
+    title: "General Question",
+    description: "Capture a question or request shared by phone, text, email, or in person.",
+    messageLabel: "Question or request",
+    messagePlaceholder: "Summarize what the admin heard and what follow-up may be needed.",
+    showContact: true,
+    contactRequired: false,
+    contactLabel: "Contact details",
+    contactPlaceholder: "Email, phone number, Instagram handle, or anything useful",
+    showOrderId: true,
+    showOtherDetails: false,
+    otherDetailsLabel: "Extra context",
+    otherDetailsPlaceholder: "",
+  },
+  feedback: {
+    title: "Feedback",
+    description: "Record praise, complaints, or suggestions gathered outside the website.",
+    messageLabel: "Feedback summary",
+    messagePlaceholder: "What did they say? Capture the main feedback in a clear summary.",
+    showContact: true,
+    contactRequired: false,
+    contactLabel: "Contact details",
+    contactPlaceholder: "Email, phone number, Instagram handle, or anything useful",
+    showOrderId: true,
+    showOtherDetails: true,
+    otherDetailsLabel: "Additional context",
+    otherDetailsPlaceholder: "Any extra context, follow-up notes, or source details",
+  },
+  collaboration: {
+    title: "Collaboration",
+    description: "Track partnership, catering, or event opportunities that need follow-up.",
+    messageLabel: "Opportunity details",
+    messagePlaceholder: "What is the collaboration opportunity and what did they ask for?",
+    showContact: true,
+    contactRequired: true,
+    contactLabel: "Contact details",
+    contactPlaceholder: "Who should the team follow up with and how?",
+    showOrderId: false,
+    showOtherDetails: true,
+    otherDetailsLabel: "Supporting context",
+    otherDetailsPlaceholder: "Optional background, timeline, venue details, or next steps",
+  },
+  other: {
+    title: "Other",
+    description: "Capture anything that does not fit the standard feedback categories.",
+    messageLabel: "Details",
+    messagePlaceholder: "Summarize the feedback or request clearly.",
+    showContact: true,
+    contactRequired: false,
+    contactLabel: "Contact details",
+    contactPlaceholder: "Email, phone number, Instagram handle, or anything useful",
+    showOrderId: false,
+    showOtherDetails: true,
+    otherDetailsLabel: "Additional context",
+    otherDetailsPlaceholder: "Optional notes, background, or source details",
+  },
+};
+
+const INITIAL_ADMIN_FEEDBACK_FORM: AdminFeedbackFormState = {
+  feedback_type: "feedback",
+  name: "",
+  contact: "",
+  order_id: "",
+  message: "",
+  other_details: "",
+  rating: 0,
+  show_in_reviews: false,
+};
+
 function buildOriginCounts(items: FeedbackItem[]): Record<FeedbackOrigin, number> {
   return {
     contact_us: items.filter((item) => item.origin === "contact_us").length,
@@ -143,6 +266,7 @@ function buildOriginCounts(items: FeedbackItem[]): Record<FeedbackOrigin, number
     events_page_customer: items.filter((item) => item.origin === "events_page_customer").length,
     event_reminder_email: items.filter((item) => item.origin === "event_reminder_email").length,
     reviews_page: items.filter((item) => item.origin === "reviews_page").length,
+    admin_submission: items.filter((item) => item.origin === "admin_submission").length,
   };
 }
 
@@ -152,6 +276,16 @@ function buildTypeCounts(items: FeedbackItem[]): Record<FeedbackType, number> {
     feedback: items.filter((item) => item.feedback_type === "feedback").length,
     collaboration: items.filter((item) => item.feedback_type === "collaboration").length,
     other: items.filter((item) => item.feedback_type === "other").length,
+  };
+}
+
+function buildEmptyFeedbackData(items: FeedbackItem[]): FeedbackResponse {
+  return {
+    total: items.length,
+    origin_counts: buildOriginCounts(items),
+    type_counts: buildTypeCounts(items),
+    reason_metrics: EMPTY_REASON_METRICS.map((metric) => ({ ...metric })),
+    items,
   };
 }
 
@@ -647,6 +781,11 @@ export default function AdminFeedbackPage() {
   const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
   const [bulkStatusTarget, setBulkStatusTarget] = useState("resolved");
   const [pendingReviewToggle, setPendingReviewToggle] = useState<{ id: string; show: boolean } | null>(null);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createForm, setCreateForm] = useState<AdminFeedbackFormState>(INITIAL_ADMIN_FEEDBACK_FORM);
+  const [createErrors, setCreateErrors] = useState<AdminFeedbackFieldErrors>({});
+  const [createError, setCreateError] = useState("");
+  const [creating, setCreating] = useState(false);
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -821,6 +960,107 @@ export default function AdminFeedbackPage() {
   async function getAuthHeader(): Promise<Record<string, string>> {
     const token = await getAdminToken();
     return token ? { Authorization: `Bearer ${token}` } : {};
+  }
+
+  const activeCreateType = ADMIN_FEEDBACK_TYPE_CONFIG[createForm.feedback_type];
+  const createFormSupportsReviews = createForm.feedback_type === "feedback";
+
+  function resetCreateForm() {
+    setCreateForm(INITIAL_ADMIN_FEEDBACK_FORM);
+    setCreateErrors({});
+    setCreateError("");
+  }
+
+  function openCreateModal() {
+    resetCreateForm();
+    setShowCreateModal(true);
+  }
+
+  function closeCreateModal() {
+    if (creating) return;
+    setShowCreateModal(false);
+    resetCreateForm();
+  }
+
+  function updateCreateForm<K extends keyof AdminFeedbackFormState>(field: K, value: AdminFeedbackFormState[K]) {
+    setCreateForm((prev) => ({ ...prev, [field]: value }));
+    setCreateErrors((prev) => ({ ...prev, [field]: undefined }));
+    if (createError) setCreateError("");
+  }
+
+  function updateCreateRating(nextRating: number) {
+    setCreateForm((prev) => ({
+      ...prev,
+      rating: nextRating,
+      show_in_reviews: nextRating > 0 ? prev.show_in_reviews : false,
+    }));
+    if (createError) setCreateError("");
+  }
+
+  function validateCreateForm(): AdminFeedbackFieldErrors {
+    const nextErrors: AdminFeedbackFieldErrors = {};
+    if (!createForm.message.trim()) {
+      nextErrors.message = `${activeCreateType.messageLabel} is required.`;
+    }
+    if (activeCreateType.contactRequired && !createForm.contact.trim()) {
+      nextErrors.contact = "Contact details are required for collaboration feedback.";
+    }
+    return nextErrors;
+  }
+
+  async function handleCreateFeedback() {
+    const nextErrors = validateCreateForm();
+    setCreateErrors(nextErrors);
+    if (Object.keys(nextErrors).length > 0) {
+      return;
+    }
+
+    const headers = await getAuthHeader();
+    const payload = {
+      feedback_type: createForm.feedback_type,
+      name: createForm.name.trim() || undefined,
+      contact: createForm.contact.trim() || undefined,
+      order_id: activeCreateType.showOrderId ? createForm.order_id.trim() || undefined : undefined,
+      message: createForm.message.trim(),
+      other_details: activeCreateType.showOtherDetails ? createForm.other_details.trim() || undefined : undefined,
+      rating: createFormSupportsReviews && createForm.rating > 0 ? createForm.rating : undefined,
+      show_in_reviews: createFormSupportsReviews && createForm.rating > 0 ? createForm.show_in_reviews : false,
+    };
+
+    setCreating(true);
+    setCreateError("");
+
+    try {
+      const res = await fetch(`${API_URL}/api/admin/feedback`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (res.status === 401) {
+        router.push("/admin/login");
+        return;
+      }
+
+      if (!res.ok) {
+        const result = await res.json().catch(() => null);
+        const detail = typeof result?.detail === "string" ? result.detail : "Failed to submit feedback";
+        throw new Error(detail);
+      }
+
+      const created: FeedbackItem = await res.json();
+      setData((prev) => (prev ? rebuildFeedbackData(prev, [created, ...prev.items]) : buildEmptyFeedbackData([created])));
+      setPage(1);
+      setShowCreateModal(false);
+      resetCreateForm();
+      showToast("Admin feedback submitted", "success");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to submit feedback";
+      setCreateError(message);
+      showToast("Failed to submit feedback", "error");
+    } finally {
+      setCreating(false);
+    }
   }
 
   async function handleStatusChange(id: string, status: string): Promise<void> {
@@ -1031,21 +1271,29 @@ export default function AdminFeedbackPage() {
     <div style={{ padding: "clamp(20px, 2vw, 32px) clamp(16px, 1.25vw, 24px) 56px", maxWidth: 1200, margin: "0 auto" }}>
 
       {/* Header */}
-      <div style={{ marginBottom: 28 }}>
-        <h1
-          style={{
-            fontSize: 24,
-            fontWeight: 700,
-            color: "var(--color-forest)",
-            fontFamily: "var(--font-serif)",
-            marginBottom: 4,
-          }}
-        >
-          Feedback
-        </h1>
-        <p style={{ fontSize: 14, color: "var(--color-muted)" }}>
-          Pre-order feedback from visitors, contact messages, and post-order feedback from customers.
-        </p>
+      <div style={{ marginBottom: 28, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <h1
+            style={{
+              fontSize: 24,
+              fontWeight: 700,
+              color: "var(--color-forest)",
+              fontFamily: "var(--font-serif)",
+              marginBottom: 4,
+            }}
+          >
+            Feedback
+          </h1>
+          <p style={{ fontSize: 14, color: "var(--color-muted)" }}>
+            Pre-order feedback from visitors, contact messages, admin-captured notes, and post-order feedback from customers.
+          </p>
+        </div>
+        <button onClick={openCreateModal} style={btnPrimary}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14" /><path d="M5 12h14" />
+          </svg>
+          Submit feedback
+        </button>
       </div>
 
       {error && (
@@ -1066,7 +1314,7 @@ export default function AdminFeedbackPage() {
 
       {/* Top metric cards */}
       {loading ? (
-        <CompactMetricRail>
+          <CompactMetricRail>
           {[...Array(5)].map((_, i) => (
             <CompactMetricCard key={i} variant={i === 0 ? "dark" : "light"}>
               <Skeleton w="60%" h={10} />
@@ -1249,6 +1497,42 @@ export default function AdminFeedbackPage() {
             </p>
           </CompactMetricCard>
 
+          <CompactMetricCard
+            onClick={() => setOriginFilter(originFilter === "admin_submission" ? "all" : "admin_submission")}
+            selected={originFilter === "admin_submission"}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <p
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  color: "var(--color-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.08em",
+                }}
+              >
+                Admin Submitted
+              </p>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 12h6" /><path d="M12 9v6" /><path d="M9 3h6l1 2h4v16H4V5h4l1-2z" />
+              </svg>
+            </div>
+            <p
+              style={{
+                fontSize: "clamp(24px, 2vw, 28px)",
+                fontWeight: 700,
+                color: "var(--color-forest)",
+                fontFamily: "var(--font-serif)",
+                lineHeight: 1,
+              }}
+            >
+              {data.origin_counts.admin_submission}
+            </p>
+            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
+              Captured outside the platform
+            </p>
+          </CompactMetricCard>
+
           {sortedMetrics[0] && (() => {
             const m = sortedMetrics[0];
             const colors = REASON_COLORS[m.reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" };
@@ -1385,6 +1669,7 @@ export default function AdminFeedbackPage() {
           <option value="events_page_customer">Events Page (Customer)</option>
           <option value="event_reminder_email">Event Reminder Email</option>
           <option value="reviews_page">Reviews Page</option>
+          <option value="admin_submission">Admin Submission</option>
         </select>
 
         <select
@@ -1405,14 +1690,9 @@ export default function AdminFeedbackPage() {
           style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
         >
           <option value="all">All pre-order reasons</option>
-          <option value="price_too_high">Price too high</option>
-          <option value="location_not_convenient">Pickup location not convenient</option>
-          <option value="dietary_needs">Food does not meet dietary needs</option>
-          <option value="not_available">Not available on the event date</option>
-          <option value="different_menu">Prefer a different menu item</option>
-          <option value="prefer_delivery">Prefer delivery over pickup</option>
-          <option value="not_interested">Not interested at this time</option>
-          <option value="other">Other</option>
+          {PRE_ORDER_REASON_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>{option.label}</option>
+          ))}
         </select>
 
         <select
@@ -1525,8 +1805,13 @@ export default function AdminFeedbackPage() {
             </svg>
             <p style={{ fontSize: 15, fontWeight: 600, color: "var(--color-forest)", marginBottom: 4 }}>No feedback yet</p>
             <p style={{ fontSize: 13, color: "var(--color-muted)" }}>
-              {hasFilters ? "No results match your filters." : "Feedback, contact messages, and customer notes will appear here."}
+              {hasFilters ? "No results match your filters." : "Feedback, contact messages, customer notes, and admin-submitted entries will appear here."}
             </p>
+            {!hasFilters && (
+              <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
+                <button onClick={openCreateModal} style={btnPrimary}>Submit feedback</button>
+              </div>
+            )}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>
@@ -1753,6 +2038,307 @@ export default function AdminFeedbackPage() {
           </button>
         </div>
       )}
+
+      {/* Single delete modal */}
+      <Modal
+        isOpen={showCreateModal}
+        onClose={closeCreateModal}
+        title="Submit admin feedback"
+        size="xl"
+        actions={
+          <>
+            <button onClick={closeCreateModal} disabled={creating} style={btnBase}>Cancel</button>
+            <button onClick={handleCreateFeedback} disabled={creating} style={{ ...btnPrimary, opacity: creating ? 0.7 : 1, cursor: creating ? "not-allowed" : "pointer" }}>
+              {creating ? "Submitting..." : "Submit feedback"}
+            </button>
+          </>
+        }
+      >
+        <div style={{ display: "grid", gap: 20 }}>
+          <div
+            style={{
+              padding: 16,
+              borderRadius: 16,
+              border: "1px solid #c8ddb4",
+              background: "#f0f7eb",
+              display: "grid",
+              gap: 6,
+            }}
+          >
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--color-forest)" }}>
+              Capture feedback shared outside the platform.
+            </p>
+            <p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>
+              Start by choosing the type. The form keeps only the required fields up front, then moves optional context to the end.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gap: 10 }}>
+            <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
+              Feedback type
+            </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+              {(Object.keys(ADMIN_FEEDBACK_TYPE_CONFIG) as FeedbackType[]).map((type) => {
+                const config = ADMIN_FEEDBACK_TYPE_CONFIG[type];
+                const selected = createForm.feedback_type === type;
+                return (
+                  <button
+                    key={type}
+                    onClick={() => updateCreateForm("feedback_type", type)}
+                    style={{
+                      textAlign: "left",
+                      padding: 14,
+                      borderRadius: 14,
+                      border: selected ? "1px solid var(--color-forest)" : "1px solid var(--color-border)",
+                      background: selected ? "#f0f7eb" : "white",
+                      cursor: "pointer",
+                      display: "grid",
+                      gap: 6,
+                    }}
+                  >
+                    <span style={{ fontSize: 14, fontWeight: 600, color: selected ? "var(--color-forest)" : "var(--color-text)" }}>
+                      {config.title}
+                    </span>
+                    <span style={{ fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>
+                      {config.description}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 14 }}>
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0, marginBottom: 6 }}>
+                Required details
+              </p>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>
+                {activeCreateType.description}
+              </p>
+            </div>
+
+            {activeCreateType.showContact && activeCreateType.contactRequired && (
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
+                  {activeCreateType.contactLabel} <span style={{ color: "#c53030" }}>*</span>
+                </label>
+                <input
+                  type="text"
+                  value={createForm.contact}
+                  onChange={(e) => updateCreateForm("contact", e.target.value)}
+                  placeholder={activeCreateType.contactPlaceholder}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: createErrors.contact ? "1px solid #c53030" : "1px solid var(--color-border)",
+                    fontSize: 13,
+                    color: "var(--color-text)",
+                    background: "white",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+                {createErrors.contact && <p style={{ margin: 0, fontSize: 12, color: "#c53030" }}>{createErrors.contact}</p>}
+              </div>
+            )}
+
+            <div style={{ display: "grid", gap: 6 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
+                {activeCreateType.messageLabel} <span style={{ color: "#c53030" }}>*</span>
+              </label>
+              <textarea
+                value={createForm.message}
+                onChange={(e) => updateCreateForm("message", e.target.value)}
+                placeholder={activeCreateType.messagePlaceholder}
+                rows={5}
+                style={{
+                  width: "100%",
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: createErrors.message ? "1px solid #c53030" : "1px solid var(--color-border)",
+                  fontSize: 13,
+                  color: "var(--color-text)",
+                  background: "white",
+                  resize: "vertical",
+                  fontFamily: "inherit",
+                  outline: "none",
+                  boxSizing: "border-box",
+                }}
+              />
+              {createErrors.message && <p style={{ margin: 0, fontSize: 12, color: "#c53030" }}>{createErrors.message}</p>}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 14 }}>
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0, marginBottom: 6 }}>
+                Optional context
+              </p>
+              <p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>
+                Add supporting details only if they help the team understand or follow up on the entry.
+              </p>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Name</label>
+                <input
+                  type="text"
+                  value={createForm.name}
+                  onChange={(e) => updateCreateForm("name", e.target.value)}
+                  placeholder="Who shared this feedback?"
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: "1px solid var(--color-border)",
+                    fontSize: 13,
+                    color: "var(--color-text)",
+                    background: "white",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+
+              {activeCreateType.showContact && !activeCreateType.contactRequired && (
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{activeCreateType.contactLabel}</label>
+                  <input
+                    type="text"
+                    value={createForm.contact}
+                    onChange={(e) => updateCreateForm("contact", e.target.value)}
+                    placeholder={activeCreateType.contactPlaceholder}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      border: "1px solid var(--color-border)",
+                      fontSize: 13,
+                      color: "var(--color-text)",
+                      background: "white",
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              )}
+
+              {activeCreateType.showOrderId && (
+                <div style={{ display: "grid", gap: 6 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Related order ID</label>
+                  <input
+                    type="text"
+                    value={createForm.order_id}
+                    onChange={(e) => updateCreateForm("order_id", e.target.value)}
+                    placeholder="Add an order ID only if this feedback links to one"
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 12,
+                      border: "1px solid var(--color-border)",
+                      fontSize: 13,
+                      color: "var(--color-text)",
+                      background: "white",
+                      outline: "none",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {activeCreateType.showOtherDetails && (
+              <div style={{ display: "grid", gap: 6 }}>
+                <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{activeCreateType.otherDetailsLabel}</label>
+                <textarea
+                  value={createForm.other_details}
+                  onChange={(e) => updateCreateForm("other_details", e.target.value)}
+                  placeholder={activeCreateType.otherDetailsPlaceholder}
+                  rows={3}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    borderRadius: 12,
+                    border: "1px solid var(--color-border)",
+                    fontSize: 13,
+                    color: "var(--color-text)",
+                    background: "white",
+                    resize: "vertical",
+                    fontFamily: "inherit",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+            )}
+
+            {createFormSupportsReviews && (
+              <div
+                style={{
+                  padding: 16,
+                  borderRadius: 16,
+                  border: "1px solid #f3e3b2",
+                  background: "#fffaf0",
+                  display: "grid",
+                  gap: 12,
+                }}
+              >
+                <div style={{ display: "grid", gap: 4 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Star rating</label>
+                  <p style={{ margin: 0, fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>
+                    Add an optional rating if this entry should appear as a starred review.
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                  <StarRating value={createForm.rating} onChange={updateCreateRating} size={28} mode="input" />
+                  <span style={{ fontSize: 13, color: "var(--color-muted)" }}>
+                    {createForm.rating > 0 ? `${createForm.rating} out of 5` : "No rating selected"}
+                  </span>
+                  {createForm.rating > 0 && (
+                    <button onClick={() => updateCreateRating(0)} style={btnBase}>
+                      Clear rating
+                    </button>
+                  )}
+                </div>
+
+                <label
+                  style={{
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: 10,
+                    cursor: createForm.rating > 0 ? "pointer" : "not-allowed",
+                    opacity: createForm.rating > 0 ? 1 : 0.6,
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={createForm.show_in_reviews}
+                    disabled={createForm.rating === 0}
+                    onChange={(e) => updateCreateForm("show_in_reviews", e.target.checked)}
+                    style={{ marginTop: 2, cursor: createForm.rating > 0 ? "pointer" : "not-allowed" }}
+                  />
+                  <span style={{ display: "grid", gap: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Show on public reviews page</span>
+                    <span style={{ fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>
+                      This is available after you add a star rating. The entry can still stay internal if this remains unchecked.
+                    </span>
+                  </span>
+                </label>
+              </div>
+            )}
+          </div>
+
+          {createError && (
+            <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #fecaca", background: "#fef2f2", color: "#c53030", fontSize: 13 }}>
+              {createError}
+            </div>
+          )}
+        </div>
+      </Modal>
 
       {/* Single delete modal */}
       <Modal

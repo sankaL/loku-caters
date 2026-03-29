@@ -50,3 +50,7 @@ backup_data/*
 docs/assets/*
 
 .artifacts/*
+
+# supabase
+.supabase/*
+.supabase/.temp/*

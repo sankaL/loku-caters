@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 
@@ -536,6 +536,7 @@ FEEDBACK_ORIGINS = {
     "events_page_customer",
     "event_reminder_email",
     "reviews_page",
+    "admin_submission",
 }
 
 FEEDBACK_ORIGIN_LABELS = {
@@ -544,6 +545,7 @@ FEEDBACK_ORIGIN_LABELS = {
     "events_page_customer": "Events Page (Customer)",
     "event_reminder_email": "Event Reminder Email",
     "reviews_page": "Reviews Page",
+    "admin_submission": "Admin Submission",
 }
 
 FEEDBACK_TYPES = {
@@ -591,11 +593,34 @@ class FeedbackCreate(BaseModel):
     message: Optional[str] = None
     rating: Optional[int] = None
 
+    @field_validator("origin", "feedback_type", mode="before")
+    @classmethod
+    def normalize_optional_choice_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip().lower()
+        return stripped or None
+
+    @field_validator("order_id", "name", "contact", "other_details", "message", mode="before")
+    @classmethod
+    def normalize_optional_text_fields(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
+
     @field_validator("origin")
     @classmethod
     def origin_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v not in FEEDBACK_ORIGINS:
             raise ValueError("Invalid feedback origin")
+        return v
+
+    @field_validator("feedback_type")
+    @classmethod
+    def feedback_type_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in FEEDBACK_TYPES and v not in LEGACY_FEEDBACK_TYPES:
+            raise ValueError("Invalid feedback type")
         return v
 
     @field_validator("reason")
@@ -611,6 +636,10 @@ class FeedbackCreate(BaseModel):
         if v is not None and (v < 1 or v > 5):
             raise ValueError("Rating must be between 1 and 5")
         return v
+
+
+class AdminFeedbackCreate(FeedbackCreate):
+    show_in_reviews: bool = False
 
 
 class FeedbackResponse(BaseModel):
@@ -676,7 +705,9 @@ def parse_legacy_contact_subject(message: Optional[str]) -> tuple[Optional[str],
     return feedback_type, normalized_message
 
 
-def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional[str]]:
+def normalize_feedback_create(
+    feedback_in: FeedbackCreate,
+) -> dict[str, Optional[Union[str, int]]]:
     origin = feedback_in.origin
     feedback_type = feedback_in.feedback_type
     reason = feedback_in.reason
@@ -721,7 +752,13 @@ def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional
     if feedback_type not in FEEDBACK_TYPES:
         raise ValueError("Invalid feedback type")
 
-    if origin in {"events_page_non_customer", "event_reminder_email"}:
+    if origin == "admin_submission":
+        if not message:
+            raise ValueError("Message is required for admin submissions")
+        if feedback_type == "collaboration" and not feedback_in.contact:
+            raise ValueError("Contact is required for collaboration feedback")
+        reason = None
+    elif origin in {"events_page_non_customer", "event_reminder_email"}:
         if feedback_type != "feedback":
             raise ValueError("Batch feedback must use type 'feedback'")
         if reason is not None and reason not in FEEDBACK_REASONS:
@@ -732,6 +769,18 @@ def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional
         reason = None
         other_details = None
 
+    rating_allowed_origins = {
+        "reviews_page",
+        "events_page_customer",
+        "contact_us",
+        "admin_submission",
+    }
+    rating = (
+        feedback_in.rating
+        if feedback_type == "feedback" and origin in rating_allowed_origins
+        else None
+    )
+
     return {
         "origin": origin,
         "feedback_type": feedback_type,
@@ -741,7 +790,7 @@ def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional
         "reason": reason,
         "other_details": other_details,
         "message": message,
-        "rating": feedback_in.rating,
+        "rating": rating,
     }
 
 
