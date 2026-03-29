@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
 import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
+import StarRating from "@/components/ui/StarRating";
 
 const subjects = [
     { value: "general_question", label: "General Question" },
@@ -18,6 +19,7 @@ export default function ContactPage() {
     const [isSuccess, setIsSuccess] = useState(false);
     const [errorDetails, setErrorDetails] = useState<string | null>(null);
     const [selectedSubject, setSelectedSubject] = useState(subjects[0].value);
+    const [rating, setRating] = useState(0);
     const selectedSubjectOption = subjects.find((subject) => subject.value === selectedSubject) ?? subjects[0];
 
     async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
@@ -26,13 +28,16 @@ export default function ContactPage() {
         setErrorDetails(null);
 
         const formData = new FormData(e.currentTarget);
-        const payload = {
+        const payload: Record<string, unknown> = {
             origin: "contact_us",
             feedback_type: selectedSubject,
             name: formData.get("name") as string,
-            contact: formData.get("email") as string, // Backend accepts contact string
+            contact: formData.get("email") as string,
             message: formData.get("message") as string,
         };
+        if (selectedSubject === "feedback" && rating > 0) {
+            payload.rating = rating;
+        }
 
         try {
             const resp = await fetch(`${API_URL}/api/feedback`, {
@@ -227,6 +232,15 @@ export default function ContactPage() {
                                         <label htmlFor="message" className="text-sm font-semibold text-[color:var(--color-text)]">Message *</label>
                                         <textarea required id="message" name="message" rows={6} className="p-3 border border-[color:var(--color-border)] rounded-xl bg-[color:var(--color-cream)] focus:border-[color:var(--color-sage)] focus:bg-white resize-y transition-colors"></textarea>
                                     </div>
+
+                                    {selectedSubject === "feedback" && (
+                                        <div className="flex flex-col gap-3">
+                                            <label className="text-sm font-semibold text-[color:var(--color-text)]">
+                                                Rating <span className="font-normal text-[color:var(--color-muted)]">(optional)</span>
+                                            </label>
+                                            <StarRating value={rating} onChange={setRating} size={32} mode="input" />
+                                        </div>
+                                    )}
 
                                     <button
                                         type="submit"

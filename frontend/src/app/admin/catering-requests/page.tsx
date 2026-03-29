@@ -180,9 +180,16 @@ function ExpandedRow({
   const [updatingStatus, setUpdatingStatus] = useState(false);
   const [commentText, setCommentText] = useState("");
   const [savingComment, setSavingComment] = useState(false);
+  const [pendingStatusChange, setPendingStatusChange] = useState<CateringRequestStatus | null>(null);
 
-  async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const nextStatus = e.target.value as CateringRequestStatus;
+  async function handleStatusChange(status: CateringRequestStatus) {
+    setPendingStatusChange(status);
+  }
+
+  async function confirmStatusChange() {
+    if (!pendingStatusChange) return;
+    const nextStatus = pendingStatusChange;
+    setPendingStatusChange(null);
     setUpdatingStatus(true);
     try {
       await onStatusChange(item.id, nextStatus);
@@ -315,7 +322,7 @@ function ExpandedRow({
             </label>
             <select
               value={item.status}
-              onChange={handleStatusChange}
+              onChange={(e) => handleStatusChange(e.target.value as CateringRequestStatus)}
               disabled={updatingStatus}
               style={{
                 padding: "7px 12px",
@@ -334,6 +341,57 @@ function ExpandedRow({
                 </option>
               ))}
             </select>
+
+            {/* Status Change Confirmation */}
+            {pendingStatusChange && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "12px 14px",
+                  background: "#fff7ed",
+                  border: "1px solid #fed7aa",
+                  borderRadius: 12,
+                }}
+              >
+                <p style={{ fontSize: 13, color: "var(--color-text)", marginBottom: 10 }}>
+                  Change status from <strong>{item.status}</strong> to <strong>{pendingStatusChange}</strong>?
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => setPendingStatusChange(null)}
+                    disabled={updatingStatus}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: "1px solid var(--color-border)",
+                      background: "white",
+                      color: "var(--color-text)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: updatingStatus ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmStatusChange}
+                    disabled={updatingStatus}
+                    style={{
+                      padding: "6px 12px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "var(--color-forest)",
+                      color: "var(--color-cream)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: updatingStatus ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {updatingStatus ? "Updating..." : "Confirm"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div style={{ gridColumn: "1 / -1" }}>

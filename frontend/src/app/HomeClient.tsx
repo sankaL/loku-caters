@@ -1,35 +1,144 @@
 "use client";
 
+import { useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
+import StarRating from "@/components/ui/StarRating";
+import { API_URL } from "@/config/event";
 import type { EventConfig } from "@/config/event";
+
+interface PublicReview {
+  id: string;
+  name: string | null;
+  message: string | null;
+  rating: number | null;
+  created_at: string | null;
+}
+
+function ReviewCard({ review }: { review: PublicReview }) {
+  return (
+    <div
+      style={{
+        background: "white",
+        border: "1px solid var(--color-border)",
+        borderRadius: 24,
+        padding: "28px 24px",
+        minWidth: 290,
+        maxWidth: 340,
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+      }}
+    >
+      {review.rating && <StarRating value={review.rating} size={18} mode="display" />}
+      {review.message && (
+        <p
+          style={{
+            color: "var(--color-text)",
+            fontSize: 14,
+            lineHeight: 1.65,
+            margin: 0,
+            display: "-webkit-box",
+            WebkitLineClamp: 4,
+            WebkitBoxOrient: "vertical",
+            overflow: "hidden",
+          }}
+        >
+          &ldquo;{review.message}&rdquo;
+        </p>
+      )}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
+        <span style={{ fontWeight: 600, fontSize: 13, color: "var(--color-forest)" }}>
+          {review.name || "Happy Customer"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function ReviewTicker({ reviews }: { reviews: PublicReview[] }) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [paused, setPaused] = useState(false);
+  const animationRef = useRef<number | null>(null);
+  const displayReviews = reviews.length > 0 ? [...reviews, ...reviews] : [];
+
+  const tick = useCallback(() => {
+    if (scrollRef.current && !paused) {
+      scrollRef.current.scrollLeft += 0.5;
+      const halfWidth = scrollRef.current.scrollWidth / 2;
+      if (scrollRef.current.scrollLeft >= halfWidth) {
+        scrollRef.current.scrollLeft = 0;
+      }
+    }
+    animationRef.current = requestAnimationFrame(tick);
+  }, [paused]);
+
+  useEffect(() => {
+    animationRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (animationRef.current) cancelAnimationFrame(animationRef.current);
+    };
+  }, [tick]);
+
+  if (reviews.length === 0) return null;
+
+  return (
+    <div
+      ref={scrollRef}
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      style={{
+        display: "flex",
+        gap: 20,
+        overflowX: "hidden",
+        paddingBottom: 8,
+        maskImage: "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
+        WebkitMaskImage: "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
+      }}
+    >
+      {displayReviews.map((review, idx) => (
+        <ReviewCard key={`${review.id}-${idx}`} review={review} />
+      ))}
+    </div>
+  );
+}
 
 export default function HomeClient({ eventConfig }: { eventConfig: EventConfig | null }) {
   const hasActiveEvent = Boolean(eventConfig);
+  const [reviews, setReviews] = useState<PublicReview[]>([]);
+
+  useEffect(() => {
+    fetch(`${API_URL}/api/feedback/reviews`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data: PublicReview[]) => setReviews(data))
+      .catch(() => {});
+  }, []);
 
   return (
     <main className="flex-1 flex flex-col bg-[color:var(--color-cream)]">
       {/* Hero Section */}
       <section className="relative w-full min-h-[85vh] flex items-center justify-center overflow-hidden">
-        {/* Background Image / Overlay */}
         <div className="absolute inset-0 z-0 bg-[color:var(--color-cream)]">
           <div
             className="absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: "url('/assets/food/multi-food6.jpg')" }}
           />
           <div className="absolute inset-0 bg-black/40" />
-          {/* Smooth opaque gradient transition to the next section */}
           <div className="absolute inset-x-0 bottom-0 h-64 bg-gradient-to-t from-[color:var(--color-cream)] to-transparent" />
         </div>
 
         <div className="relative z-10 max-w-4xl mx-auto px-6 text-center animate-fade-up">
-          <h1 className="text-5xl md:text-7xl font-bold leading-tight mb-6 text-white drop-shadow-lg" style={{ fontFamily: "var(--font-serif)" }}>
+          <h1
+            className="text-5xl md:text-7xl font-bold leading-tight mb-6 text-white drop-shadow-lg"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
             Authentic Sri Lankan Catering
           </h1>
           <p className="text-lg md:text-2xl text-[color:var(--color-cream)] mb-10 max-w-2xl mx-auto font-light opacity-80 drop-shadow-md tracking-wide">
             Bold flavors and traditional recipes for events of any scale.
           </p>
 
-          {/* Dynamic CTA Block */}
           <div
             className={`backdrop-blur-md border p-8 rounded-3xl max-w-xl mx-auto shadow-2xl animate-fade-up delay-200 ${
               hasActiveEvent ? "bg-black/40 border-white/30" : "bg-white/10 border-white/20"
@@ -70,7 +179,7 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
         </div>
       </section>
 
-      {/* About Snippet */}
+      {/* Crafted with Passion */}
       <section className="pb-24 pt-12 px-6 bg-[color:var(--color-cream)]">
         <div className="max-w-4xl mx-auto text-center animate-fade-up">
           <div className="text-[color:var(--color-sage)] flex justify-center mb-6">
@@ -80,7 +189,10 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
               <path d="M21 15V2v0a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7" />
             </svg>
           </div>
-          <h2 className="text-3xl md:text-5xl font-bold mb-8 text-[color:var(--color-forest)]" style={{ fontFamily: "var(--font-serif)" }}>
+          <h2
+            className="text-3xl md:text-5xl font-bold mb-8 text-[color:var(--color-forest)]"
+            style={{ fontFamily: "var(--font-serif)" }}
+          >
             Crafted with Passion
           </h2>
           <p className="text-lg md:text-xl text-[color:var(--color-muted)] leading-relaxed max-w-3xl mx-auto mb-10">
@@ -91,17 +203,57 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
             className="inline-flex items-center gap-2 text-[color:var(--color-sage)] font-semibold hover:text-[color:var(--color-forest)] transition-colors text-lg"
           >
             Discover Our Story
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M5 12h14"></path>
+              <path d="m12 5 7 7-7 7"></path>
+            </svg>
           </Link>
         </div>
       </section>
 
-      {/* Visual Highlights */}
+      {/* What Our Customers Say */}
+      {reviews.length > 0 && (
+        <section className="pb-24 px-6 bg-[color:var(--color-cream)]">
+          <div className="max-w-5xl mx-auto">
+            <div className="text-center mb-10 animate-fade-up">
+              <span className="text-sm font-bold tracking-widest uppercase text-[color:var(--color-bark)] block mb-3">
+                Customers
+              </span>
+              <h2
+                className="text-3xl md:text-4xl font-bold text-[color:var(--color-forest)]"
+                style={{ fontFamily: "var(--font-serif)" }}
+              >
+                What Our Customers Say
+              </h2>
+            </div>
+          </div>
+          <div style={{ opacity: 0.75 }}>
+            <ReviewTicker reviews={reviews} />
+          </div>
+          <div className="text-center mt-10">
+            <Link
+              href="/reviews"
+              className="inline-flex items-center gap-2 text-[color:var(--color-sage)] font-semibold hover:text-[color:var(--color-forest)] transition-colors"
+            >
+              Share your experience
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14"></path>
+                <path d="m12 5 7 7-7 7"></path>
+              </svg>
+            </Link>
+          </div>
+        </section>
+      )}
+
+      {/* Signature Dishes */}
       <section className="py-24 px-6">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16 animate-fade-up">
             <span className="text-sm font-bold tracking-widest uppercase text-[color:var(--color-sage)] block mb-4">Our Menu</span>
-            <h2 className="text-3xl md:text-5xl font-bold text-[color:var(--color-forest)]" style={{ fontFamily: "var(--font-serif)" }}>
+            <h2
+              className="text-3xl md:text-5xl font-bold text-[color:var(--color-forest)]"
+              style={{ fontFamily: "var(--font-serif)" }}
+            >
               Signature Dishes
             </h2>
           </div>
@@ -110,7 +262,7 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
             {[
               { title: "Traditional Lamprais", desc: "A fragrant mixed meat curry, frikkadel, blachan, and seeni sambal, wrapped and baked in a banana leaf.", image: "/assets/food/lamprais.jpg" },
               { title: "Chicken Biryani with Raita", desc: "Aromatic basmati rice cooked with rich spices, tender chicken, and served with cooling raita.", image: "/assets/food/chicken-biryani.jpg" },
-              { title: "Fish Rolls", desc: "Crispy, golden-fried rolls filled with a savory mix of spiced fish and potatoes. A classic Sri Lankan short eat.", image: "/assets/food/rolls2.jpg" }
+              { title: "Fish Rolls", desc: "Crispy, golden-fried rolls filled with a savory mix of spiced fish and potatoes. A classic Sri Lankan short eat.", image: "/assets/food/rolls2.jpg" },
             ].map((dish, idx) => (
               <div
                 key={idx}
@@ -121,14 +273,13 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
                   style={{ backgroundImage: `url('${dish.image}')` }}
                 >
                   {!dish.image && <span className="text-[color:var(--color-muted)] opacity-50 font-medium">Image coming soon</span>}
-                  {/* Subtle hover effect for images when they exist */}
                   <div className="absolute inset-0 bg-black/0 group-hover:bg-black/5 transition-colors" />
                 </div>
                 <div className="p-8">
-                  <h3 className="text-xl font-bold text-[color:var(--color-forest)] mb-3" style={{ fontFamily: "var(--font-serif)" }}>{dish.title}</h3>
-                  <p className="text-[color:var(--color-muted)] text-sm leading-relaxed mb-6">
-                    {dish.desc}
-                  </p>
+                  <h3 className="text-xl font-bold text-[color:var(--color-forest)] mb-3" style={{ fontFamily: "var(--font-serif)" }}>
+                    {dish.title}
+                  </h3>
+                  <p className="text-[color:var(--color-muted)] text-sm leading-relaxed mb-6">{dish.desc}</p>
                   <Link href="/menu" className="text-sm font-bold text-[color:var(--color-sage)] hover:text-[color:var(--color-forest)] transition-colors">
                     Explore Menu &rarr;
                   </Link>
@@ -138,7 +289,6 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
           </div>
         </div>
       </section>
-
     </main>
   );
 }

@@ -125,6 +125,8 @@ class Feedback(Base):
     )
     status: Mapped[str] = mapped_column(String, nullable=False, default="new")
     admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    show_in_reviews: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
 
 class CateringRequest(Base):

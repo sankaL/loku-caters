@@ -20,3 +20,23 @@ def create_feedback(feedback_in: FeedbackCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(feedback)
     return FeedbackResponse(success=True, feedback_id=str(feedback.id))
+
+
+@router.get("/reviews")
+def get_public_reviews(db: Session = Depends(get_db)):
+    rows = (
+        db.query(Feedback)
+        .filter(Feedback.show_in_reviews == True)
+        .order_by(Feedback.created_at.desc())
+        .all()
+    )
+    return [
+        {
+            "id": row.id,
+            "name": row.name,
+            "message": row.message,
+            "rating": row.rating,
+            "created_at": row.created_at.isoformat() if row.created_at else None,
+        }
+        for row in rows
+    ]

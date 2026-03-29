@@ -41,6 +41,7 @@ export default function Navigation() {
                 <nav className="hidden md:flex items-center gap-8">
                     <Link href="/menu" className={linkStyle("/menu")}>Menu</Link>
                     <Link href="/about" className={linkStyle("/about")}>About Us</Link>
+                    <Link href="/reviews" className={linkStyle("/reviews")}>Reviews</Link>
                     <Link href="/contact" className={linkStyle("/contact")}>Contact Us</Link>
                     <Link href="/catering-request" className={linkStyle("/catering-request")}>Catering Request</Link>
                     <Link
@@ -80,6 +81,7 @@ export default function Navigation() {
                     <nav className="flex flex-col p-6 gap-6">
                         <Link href="/menu" className={linkStyle("/menu")} onClick={() => setIsMenuOpen(false)}>Menu</Link>
                         <Link href="/about" className={linkStyle("/about")} onClick={() => setIsMenuOpen(false)}>About Us</Link>
+                        <Link href="/reviews" className={linkStyle("/reviews")} onClick={() => setIsMenuOpen(false)}>Reviews</Link>
                         <Link href="/contact" className={linkStyle("/contact")} onClick={() => setIsMenuOpen(false)}>Contact Us</Link>
                         <Link href="/catering-request" className={linkStyle("/catering-request")} onClick={() => setIsMenuOpen(false)}>Catering Request</Link>
                         <Link

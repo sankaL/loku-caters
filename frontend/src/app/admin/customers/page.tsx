@@ -146,6 +146,7 @@ export default function AdminCustomersPage() {
   const [editError, setEditError] = useState<string | null>(null);
 
   const [showEventReminderModal, setShowEventReminderModal] = useState(false);
+  const [showEventReminderConfirm, setShowEventReminderConfirm] = useState(false);
   const [eventReminderSearch, setEventReminderSearch] = useState("");
   const [eventReminderPickupLocation, setEventReminderPickupLocation] = useState("all");
   const [eventReminderSelectedIds, setEventReminderSelectedIds] = useState<Set<string>>(new Set());
@@ -492,6 +493,17 @@ export default function AdminCustomersPage() {
     setEventReminderLocationIds(new Set(activeEventLocations.map((location) => location.id)));
     setEventReminderItemIds(new Set(activeEventItems.map((item) => item.id)));
     setEventReminderRun(EMPTY_EVENT_REMINDER_RUN);
+    setShowEventReminderModal(true);
+  }
+
+  function openEventReminderConfirm() {
+    setShowEventReminderModal(false);
+    setShowEventReminderConfirm(true);
+  }
+
+  function closeEventReminderConfirm() {
+    if (eventReminderLoading) return;
+    setShowEventReminderConfirm(false);
     setShowEventReminderModal(true);
   }
 
@@ -1289,7 +1301,7 @@ export default function AdminCustomersPage() {
                 Cancel
               </button>
               <button
-                onClick={handleSendEventReminders}
+                onClick={openEventReminderConfirm}
                 disabled={eventReminderActionDisabled || eventReminderLoading}
                 style={eventReminderActionDisabled || eventReminderLoading
                   ? { ...btnPrimary, opacity: 0.6, cursor: "not-allowed" }
@@ -1673,6 +1685,38 @@ export default function AdminCustomersPage() {
             </div>
           </div>
         )}
+      </Modal>
+
+      {/* Event Reminder Confirmation Modal */}
+      <Modal
+        isOpen={showEventReminderConfirm}
+        onClose={closeEventReminderConfirm}
+        title="Send Event Reminders"
+        actions={
+          <>
+            <button
+              onClick={closeEventReminderConfirm}
+              style={btnBase}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                setShowEventReminderConfirm(false);
+                setShowEventReminderModal(true);
+                await handleSendEventReminders();
+              }}
+              disabled={eventReminderLoading}
+              style={eventReminderLoading ? { ...btnPrimary, opacity: 0.6, cursor: "not-allowed" } : btnPrimary}
+            >
+              Send {eventReminderSelectedIds.size} Reminder{eventReminderSelectedIds.size !== 1 ? "s" : ""}
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: "var(--color-muted)" }}>
+          Send event reminder emails to <span className="font-semibold" style={{ color: "var(--color-text)" }}>{eventReminderSelectedIds.size} customer{eventReminderSelectedIds.size !== 1 ? "s" : ""}</span>?
+        </p>
       </Modal>
     </div>
   );

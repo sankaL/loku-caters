@@ -535,6 +535,7 @@ FEEDBACK_ORIGINS = {
     "events_page_non_customer",
     "events_page_customer",
     "event_reminder_email",
+    "reviews_page",
 }
 
 FEEDBACK_ORIGIN_LABELS = {
@@ -542,6 +543,7 @@ FEEDBACK_ORIGIN_LABELS = {
     "events_page_non_customer": "Events Page (Non-customer)",
     "events_page_customer": "Events Page (Customer)",
     "event_reminder_email": "Event Reminder Email",
+    "reviews_page": "Reviews Page",
 }
 
 FEEDBACK_TYPES = {
@@ -587,6 +589,7 @@ class FeedbackCreate(BaseModel):
     reason: Optional[str] = None
     other_details: Optional[str] = None
     message: Optional[str] = None
+    rating: Optional[int] = None
 
     @field_validator("origin")
     @classmethod
@@ -600,6 +603,13 @@ class FeedbackCreate(BaseModel):
     def reason_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
         if v is not None and v not in FEEDBACK_REASONS and v not in LEGACY_CONTACT_REASONS:
             raise ValueError("Invalid feedback reason")
+        return v
+
+    @field_validator("rating")
+    @classmethod
+    def rating_must_be_in_range(cls, v: Optional[int]) -> Optional[int]:
+        if v is not None and (v < 1 or v > 5):
+            raise ValueError("Rating must be between 1 and 5")
         return v
 
 
@@ -624,6 +634,10 @@ class FeedbackStatusUpdate(BaseModel):
 
 class FeedbackCommentUpdate(BaseModel):
     admin_comment: Optional[str] = None
+
+
+class FeedbackReviewVisibilityUpdate(BaseModel):
+    show_in_reviews: bool
 
 
 class CustomerEventReminderRequest(BaseModel):
@@ -727,6 +741,7 @@ def normalize_feedback_create(feedback_in: FeedbackCreate) -> dict[str, Optional
         "reason": reason,
         "other_details": other_details,
         "message": message,
+        "rating": feedback_in.rating,
     }
 
 

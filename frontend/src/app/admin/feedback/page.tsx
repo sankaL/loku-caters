@@ -18,7 +18,7 @@ interface FeedbackMetric {
   pct: number;
 }
 
-type FeedbackOrigin = "contact_us" | "events_page_non_customer" | "events_page_customer" | "event_reminder_email";
+type FeedbackOrigin = "contact_us" | "events_page_non_customer" | "events_page_customer" | "event_reminder_email" | "reviews_page";
 type FeedbackType = "general_question" | "feedback" | "collaboration" | "other";
 
 interface FeedbackItem {
@@ -37,6 +37,8 @@ interface FeedbackItem {
   created_at: string | null;
   status: string;
   admin_comment: string | null;
+  rating: number | null;
+  show_in_reviews: boolean;
 }
 
 interface FeedbackResponse {
@@ -99,6 +101,12 @@ const ORIGIN_STYLES: Record<FeedbackOrigin, { bg: string; color: string; border:
     border: "1px solid #c7d2fe",
     label: "Event Reminder Email",
   },
+  reviews_page: {
+    bg: "#fffbeb",
+    color: "#92400e",
+    border: "1px solid #fcd34d",
+    label: "Reviews Page",
+  },
 };
 
 const TYPE_STYLES: Record<FeedbackType, { bg: string; color: string; border: string; label: string }> = {
@@ -134,6 +142,7 @@ function buildOriginCounts(items: FeedbackItem[]): Record<FeedbackOrigin, number
     events_page_non_customer: items.filter((item) => item.origin === "events_page_non_customer").length,
     events_page_customer: items.filter((item) => item.origin === "events_page_customer").length,
     event_reminder_email: items.filter((item) => item.origin === "event_reminder_email").length,
+    reviews_page: items.filter((item) => item.origin === "reviews_page").length,
   };
 }
 
@@ -302,15 +311,23 @@ function FeedbackDetailsModal({
   const [commentText, setCommentText] = useState(item.admin_comment ?? "");
   const [savingComment, setSavingComment] = useState(false);
   const [updatingStatus, setUpdatingStatus] = useState(false);
+  const [pendingStatusChange, setPendingStatusChange] = useState<string | null>(null);
 
   useEffect(() => {
     setCommentText(item.admin_comment ?? "");
   }, [item.admin_comment, item.id]);
 
-  async function handleStatusChange(e: React.ChangeEvent<HTMLSelectElement>) {
+  async function handleStatusChangeSelect(e: React.ChangeEvent<HTMLSelectElement>) {
+    setPendingStatusChange(e.target.value);
+  }
+
+  async function confirmStatusChange() {
+    if (!pendingStatusChange) return;
+    const nextStatus = pendingStatusChange;
+    setPendingStatusChange(null);
     setUpdatingStatus(true);
     try {
-      await onStatusChange(item.id, e.target.value);
+      await onStatusChange(item.id, nextStatus);
     } finally {
       setUpdatingStatus(false);
     }
@@ -368,7 +385,7 @@ function FeedbackDetailsModal({
           <DetailField label="Status">
             <select
               value={item.status}
-              onChange={handleStatusChange}
+              onChange={handleStatusChangeSelect}
               disabled={updatingStatus}
               style={{
                 width: "100%",
@@ -386,6 +403,55 @@ function FeedbackDetailsModal({
               <option value="in_progress">In Progress</option>
               <option value="resolved">Resolved</option>
             </select>
+            {pendingStatusChange && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: "10px 12px",
+                  background: "#fff7ed",
+                  border: "1px solid #fed7aa",
+                  borderRadius: 10,
+                }}
+              >
+                <p style={{ fontSize: 12, color: "var(--color-text)", marginBottom: 8 }}>
+                  Change status from <strong>{item.status}</strong> to <strong>{pendingStatusChange}</strong>?
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={() => setPendingStatusChange(null)}
+                    disabled={updatingStatus}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: 8,
+                      border: "1px solid var(--color-border)",
+                      background: "white",
+                      color: "var(--color-text)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: updatingStatus ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={confirmStatusChange}
+                    disabled={updatingStatus}
+                    style={{
+                      padding: "5px 10px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "var(--color-forest)",
+                      color: "var(--color-cream)",
+                      fontSize: 12,
+                      fontWeight: 600,
+                      cursor: updatingStatus ? "not-allowed" : "pointer",
+                    }}
+                  >
+                    {updatingStatus ? "Updating..." : "Confirm"}
+                  </button>
+                </div>
+              </div>
+            )}
           </DetailField>
 
           <DetailField label="Name">
@@ -580,6 +646,7 @@ export default function AdminFeedbackPage() {
   const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
   const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
   const [bulkStatusTarget, setBulkStatusTarget] = useState("resolved");
+  const [pendingReviewToggle, setPendingReviewToggle] = useState<{ id: string; show: boolean } | null>(null);
 
   // Toast
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -808,6 +875,45 @@ export default function AdminFeedbackPage() {
       showToast("Note saved", "success");
     } catch {
       showToast("Failed to save note", "error");
+    }
+  }
+
+  async function handleToggleShowInReviews(id: string, nextShowInReviews: boolean) {
+    const headers = await getAuthHeader();
+    const previousValue = data?.items.find((i) => i.id === id)?.show_in_reviews;
+    // Optimistic update
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: prev.items.map((item) =>
+          item.id === id ? { ...item, show_in_reviews: nextShowInReviews } : item
+        ),
+      };
+    });
+    try {
+      const res = await fetch(`${API_URL}/api/admin/feedback/${id}/show-in-reviews`, {
+        method: "PATCH",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ show_in_reviews: nextShowInReviews }),
+      });
+      if (!res.ok) throw new Error("Failed");
+      const result = await res.json();
+      showToast(result.show_in_reviews ? "Shown in reviews" : "Hidden from reviews", "success");
+    } catch {
+      // Rollback
+      if (previousValue !== undefined) {
+        setData((prev) => {
+          if (!prev) return prev;
+          return {
+            ...prev,
+            items: prev.items.map((item) =>
+              item.id === id ? { ...item, show_in_reviews: previousValue } : item
+            ),
+          };
+        });
+      }
+      showToast("Failed to update review visibility", "error");
     }
   }
 
@@ -1278,6 +1384,7 @@ export default function AdminFeedbackPage() {
           <option value="events_page_non_customer">Events Page (Non-customer)</option>
           <option value="events_page_customer">Events Page (Customer)</option>
           <option value="event_reminder_email">Event Reminder Email</option>
+          <option value="reviews_page">Reviews Page</option>
         </select>
 
         <select
@@ -1526,7 +1633,26 @@ export default function AdminFeedbackPage() {
 
                         {/* Status */}
                         <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}>
-                          <StatusBadge status={item.status} />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <StatusBadge status={item.status} />
+                            {item.rating != null && (
+                              <div style={{ display: "flex", gap: 1 }}>
+                                {[1, 2, 3, 4, 5].map((s) => (
+                                  <svg
+                                    key={s}
+                                    width="11"
+                                    height="11"
+                                    viewBox="0 0 24 24"
+                                    fill={s <= item.rating! ? "#f59e0b" : "none"}
+                                    stroke={s <= item.rating! ? "#f59e0b" : "var(--color-border)"}
+                                    strokeWidth="1.5"
+                                  >
+                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                                  </svg>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </td>
 
                         {/* Message / Details */}
@@ -1545,24 +1671,47 @@ export default function AdminFeedbackPage() {
                           style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <button
-                            onClick={() => setDeleteTarget(item.id)}
-                            title="Delete"
-                            style={{
-                              padding: "5px 8px",
-                              borderRadius: 8,
-                              border: "1px solid var(--color-border)",
-                              background: "white",
-                              cursor: "pointer",
-                              color: "var(--color-muted)",
-                              display: "inline-flex",
-                              alignItems: "center",
-                            }}
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
-                            </svg>
-                          </button>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            {/* Show in reviews toggle */}
+                            <button
+                              onClick={() => setPendingReviewToggle({ id: item.id, show: !item.show_in_reviews })}
+                              title={item.show_in_reviews ? "Hide from reviews" : "Show in reviews"}
+                              style={{
+                                padding: "5px 8px",
+                                borderRadius: 8,
+                                border: item.show_in_reviews ? "1px solid #fcd34d" : "1px solid var(--color-border)",
+                                background: item.show_in_reviews ? "#fffbeb" : "white",
+                                cursor: "pointer",
+                                color: item.show_in_reviews ? "#92400e" : "var(--color-muted)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                transition: "all 0.15s",
+                              }}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill={item.show_in_reviews ? "#f59e0b" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                              </svg>
+                            </button>
+                            {/* Delete */}
+                            <button
+                              onClick={() => setDeleteTarget(item.id)}
+                              title="Delete"
+                              style={{
+                                padding: "5px 8px",
+                                borderRadius: 8,
+                                border: "1px solid var(--color-border)",
+                                background: "white",
+                                cursor: "pointer",
+                                color: "var(--color-muted)",
+                                display: "inline-flex",
+                                alignItems: "center",
+                              }}
+                            >
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
+                              </svg>
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     </Fragment>
@@ -1651,6 +1800,35 @@ export default function AdminFeedbackPage() {
       >
         Mark {selectedIds.size} selected {selectedIds.size === 1 ? "entry" : "entries"} as{" "}
         <strong>{bulkStatusTarget === "in_progress" ? "In Progress" : bulkStatusTarget === "resolved" ? "Resolved" : "New"}</strong>?
+      </Modal>
+
+      {/* Review visibility toggle confirmation */}
+      <Modal
+        isOpen={!!pendingReviewToggle}
+        onClose={() => setPendingReviewToggle(null)}
+        title={pendingReviewToggle?.show ? "Show in Reviews" : "Hide from Reviews"}
+        actions={
+          <>
+            <button onClick={() => setPendingReviewToggle(null)} style={btnBase}>Cancel</button>
+            <button
+              onClick={() => {
+                if (pendingReviewToggle) {
+                  handleToggleShowInReviews(pendingReviewToggle.id, pendingReviewToggle.show);
+                  setPendingReviewToggle(null);
+                }
+              }}
+              style={btnPrimary}
+            >
+              {pendingReviewToggle?.show ? "Show" : "Hide"}
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: "var(--color-muted)", fontSize: 14 }}>
+          {pendingReviewToggle?.show
+            ? "This feedback will be visible on the reviews page. Continue?"
+            : "This feedback will be hidden from the reviews page. Continue?"}
+        </p>
       </Modal>
 
       {/* Feedback details modal */}
