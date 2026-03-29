@@ -67,6 +67,7 @@ export default function Footer() {
                         <li><Link href="/" className="text-sm opacity-80 hover:opacity-100 transition-opacity">Home</Link></li>
                         <li><Link href="/menu" className="text-sm opacity-80 hover:opacity-100 transition-opacity">Our Menu</Link></li>
                         <li><Link href="/about" className="text-sm opacity-80 hover:opacity-100 transition-opacity">About Us</Link></li>
+                        <li><Link href="/reviews" className="text-sm opacity-80 hover:opacity-100 transition-opacity">Reviews</Link></li>
                         <li><Link href="/orders" className="text-sm opacity-80 hover:opacity-100 transition-opacity">Live Orders</Link></li>
                     </ul>
                 </div>

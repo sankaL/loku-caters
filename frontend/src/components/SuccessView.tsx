@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Modal from "@/components/ui/Modal";
+import StarRating from "@/components/ui/StarRating";
 import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 import type { CheckoutResult } from "@/components/OrderForm";
@@ -36,6 +37,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [message, setMessage] = useState("");
+  const [rating, setRating] = useState(0);
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [serverError, setServerError] = useState("");
@@ -67,6 +69,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
           name: order.name,
           contact: order.email,
           message: message.trim() || null,
+          rating: rating > 0 ? rating : null,
         }),
       });
       if (!res.ok) {
@@ -312,7 +315,13 @@ export default function SuccessView({ result }: SuccessViewProps) {
         {submitted ? (
           <p>Thanks for taking the time to share feedback.</p>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-4">
+            <div className="flex flex-col gap-2">
+              <label className="text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+                How would you rate your experience?
+              </label>
+              <StarRating value={rating} onChange={setRating} size={32} mode="input" />
+            </div>
             <textarea
               value={message}
               onChange={(event) => setMessage(event.target.value)}

@@ -30,7 +30,7 @@ from schemas import (
     CustomerUpdate, EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
     CATERING_REQUEST_STATUSES, FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES,
     FEEDBACK_TYPE_LABELS, CateringRequestCommentCreate, CateringRequestStatusUpdate,
-    CustomerEventReminderRequest, FeedbackStatusUpdate, FeedbackCommentUpdate,
+    CustomerEventReminderRequest, FeedbackStatusUpdate, FeedbackCommentUpdate, FeedbackReviewVisibilityUpdate,
 )
 from services.customers import (
     CustomerEmailConflictError,
@@ -2553,6 +2553,8 @@ def admin_list_feedback(
             "created_at": row.created_at.isoformat() if row.created_at else None,
             "status": row.status,
             "admin_comment": row.admin_comment,
+            "rating": row.rating,
+            "show_in_reviews": bool(row.show_in_reviews),
         }
         for row in rows
     ]
@@ -2667,3 +2669,18 @@ def update_feedback_comment(
     fb.admin_comment = body.admin_comment
     db.commit()
     return {"success": True}
+
+
+@router.patch("/feedback/{feedback_id}/show-in-reviews")
+def toggle_feedback_show_in_reviews(
+    feedback_id: str,
+    body: FeedbackReviewVisibilityUpdate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    fb = db.query(Feedback).filter(Feedback.id == feedback_id).first()
+    if fb is None:
+        raise HTTPException(status_code=404, detail="Not found")
+    fb.show_in_reviews = body.show_in_reviews
+    db.commit()
+    return {"success": True, "show_in_reviews": bool(fb.show_in_reviews)}

@@ -179,6 +179,8 @@ Stores all contact messages, pre-order event feedback, and post-order customer f
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
 | `status` | `VARCHAR` | NOT NULL, default `'new'` | Admin triage state: `new`, `in_progress`, or `resolved` |
 | `admin_comment` | `TEXT` | nullable | Internal admin note; not visible to submitters |
+| `rating` | `INTEGER` | nullable | Star rating 1-5; set when user provides a rating from the reviews page, contact page, or post-order feedback |
+| `show_in_reviews` | `BOOLEAN` | NOT NULL, default `false` | Admin-controlled flag; when true, the feedback is visible as a public testimonial on the reviews page |
 
 ### Allowed `origin` values
 
@@ -187,6 +189,7 @@ Stores all contact messages, pre-order event feedback, and post-order customer f
 | `contact_us` | Contact Us |
 | `events_page_non_customer` | Events Page (Non-customer) |
 | `events_page_customer` | Events Page (Customer) |
+| `reviews_page` | Reviews Page |
 
 ### Allowed `feedback_type` values
 
@@ -292,6 +295,7 @@ alembic upgrade head
 | `c3f9a6e7b2d1_add_item_minimum_order_quantity` | adds `minimum_order_quantity` to `items` with a check constraint enforcing values >= 1 |
 | `7b1d5f8c2a4e_enable_rls_catering_and_alembic_version` | enables RLS on `catering_requests`, `catering_request_comments`, and `alembic_version`; revokes `anon` and `authenticated` access when those roles exist |
 | `a4d7e3b91c2f_add_combo_deals_and_grouped_order_pricing` | adds `events.combo_deals` and grouped cart pricing columns on `orders` (`group_id`, `base_total_price`, `discount_total`, `pricing_meta`) |
+| `0021_feedback_rating_and_show_in_reviews` | adds `rating` (Integer, nullable) and `show_in_reviews` (Boolean, default false) to `feedback` |
 
 ---
 

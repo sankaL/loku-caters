@@ -347,16 +347,24 @@ def seed_customers_from_orders(db, orders):
 
 
 def seed_feedback(db, events, orders):
-    """Seed 30 feedback entries across events."""
+    """Seed 30 feedback entries across events, including ratings for the new reviews page."""
     print("Seeding feedback...")
     feedback_list = []
     
     # Get customer orders for linking
     order_by_email = {o.email.lower(): o for o in orders if o.email}
     
+    # Extended origins to include the new reviews_page
+    EXTENDED_ORIGINS = FEEDBACK_ORIGINS + ["reviews_page"]
+    
     for i in range(30):
-        origin = random.choice(FEEDBACK_ORIGINS)
+        origin = random.choice(EXTENDED_ORIGINS)
         feedback_type = random.choice(FEEDBACK_TYPES)
+        
+        # New: Add rating logic
+        rating = random.randint(3, 5) if random.random() > 0.2 else random.randint(1, 2)
+        # Show in reviews if it's high rated (4-5) and random chance
+        show_in_reviews = rating >= 4 and random.random() > 0.4
         
         # For event-related feedback, try to link to an order
         linked_order = None
@@ -378,6 +386,10 @@ def seed_feedback(db, events, orders):
                 other_details = fake.sentence()
             name = fake.name()
             contact = fake.email()
+            
+        if origin == "reviews_page":
+            name = fake.name()
+            feedback_type = "feedback"
         
         feedback = Feedback(
             id=str(uuid.uuid4()),
@@ -389,6 +401,8 @@ def seed_feedback(db, events, orders):
             reason=reason,
             other_details=other_details,
             message=message,
+            rating=rating,
+            show_in_reviews=show_in_reviews,
             created_at=datetime.now(timezone.utc) - timedelta(hours=random.randint(0, 504)),  # up to 3 weeks ago
             status=random.choice(FEEDBACK_STATUSES),
             admin_comment=None,
@@ -396,8 +410,31 @@ def seed_feedback(db, events, orders):
         db.add(feedback)
         feedback_list.append(feedback)
     
+    # Add a few guaranteed high-quality reviews for the carousel
+    stellar_reviews = [
+        ("The lamprais was out of this world! Reminded me exactly of home. Thank you Loku Caters!", 5, "Nimal Perera"),
+        ("Best Sri Lankan food in the GTA. The pol sambol was perfectly spicy.", 5, "Sarah J."),
+        ("Very impressed with the packaging and the care taken. Highly recommended.", 4, "Michael De Silva"),
+        ("A bit of a wait at the pickup point, but the food made it all worth it. 5 stars for the taste!", 5, "Priya K."),
+    ]
+    
+    for msg, rat, n in stellar_reviews:
+        f = Feedback(
+            id=str(uuid.uuid4()),
+            origin="reviews_page",
+            feedback_type="feedback",
+            name=n,
+            message=msg,
+            rating=rat,
+            show_in_reviews=True,
+            created_at=datetime.now(timezone.utc) - timedelta(days=random.randint(1, 5)),
+            status="resolved"
+        )
+        db.add(f)
+        feedback_list.append(f)
+    
     db.commit()
-    print(f"  Created {len(feedback_list)} feedback entries.")
+    print(f"  Created {len(feedback_list)} feedback entries (including {len(stellar_reviews)} stellar public reviews).")
     return feedback_list
 
 

@@ -824,12 +824,24 @@ export default function AdminOrdersPage() {
   const actionMenuRef = useRef<HTMLDivElement | null>(null);
   const remindLoading = reminderRun.isRunning;
 
+  // Bulk reminder confirmation
+  const [showBulkReminderConfirm, setShowBulkReminderConfirm] = useState(false);
+
+  // Single reminder confirmation
+  const [reminderConfirmTarget, setReminderConfirmTarget] = useState<Order | null>(null);
+
   // Payment reminder modal
   const [showPaymentRemindModal, setShowPaymentRemindModal] = useState(false);
   const [paymentRemindSelections, setPaymentRemindSelections] = useState<Set<string>>(new Set());
   const [paymentReminderRun, setPaymentReminderRun] = useState<ReminderRunState>(EMPTY_REMINDER_RUN);
   const [paymentRemindSearch, setPaymentRemindSearch] = useState("");
   const paymentReminderLoading = paymentReminderRun.isRunning;
+
+  // Bulk payment reminder confirmation
+  const [showBulkPaymentReminderConfirm, setShowBulkPaymentReminderConfirm] = useState(false);
+
+  // Single payment reminder confirmation
+  const [paymentReminderConfirmTarget, setPaymentReminderConfirmTarget] = useState<Order | null>(null);
 
   // Reset selection when filter/orders change
   useEffect(() => { setSelectedIds(new Set()); }, [filter, paymentFilter, eventFilter, locationFilter, orders]);
@@ -1610,6 +1622,17 @@ export default function AdminOrdersPage() {
     setShowRemindModal(true);
   }
 
+  function openBulkReminderConfirm() {
+    setShowRemindModal(false);
+    setShowBulkReminderConfirm(true);
+  }
+
+  function closeBulkReminderConfirm() {
+    if (remindLoading) return;
+    setShowBulkReminderConfirm(false);
+    setShowRemindModal(true);
+  }
+
   function closePaymentRemindModal() {
     if (paymentReminderLoading) return;
     setShowPaymentRemindModal(false);
@@ -1624,6 +1647,30 @@ export default function AdminOrdersPage() {
     setPaymentRemindSearch("");
     setPaymentReminderRun(EMPTY_REMINDER_RUN);
     setShowPaymentRemindModal(true);
+  }
+
+  function openBulkPaymentReminderConfirm() {
+    setShowPaymentRemindModal(false);
+    setShowBulkPaymentReminderConfirm(true);
+  }
+
+  function closeBulkPaymentReminderConfirm() {
+    if (paymentReminderLoading) return;
+    setShowBulkPaymentReminderConfirm(false);
+    setShowPaymentRemindModal(true);
+  }
+
+  function openPaymentReminderConfirmFromPaymentModal() {
+    if (!paymentTarget) return;
+    setPaymentTarget(null);
+    setPaymentReminderConfirmTarget(paymentTarget);
+  }
+
+  function closePaymentReminderConfirm() {
+    if (paymentReminderLoading) return;
+    const target = paymentReminderConfirmTarget;
+    setPaymentReminderConfirmTarget(null);
+    if (target) setPaymentTarget(target);
   }
 
   function closeBundleDetailsModal() {
@@ -3171,7 +3218,7 @@ export default function AdminOrdersPage() {
                                 <button
                                   onClick={() => {
                                     setOpenActionMenuId(null);
-                                    void handleSendSingleReminder(order);
+                                    setReminderConfirmTarget(order);
                                   }}
                                   disabled={isSendingReminder || !!getReminderUnavailableReason(order)}
                                   className="w-full px-4 py-3 text-left text-sm font-medium transition-colors disabled:opacity-60"
@@ -3365,7 +3412,7 @@ export default function AdminOrdersPage() {
                       )}
                       {selectedBundle.status === "confirmed" && (
                         <button
-                          onClick={() => { void handleSendSingleReminder(selectedBundle); }}
+                          onClick={() => { setReminderConfirmTarget(selectedBundle); }}
                           disabled={sendingReminder === getOrderActionId(selectedBundle) || !!getReminderUnavailableReason(selectedBundle)}
                           className="px-3 py-1.5 rounded-lg text-xs font-semibold disabled:opacity-60"
                           style={{
@@ -3774,7 +3821,7 @@ export default function AdminOrdersPage() {
             </button>
             {paymentTarget && !getPaymentReminderUnavailableReason(paymentTarget) && (
               <button
-                onClick={() => { void handleSendSinglePaymentReminder(paymentTarget); }}
+                onClick={openPaymentReminderConfirmFromPaymentModal}
                 disabled={paymentReminderLoading || updatingPayment === getOrderActionId(paymentTarget)}
                 className="px-4 py-2 rounded-xl text-sm font-medium disabled:opacity-60"
                 style={{ background: "white", color: "var(--color-bark)", border: "1px solid var(--color-border)" }}
@@ -3908,6 +3955,77 @@ export default function AdminOrdersPage() {
         }
       >
         This will set paid to false and clear the payment method.
+      </Modal>
+
+      {/* Single Reminder Confirmation Modal */}
+      <Modal
+        isOpen={!!reminderConfirmTarget}
+        onClose={() => setReminderConfirmTarget(null)}
+        title="Send Pickup Reminder"
+        actions={
+          <>
+            <button
+              onClick={() => setReminderConfirmTarget(null)}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = reminderConfirmTarget;
+                if (!target) return;
+                setReminderConfirmTarget(null);
+                await handleSendSingleReminder(target);
+              }}
+              disabled={!!reminderConfirmTarget && sendingReminder === getOrderActionId(reminderConfirmTarget)}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Send Reminder
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: "var(--color-muted)" }}>
+          Send a pickup reminder email to <span className="font-semibold" style={{ color: "var(--color-text)" }}>{reminderConfirmTarget?.name ?? "this customer"}</span> at <span className="font-semibold" style={{ color: "var(--color-text)" }}>{reminderConfirmTarget?.email ?? "their email"}</span>?
+        </p>
+      </Modal>
+
+      {/* Single Payment Reminder Confirmation Modal */}
+      <Modal
+        isOpen={!!paymentReminderConfirmTarget}
+        onClose={closePaymentReminderConfirm}
+        title="Send Payment Reminder"
+        actions={
+          <>
+            <button
+              onClick={closePaymentReminderConfirm}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={async () => {
+                const target = paymentReminderConfirmTarget;
+                if (!target) return;
+                setPaymentReminderConfirmTarget(null);
+                setShowPaymentRemindModal(true);
+                await handleSendSinglePaymentReminder(target);
+              }}
+              disabled={paymentReminderLoading}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Send Payment Reminder
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: "var(--color-muted)" }}>
+          Send a payment reminder email to <span className="font-semibold" style={{ color: "var(--color-text)" }}>{paymentReminderConfirmTarget?.name ?? "this customer"}</span> at <span className="font-semibold" style={{ color: "var(--color-text)" }}>{paymentReminderConfirmTarget?.email ?? "their email"}</span>?
+        </p>
       </Modal>
 
       {/* Add Order Type Modal */}
@@ -4796,7 +4914,7 @@ export default function AdminOrdersPage() {
                       Cancel
                     </button>
                     <button
-                      onClick={() => { void handleSendPaymentReminders(); }}
+                      onClick={openBulkPaymentReminderConfirm}
                       disabled={paymentReminderLoading || paymentRemindSelections.size === 0}
                       className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
@@ -5100,7 +5218,7 @@ export default function AdminOrdersPage() {
                       Cancel
                     </button>
                     <button
-                      onClick={handleSendReminders}
+                      onClick={openBulkReminderConfirm}
                       disabled={remindLoading || remindSelections.size === 0}
                       className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
                       style={{ background: "var(--color-bark)", color: "var(--color-cream)", border: "1px solid var(--color-bark)" }}
@@ -5114,6 +5232,74 @@ export default function AdminOrdersPage() {
           </div>
         );
       })()}
+
+      {/* Bulk Reminder Confirmation Modal */}
+      <Modal
+        isOpen={showBulkReminderConfirm}
+        onClose={closeBulkReminderConfirm}
+        title="Send Pickup Reminders"
+        actions={
+          <>
+            <button
+              onClick={closeBulkReminderConfirm}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setShowBulkReminderConfirm(false);
+                setShowRemindModal(true);
+                void handleSendReminders();
+              }}
+              disabled={remindLoading}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Send {remindSelections.size} Reminder{remindSelections.size !== 1 ? "s" : ""}
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: "var(--color-muted)" }}>
+          Send pickup reminder emails to <span className="font-semibold" style={{ color: "var(--color-text)" }}>{remindSelections.size} customer{remindSelections.size !== 1 ? "s" : ""}</span>?
+        </p>
+      </Modal>
+
+      {/* Bulk Payment Reminder Confirmation Modal */}
+      <Modal
+        isOpen={showBulkPaymentReminderConfirm}
+        onClose={closeBulkPaymentReminderConfirm}
+        title="Send Payment Reminders"
+        actions={
+          <>
+            <button
+              onClick={closeBulkPaymentReminderConfirm}
+              className="px-4 py-2 rounded-xl text-sm font-medium"
+              style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={() => {
+                setShowBulkPaymentReminderConfirm(false);
+                setShowPaymentRemindModal(true);
+                void handleSendPaymentReminders();
+              }}
+              disabled={paymentReminderLoading}
+              className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Send {paymentRemindSelections.size} Payment Reminder{paymentRemindSelections.size !== 1 ? "s" : ""}
+            </button>
+          </>
+        }
+      >
+        <p style={{ color: "var(--color-muted)" }}>
+          Send payment reminder emails to <span className="font-semibold" style={{ color: "var(--color-text)" }}>{paymentRemindSelections.size} customer{paymentRemindSelections.size !== 1 ? "s" : ""}</span>?
+        </p>
+      </Modal>
     </div>
   );
 }
