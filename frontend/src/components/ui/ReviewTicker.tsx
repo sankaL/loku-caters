@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useState } from "react";
 import StarRating from "@/components/ui/StarRating";
 
 export interface PublicReview {
@@ -81,91 +81,75 @@ interface ReviewTickerProps {
   showTimestamp?: boolean;
 }
 
-export default function ReviewTicker({ reviews, showTimestamp = false }: ReviewTickerProps) {
-  const scrollRef = useRef<HTMLDivElement>(null);
-  // Use a ref for pause state so the animation loop always reads the current value
-  // without stale closures from useCallback/useState.
-  const isPausedRef = useRef(false);
-  const rafRef = useRef<number | null>(null);
+const CARD_WIDTH = 290 + 20;
+const DURATION_PER_CARD = 150;
 
-  const tick = useCallback(() => {
-    const el = scrollRef.current;
-    if (el && !isPausedRef.current) {
-      el.scrollLeft += 0.5;
-      const halfWidth = el.scrollWidth / 2;
-      if (el.scrollLeft >= halfWidth) {
-        el.scrollLeft = 0;
-      }
-    }
-    // Always schedule the next frame, regardless of pause state,
-    // so the loop never stops and resumes seamlessly when unpaused.
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
+export default function ReviewTicker({ reviews, showTimestamp = false }: ReviewTickerProps) {
+  const [isPaused, setIsPaused] = useState(false);
+  const [containerWidth, setContainerWidth] = useState(0);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    };
-  }, [tick]);
+    const el = containerRef.current;
+    if (!el) return;
 
-  // Pause on pointer press (mobile / touch hold).
-  const handlePointerDown = useCallback(() => {
-    isPausedRef.current = true;
-  }, []);
-
-  // Resume when pointer is released or cancelled (lift finger, cancel, leave).
-  const handlePointerUp = useCallback(() => {
-    isPausedRef.current = false;
-  }, []);
-
-  const handlePointerCancel = useCallback(() => {
-    isPausedRef.current = false;
-  }, []);
-
-  // Pause on mouse hover (desktop).
-  const handleMouseEnter = useCallback(() => {
-    isPausedRef.current = true;
-  }, []);
-
-  const handleMouseLeave = useCallback(() => {
-    isPausedRef.current = false;
+    const ro = new ResizeObserver((entries) => {
+      setContainerWidth(entries[0].contentRect.width);
+    });
+    ro.observe(el);
+    setContainerWidth(el.clientWidth);
+    return () => ro.disconnect();
   }, []);
 
   if (reviews.length === 0) return null;
 
-  // Duplicate reviews to create a seamless infinite loop.
-  const displayReviews = [...reviews, ...reviews];
+  const baseRepeatCount = Math.max(2, Math.ceil((containerWidth * 2) / (CARD_WIDTH * reviews.length)));
+  const baseSequence = Array.from({ length: baseRepeatCount }, () => reviews).flat();
+  const displayReviews = [...baseSequence, ...baseSequence];
+
+  const animDuration = (reviews.length * baseRepeatCount * DURATION_PER_CARD) / 10;
 
   return (
     <div
-      ref={scrollRef}
-      onPointerDown={handlePointerDown}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerCancel}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
+      ref={containerRef}
+      onPointerDown={() => setIsPaused(true)}
+      onPointerUp={() => setIsPaused(false)}
+      onPointerCancel={() => setIsPaused(false)}
+      onPointerLeave={() => setIsPaused(false)}
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
       style={{
-        display: "flex",
-        gap: 20,
-        overflowX: "hidden",
+        overflow: "hidden",
         paddingBottom: 8,
         maskImage: "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
         WebkitMaskImage: "linear-gradient(to right, transparent, black 5%, black 95%, transparent)",
-        // Prevent text selection while swiping on mobile.
         userSelect: "none",
         WebkitUserSelect: "none",
-        // Ensure touch scrolling is smooth.
-        WebkitOverflowScrolling: "touch",
       }}
     >
-      {displayReviews.map((review, idx) => (
-        <ReviewCard
-          key={`${review.id}-${idx}`}
-          review={review}
-          showTimestamp={showTimestamp}
-        />
-      ))}
+      <div
+        style={{
+          display: "flex",
+          gap: 20,
+          width: "max-content",
+          animation: `reviewTickerScroll ${animDuration}s linear infinite`,
+          animationPlayState: isPaused ? "paused" : "running",
+        }}
+      >
+        {displayReviews.map((review, idx) => (
+          <ReviewCard
+            key={`${review.id}-${idx}`}
+            review={review}
+            showTimestamp={showTimestamp}
+          />
+        ))}
+      </div>
+      <style>{`
+        @keyframes reviewTickerScroll {
+          from { transform: translateX(0); }
+          to { transform: translateX(-50%); }
+        }
+      `}</style>
     </div>
   );
 }
