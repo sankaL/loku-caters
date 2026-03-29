@@ -30,7 +30,8 @@ from schemas import (
     CustomerUpdate, EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
     CATERING_REQUEST_STATUSES, FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES,
     FEEDBACK_TYPE_LABELS, CateringRequestCommentCreate, CateringRequestStatusUpdate,
-    CustomerEventReminderRequest, FeedbackStatusUpdate, FeedbackCommentUpdate, FeedbackReviewVisibilityUpdate,
+    CustomerEventReminderRequest, AdminFeedbackCreate, FeedbackStatusUpdate, FeedbackCommentUpdate,
+    FeedbackReviewVisibilityUpdate, normalize_feedback_create,
 )
 from services.customers import (
     CustomerEmailConflictError,
@@ -2518,6 +2519,49 @@ def add_catering_request_comment(
 # Feedback endpoints
 # ---------------------------------------------------------------------------
 
+def _feedback_dict(row: Feedback) -> dict:
+    return {
+        "id": row.id,
+        "origin": row.origin,
+        "origin_label": FEEDBACK_ORIGIN_LABELS.get(row.origin, row.origin),
+        "feedback_type": row.feedback_type,
+        "feedback_type_label": FEEDBACK_TYPE_LABELS.get(row.feedback_type, row.feedback_type),
+        "order_id": row.order_id,
+        "name": row.name,
+        "contact": row.contact,
+        "reason": row.reason,
+        "reason_label": FEEDBACK_REASON_LABELS.get(row.reason, row.reason) if row.reason else None,
+        "other_details": row.other_details,
+        "message": row.message,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "status": row.status,
+        "admin_comment": row.admin_comment,
+        "rating": row.rating,
+        "show_in_reviews": bool(row.show_in_reviews),
+    }
+
+
+@router.post("/feedback", status_code=201)
+def admin_create_feedback(
+    body: AdminFeedbackCreate,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    payload = body.model_copy(update={"origin": "admin_submission"})
+    try:
+        normalized = normalize_feedback_create(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc))
+
+    feedback = Feedback(
+        **normalized,
+        show_in_reviews=bool(body.show_in_reviews and normalized.get("rating") is not None),
+    )
+    db.add(feedback)
+    db.commit()
+    db.refresh(feedback)
+    return _feedback_dict(feedback)
+
 @router.get("/feedback")
 def admin_list_feedback(
     reason: Optional[str] = Query(None),
@@ -2536,28 +2580,7 @@ def admin_list_feedback(
 
     rows = query.all()
 
-    items = [
-        {
-            "id": row.id,
-            "origin": row.origin,
-            "origin_label": FEEDBACK_ORIGIN_LABELS.get(row.origin, row.origin),
-            "feedback_type": row.feedback_type,
-            "feedback_type_label": FEEDBACK_TYPE_LABELS.get(row.feedback_type, row.feedback_type),
-            "order_id": row.order_id,
-            "name": row.name,
-            "contact": row.contact,
-            "reason": row.reason,
-            "reason_label": FEEDBACK_REASON_LABELS.get(row.reason, row.reason) if row.reason else None,
-            "other_details": row.other_details,
-            "message": row.message,
-            "created_at": row.created_at.isoformat() if row.created_at else None,
-            "status": row.status,
-            "admin_comment": row.admin_comment,
-            "rating": row.rating,
-            "show_in_reviews": bool(row.show_in_reviews),
-        }
-        for row in rows
-    ]
+    items = [_feedback_dict(row) for row in rows]
 
     all_rows = db.query(Feedback).all()
     total = len(all_rows)

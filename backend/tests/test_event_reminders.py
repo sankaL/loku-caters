@@ -50,6 +50,42 @@ class EventReminderTests(unittest.TestCase):
         self.assertEqual(normalized["reason"], "other")
         self.assertEqual(normalized["other_details"], "Need a different date")
 
+    def test_customer_feedback_keeps_rating(self):
+        payload = FeedbackCreate(
+            origin="events_page_customer",
+            feedback_type="feedback",
+            message="Excellent lamprais",
+            rating=5,
+        )
+
+        normalized = normalize_feedback_create(payload)
+
+        self.assertEqual(normalized["rating"], 5)
+
+    def test_contact_feedback_keeps_rating(self):
+        payload = FeedbackCreate(
+            origin="contact_us",
+            feedback_type="feedback",
+            message="Loved the meal",
+            rating=4,
+        )
+
+        normalized = normalize_feedback_create(payload)
+
+        self.assertEqual(normalized["rating"], 4)
+
+    def test_admin_feedback_keeps_rating(self):
+        payload = FeedbackCreate(
+            origin="admin_submission",
+            feedback_type="feedback",
+            message="Captured in person after pickup",
+            rating=5,
+        )
+
+        normalized = normalize_feedback_create(payload)
+
+        self.assertEqual(normalized["rating"], 5)
+
     def test_event_reminder_endpoint_rejects_when_no_active_event(self):
         db = FakeSession(SimpleNamespace(id="customer-1", name="A", email="a@example.com"))
         body = CustomerEventReminderRequest(location_ids=["loc-1"], item_ids=["item-1"])
