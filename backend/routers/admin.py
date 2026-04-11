@@ -1555,6 +1555,18 @@ def _group_email_order_data(
     address: str,
 ) -> dict[str, Any]:
     first = orders[0]
+    has_combo_discounts = False
+    has_manual_pricing = False
+    for order in orders:
+        meta = order.pricing_meta or {}
+        if not isinstance(meta, dict):
+            continue
+        applied_combos = meta.get("applied_combos")
+        if isinstance(applied_combos, list) and len(applied_combos) > 0:
+            has_combo_discounts = True
+        if str(meta.get("mode") or "").strip().lower() == "manual":
+            has_manual_pricing = True
+
     lines = [
         {
             "item_id": order.item_id,
@@ -1585,6 +1597,8 @@ def _group_email_order_data(
         "subtotal": subtotal,
         "discount_total": discount_total,
         "total_price": grand_total,
+        "has_combo_discounts": has_combo_discounts,
+        "has_manual_pricing": has_manual_pricing,
         "items": lines,
     }
 

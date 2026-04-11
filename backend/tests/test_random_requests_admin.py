@@ -403,6 +403,8 @@ class RandomRequestsAdminTests(unittest.TestCase):
         payload = mock_send.call_args.args[0]
         self.assertEqual(payload["address"], "789 Random Road")
         self.assertEqual(payload["event_date"], "")
+        self.assertFalse(payload["has_combo_discounts"])
+        self.assertTrue(payload["has_manual_pricing"])
 
 
 if __name__ == "__main__":

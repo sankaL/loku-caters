@@ -59,6 +59,8 @@ def _build_order_summary_html(order_data: dict) -> str:
     subtotal = float(order_data.get("subtotal", sum(line["base_total"] for line in lines)) or 0)
     discount_total = float(order_data.get("discount_total", sum(line["discount_total"] for line in lines)) or 0)
     grand_total = float(order_data.get("total_price", sum(line["total_price"] for line in lines)) or 0)
+    has_combo_discounts = bool(order_data.get("has_combo_discounts"))
+    has_manual_pricing = bool(order_data.get("has_manual_pricing"))
     event_date = order_data.get("event_date", "")
     pickup_location = order_data.get("pickup_location", "")
     pickup_time_slot = order_data.get("pickup_time_slot", "")
@@ -80,9 +82,15 @@ def _build_order_summary_html(order_data: dict) -> str:
 
     savings_row_html = ""
     if discount_total > 0:
+        if has_combo_discounts:
+            discount_label = "Combo savings"
+        elif has_manual_pricing:
+            discount_label = "Adjusted pricing"
+        else:
+            discount_label = "Discount"
         savings_row_html = f"""
                       <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">Combo savings</td>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">{discount_label}</td>
                         <td style="font-size:14px;color:#2d6a2d;font-weight:600;text-align:right;padding:6px 0;">-{currency} ${discount_total:.2f}</td>
                       </tr>
 """
