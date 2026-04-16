@@ -40,6 +40,7 @@ export default function Navigation() {
                 {/* Desktop Nav */}
                 <nav className="hidden md:flex items-center gap-8">
                     <Link href="/menu" className={linkStyle("/menu")}>Menu</Link>
+                    <Link href="/flyer" className={linkStyle("/flyer")}>Flyers</Link>
                     <Link href="/about" className={linkStyle("/about")}>About Us</Link>
                     <Link href="/reviews" className={linkStyle("/reviews")}>Reviews</Link>
                     <Link href="/contact" className={linkStyle("/contact")}>Contact Us</Link>
@@ -80,6 +81,7 @@ export default function Navigation() {
                 <div className="md:hidden absolute top-20 inset-x-0 bg-[color:var(--color-cream)] border-b border-[color:var(--color-border)] shadow-lg animate-slide-up">
                     <nav className="flex flex-col p-6 gap-6">
                         <Link href="/menu" className={linkStyle("/menu")} onClick={() => setIsMenuOpen(false)}>Menu</Link>
+                        <Link href="/flyer" className={linkStyle("/flyer")} onClick={() => setIsMenuOpen(false)}>Flyers</Link>
                         <Link href="/about" className={linkStyle("/about")} onClick={() => setIsMenuOpen(false)}>About Us</Link>
                         <Link href="/reviews" className={linkStyle("/reviews")} onClick={() => setIsMenuOpen(false)}>Reviews</Link>
                         <Link href="/contact" className={linkStyle("/contact")} onClick={() => setIsMenuOpen(false)}>Contact Us</Link>
