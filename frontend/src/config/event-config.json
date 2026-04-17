@@ -6,5 +6,85 @@
   "currency": "CAD",
   "hero_header": "",
   "hero_subheader": "",
-  "promo_details": null
+  "promo_details": null,
+  "flyer": {
+    "appetizers": [
+      {
+        "name": "Rolls",
+        "image": "/assets/food/flyer/rolls.jpeg",
+        "imagePosition": "center 30%",
+        "minOrder": 10,
+        "varieties": [
+          { "name": "Vegetable", "price": 2.25 },
+          { "name": "Fish", "price": 2.75 },
+          { "name": "Chicken", "price": 3.0 },
+          { "name": "Mutton", "price": 3.25 }
+        ]
+      },
+      {
+        "name": "Pastries",
+        "image": "/assets/food/flyer/pastries.jpeg",
+        "minOrder": 10,
+        "varieties": [
+          { "name": "Vegetable", "price": 2.0 },
+          { "name": "Fish", "price": 2.0 },
+          { "name": "Chicken", "price": 2.1 },
+          { "name": "Mutton", "price": 2.5 }
+        ]
+      },
+      {
+        "name": "Patties",
+        "image": "/assets/food/flyer/patties.jpeg",
+        "minOrder": 10,
+        "varieties": [
+          { "name": "Vegetable", "price": 1.25 },
+          { "name": "Fish", "price": 1.25 },
+          { "name": "Chicken", "price": 1.5 },
+          { "name": "Mutton", "price": 1.75 }
+        ]
+      },
+      {
+        "name": "Cutlets",
+        "image": "/assets/food/flyer/cutlets.jpeg",
+        "imagePosition": "center 30%",
+        "minOrder": 10,
+        "varieties": [
+          { "name": "Vegetable", "price": 1.1 },
+          { "name": "Fish", "price": 1.25 }
+        ]
+      }
+    ],
+    "trays": [
+      {
+        "name": "Chicken Curry",
+        "image": "/assets/food/flyer/chicken-curry.jpg",
+        "size": "Half Tray",
+        "price": 60
+      },
+      {
+        "name": "Seeni Sambol",
+        "image": "/assets/food/flyer/seeni-sambol.jpg",
+        "size": "Half Tray",
+        "price": 50
+      },
+      {
+        "name": "Mutton Curry",
+        "image": "/assets/food/flyer/mutton-curry.jpg",
+        "size": "Half Tray",
+        "price": 80
+      },
+      {
+        "name": "Vegetable Chopsey",
+        "image": "/assets/food/flyer/chopsey.jpg",
+        "size": "Half Tray",
+        "price": 40
+      },
+      {
+        "name": "Batu Moju",
+        "image": "/assets/food/flyer/moju.png",
+        "size": "Half Tray",
+        "price": 50
+      }
+    ]
+  }
 }
