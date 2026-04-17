@@ -70,6 +70,24 @@ export interface EventConfig {
   combo_deals: ComboDeal[];
   items: Item[];
   locations: Location[];
+  flyer: {
+    appetizers: {
+      name: string;
+      image: string;
+      imagePosition?: string;
+      minOrder: number;
+      varieties: {
+        name: string;
+        price: number;
+      }[];
+    }[];
+    trays: {
+      name: string;
+      image: string;
+      size: string;
+      price: number;
+    }[];
+  };
 }
 
 export async function fetchEventConfig(eventId?: number | null): Promise<EventConfig | null> {
