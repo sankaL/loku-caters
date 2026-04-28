@@ -93,6 +93,7 @@ Relational table for menu items. Managed via `/admin/items` in the admin panel.
 | `price` | `NUMERIC(10,2)` | NOT NULL | Regular price |
 | `discounted_price` | `NUMERIC(10,2)` | NULLABLE | Overrides `price` for display and order calculation if set |
 | `minimum_order_quantity` | `INTEGER` | NOT NULL, default `1`, CHECK >= 1 | Minimum quantity required on the public order form for this item |
+| `image_key` | `TEXT` | NULLABLE | Optional key referencing a `menu_item` entry in `config/event-images.json`; resolved to a public asset path by the backend |
 | `sort_order` | `INTEGER` | NOT NULL, default `0` | Controls display order |
 
 ---
@@ -143,7 +144,7 @@ Stores events with their associated item and location selections. Only one non-s
 
 ## Event image registry
 
-Event image assets are stored in the repository and referenced by key from `events.tooltip_image_key` and `events.hero_side_image_key`.
+Event and menu image assets are stored in the repository and referenced by key from `events.tooltip_image_key`, `events.hero_side_image_key`, and `items.image_key`.
 
 Source-of-truth file:
 
@@ -158,6 +159,9 @@ Registry helper paths define where new images should be placed:
 
 - `frontend/public/assets/img/tooltip`
 - `frontend/public/assets/img/hero-side`
+- `frontend/public/assets/food/client-menu`
+
+Menu item entries use `type = "menu_item"` and currently include keys for Lamprais, Vegetarian Lamprais, Rolls, Pastries, Patties, Cutlets, and Seeni Sambol.
 
 ---
 

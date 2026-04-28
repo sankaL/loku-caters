@@ -21,6 +21,7 @@ class Item(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     discounted_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
     minimum_order_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    image_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
 
