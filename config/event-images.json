@@ -1,7 +1,8 @@
 {
   "helper": {
     "tooltip_target_dir": "frontend/public/assets/img/tooltip",
-    "hero_side_target_dir": "frontend/public/assets/img/hero-side"
+    "hero_side_target_dir": "frontend/public/assets/img/hero-side",
+    "menu_item_target_dir": "frontend/public/assets/food/client-menu"
   },
   "images": [
     {
@@ -17,6 +18,55 @@
       "label": "Lamprais Hero Side",
       "path": "/assets/img/hero-side/lamprais-side.png",
       "alt": "Lamprais serving image for hero card side decoration"
+    },
+    {
+      "key": "menu-item-lamprais",
+      "type": "menu_item",
+      "label": "Lamprais",
+      "path": "/assets/food/client-menu/lamprais.webp",
+      "alt": "Lamprais wrapped in banana leaf"
+    },
+    {
+      "key": "menu-item-lamprais-veg",
+      "type": "menu_item",
+      "label": "Vegetarian Lamprais",
+      "path": "/assets/food/client-menu/lamprais-veg.webp",
+      "alt": "Vegetarian lamprais wrapped in banana leaf"
+    },
+    {
+      "key": "menu-item-cutlets",
+      "type": "menu_item",
+      "label": "Cutlets",
+      "path": "/assets/food/client-menu/cutlets.webp",
+      "alt": "Sri Lankan cutlets"
+    },
+    {
+      "key": "menu-item-pastries",
+      "type": "menu_item",
+      "label": "Pastries",
+      "path": "/assets/food/client-menu/pastries.webp",
+      "alt": "Savory Sri Lankan pastries"
+    },
+    {
+      "key": "menu-item-patties",
+      "type": "menu_item",
+      "label": "Patties",
+      "path": "/assets/food/client-menu/patties.webp",
+      "alt": "Sri Lankan patties"
+    },
+    {
+      "key": "menu-item-rolls",
+      "type": "menu_item",
+      "label": "Rolls",
+      "path": "/assets/food/client-menu/rolls.webp",
+      "alt": "Sri Lankan rolls"
+    },
+    {
+      "key": "menu-item-seeni-sambol",
+      "type": "menu_item",
+      "label": "Seeni Sambol",
+      "path": "/assets/food/client-menu/seeni-sambol.webp",
+      "alt": "Seeni sambol tray"
     }
   ]
 }

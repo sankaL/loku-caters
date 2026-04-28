@@ -24,7 +24,7 @@ from event_config import (
     get_config_from_db,
     get_config_for_event_id_from_db,
 )
-from event_images import get_event_image_catalog, validate_event_image_key
+from event_images import get_event_image_catalog, resolve_event_image_path, validate_event_image_key
 from models import CateringRequest, CateringRequestComment, Customer, Event, Feedback, Item, Location, Order
 from schemas import (
     CustomerUpdate, EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
@@ -553,6 +553,13 @@ def _validate_event_images(payload: Union[EventCreate, EventUpdate]) -> tuple[Op
     return tooltip_image_key, hero_side_image_key
 
 
+def _validate_menu_item_image_key(image_key: Optional[str]) -> Optional[str]:
+    try:
+        return validate_event_image_key(image_key, "menu_item")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
 def _validate_event_combo_deals(payload: Union[EventCreate, EventUpdate]) -> list[dict[str, Any]]:
     try:
         combo_payload = [entry.model_dump(mode="json") for entry in payload.combo_deals]
@@ -781,6 +788,7 @@ def admin_delete_event(
 
 def _item_dict(item: Item) -> dict:
     minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+    image_key = getattr(item, "image_key", None)
     return {
         "id": item.id,
         "name": item.name,
@@ -788,6 +796,8 @@ def _item_dict(item: Item) -> dict:
         "price": float(item.price),
         "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
         "minimum_order_quantity": minimum_order_quantity,
+        "image_key": image_key,
+        "image_path": resolve_event_image_path(image_key),
         "sort_order": item.sort_order,
     }
 
@@ -807,6 +817,7 @@ def admin_create_item(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
+    image_key = _validate_menu_item_image_key(body.image_key)
     max_sort = db.query(func.max(Item.sort_order)).scalar()
     next_sort = (max_sort + 1) if max_sort is not None else 0
     item = Item(
@@ -815,6 +826,7 @@ def admin_create_item(
         price=body.price,
         discounted_price=body.discounted_price,
         minimum_order_quantity=body.minimum_order_quantity if body.minimum_order_quantity is not None else 1,
+        image_key=image_key,
         sort_order=next_sort,
     )
     db.add(item)
@@ -833,12 +845,14 @@ def admin_update_item(
     item = db.query(Item).filter(Item.id == item_id).first()
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    image_key = _validate_menu_item_image_key(body.image_key)
     item.name = body.name
     item.description = body.description
     item.price = body.price
     item.discounted_price = body.discounted_price
     if body.minimum_order_quantity is not None:
         item.minimum_order_quantity = body.minimum_order_quantity
+    item.image_key = image_key
     db.commit()
     db.refresh(item)
     return _item_dict(item)
@@ -1412,6 +1426,8 @@ def _event_items_payload(items: list[Item]) -> list[dict[str, Any]]:
             "price": float(item.price),
             "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
             "minimum_order_quantity": max(1, int(getattr(item, "minimum_order_quantity", 1) or 1)),
+            "image_key": getattr(item, "image_key", None),
+            "image_path": resolve_event_image_path(getattr(item, "image_key", None)),
         }
         for item in items
     ]

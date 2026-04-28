@@ -5,7 +5,7 @@
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
         db-up db-down db-migrate db-seed db-reset \
-        stop logs-backend help
+        stop stop-backend-port logs-backend help
 
 # ----------------------------------------------------------------------------
 # Local dev database (Docker, port 5433 to avoid conflicts with system Postgres)
@@ -80,6 +80,7 @@ dev:
 ##   Frontend runs in the foreground (Ctrl-C stops everything; run 'make stop' for cleanup)
 dev-local: sync-config db-up db-migrate db-seed
 	@echo ""
+	@$(MAKE) stop-backend-port
 	@echo "  Starting backend (local DB, DEV_MODE=true)..."
 	@echo "  Backend logs: /tmp/loku-backend.log"
 	@echo "  Admin dev login: POST http://localhost:8000/api/admin/dev-login"
@@ -92,7 +93,7 @@ dev-local: sync-config db-up db-migrate db-seed
 	cd frontend && npm run dev
 
 ## Start just the backend with local DB settings (foreground, with reload)
-dev-backend: sync-config
+dev-backend: sync-config stop-backend-port
 	cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --port 8000
 
 ## Start just the frontend
@@ -142,12 +143,15 @@ db-reset: db-up
 
 ## Stop the background backend process started by dev-local
 stop:
+	@$(MAKE) stop-backend-port
+	@echo "Done."
+
+stop-backend-port:
 	@if [ -f /tmp/loku-backend.pid ]; then \
 	    kill $$(cat /tmp/loku-backend.pid) 2>/dev/null && echo "Backend stopped." || true; \
 	    rm -f /tmp/loku-backend.pid; \
 	fi
 	@-lsof -ti :8000 | xargs kill -9 2>/dev/null || true
-	@echo "Done."
 
 ## Tail live backend logs (when started via dev-local)
 logs-backend:

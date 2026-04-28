@@ -1,6 +1,7 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
@@ -12,7 +13,17 @@ interface Item {
   price: number;
   discounted_price: number | null;
   minimum_order_quantity?: number;
+  image_key: string | null;
+  image_path: string | null;
   sort_order: number;
+}
+
+interface EventImage {
+  key: string;
+  type: string;
+  label: string;
+  path: string;
+  alt: string;
 }
 
 const EMPTY_FORM = {
@@ -21,10 +32,28 @@ const EMPTY_FORM = {
   price: "",
   discounted_price: "",
   minimum_order_quantity: "1",
+  image_key: "",
 };
+
+function normalizeMenuImages(data: unknown): EventImage[] {
+  if (!data || typeof data !== "object") return [];
+  const raw = data as { images?: unknown[] };
+  const images = Array.isArray(raw.images) ? raw.images : [];
+  return images
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry): EventImage => ({
+      key: typeof entry.key === "string" ? entry.key : "",
+      type: typeof entry.type === "string" ? entry.type : "",
+      label: typeof entry.label === "string" ? entry.label : "",
+      path: typeof entry.path === "string" ? entry.path : "",
+      alt: typeof entry.alt === "string" ? entry.alt : "",
+    }))
+    .filter((entry) => entry.type === "menu_item" && Boolean(entry.key) && Boolean(entry.path) && Boolean(entry.label));
+}
 
 export default function AdminItemsPage() {
   const [items, setItems] = useState<Item[]>([]);
+  const [menuImages, setMenuImages] = useState<EventImage[]>([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const [showModal, setShowModal] = useState(false);
@@ -37,15 +66,28 @@ export default function AdminItemsPage() {
     setTimeout(() => setToast(null), 4000);
   }, []);
 
+  const selectedFormImage = useMemo(
+    () => menuImages.find((image) => image.key === form.image_key) ?? null,
+    [menuImages, form.image_key]
+  );
+
   const loadItems = useCallback(async () => {
     try {
       const token = await getAdminToken();
       if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/items`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to load items");
-      setItems(await res.json());
+      const headers = { Authorization: `Bearer ${token}` };
+      const [itemsRes, imagesRes] = await Promise.all([
+        fetch(`${API_URL}/api/admin/items`, { headers }),
+        fetch(`${API_URL}/api/admin/event-images`, { headers }),
+      ]);
+      if (!itemsRes.ok) throw new Error("Failed to load items");
+      if (!imagesRes.ok) throw new Error("Failed to load image catalog");
+      const [itemsData, imagesData] = await Promise.all([
+        itemsRes.json() as Promise<Item[]>,
+        imagesRes.json() as Promise<unknown>,
+      ]);
+      setItems(itemsData);
+      setMenuImages(normalizeMenuImages(imagesData));
     } catch {
       showToast("Failed to load items", "error");
     } finally {
@@ -69,6 +111,7 @@ export default function AdminItemsPage() {
       price: String(item.price),
       discounted_price: item.discounted_price != null ? String(item.discounted_price) : "",
       minimum_order_quantity: String(item.minimum_order_quantity ?? 1),
+      image_key: item.image_key ?? "",
     });
     setShowModal(true);
   }
@@ -91,6 +134,7 @@ export default function AdminItemsPage() {
         price: parseFloat(form.price) || 0,
         discounted_price: form.discounted_price ? parseFloat(form.discounted_price) : null,
         minimum_order_quantity: minimumOrderQuantity,
+        image_key: form.image_key || null,
       };
 
       let res: Response;
@@ -204,10 +248,11 @@ export default function AdminItemsPage() {
           style={{ background: "white", border: "1px solid var(--color-border)" }}
         >
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="w-full min-w-[940px] text-sm">
             <thead>
               <tr style={{ borderBottom: "1px solid var(--color-border)" }}>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>ID</th>
+                <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Image</th>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Name</th>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Price</th>
                 <th className="text-left px-5 py-3 font-semibold" style={{ color: "var(--color-muted)" }}>Sale Price</th>
@@ -222,6 +267,23 @@ export default function AdminItemsPage() {
                   style={{ borderTop: idx > 0 ? "1px solid var(--color-border)" : undefined }}
                 >
                   <td className="px-5 py-3 font-mono text-xs" style={{ color: "var(--color-muted)" }}>{item.id}</td>
+                  <td className="px-5 py-3">
+                    {item.image_path ? (
+                      <img
+                        src={item.image_path}
+                        alt={item.name}
+                        className="h-12 w-16 rounded-xl object-cover"
+                        style={{ border: "1px solid var(--color-border)" }}
+                      />
+                    ) : (
+                      <div
+                        className="flex h-12 w-16 items-center justify-center rounded-xl text-xs font-semibold"
+                        style={{ background: "var(--color-cream)", color: "var(--color-muted)", border: "1px solid var(--color-border)" }}
+                      >
+                        None
+                      </div>
+                    )}
+                  </td>
                   <td className="px-5 py-3 font-medium" style={{ color: "var(--color-text)" }}>
                     <div>{item.name}</div>
                     {item.description && (
@@ -272,7 +334,7 @@ export default function AdminItemsPage() {
           onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}
         >
           <div
-            className="w-full max-w-md rounded-2xl p-6 space-y-4"
+            className="w-full max-w-2xl rounded-2xl p-6 space-y-4"
             style={{ background: "white" }}
           >
             <h2 className="text-lg font-semibold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
@@ -301,6 +363,39 @@ export default function AdminItemsPage() {
                 className={inputClass}
                 style={{ color: "var(--color-text)" }}
               />
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_10rem] sm:items-end">
+              <div>
+                <label className={labelClass} style={{ color: "var(--color-text)" }}>Menu Image</label>
+                <select
+                  value={form.image_key}
+                  onChange={(e) => setForm((p) => ({ ...p, image_key: e.target.value }))}
+                  className={inputClass}
+                  style={{ color: "var(--color-text)" }}
+                >
+                  <option value="">None</option>
+                  {menuImages.map((image) => (
+                    <option key={image.key} value={image.key}>{image.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div
+                className="h-28 overflow-hidden rounded-2xl"
+                style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}
+              >
+                {selectedFormImage ? (
+                  <img
+                    src={selectedFormImage.path}
+                    alt={selectedFormImage.alt}
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <div className="flex h-full w-full items-center justify-center px-4 text-center text-xs font-semibold" style={{ color: "var(--color-muted)" }}>
+                    No image selected
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">

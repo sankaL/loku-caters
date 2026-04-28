@@ -7,7 +7,7 @@ import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 
-type EventImageType = "tooltip" | "hero_side";
+type EventImageType = "tooltip" | "hero_side" | "menu_item";
 
 interface AdminItem {
   id: string;
@@ -34,6 +34,7 @@ interface EventImageCatalog {
   helper: {
     tooltip_target_dir: string;
     hero_side_target_dir: string;
+    menu_item_target_dir?: string;
   };
   images: EventImage[];
 }
@@ -105,6 +106,7 @@ const EMPTY_IMAGE_CATALOG: EventImageCatalog = {
   helper: {
     tooltip_target_dir: "frontend/public/assets/img/tooltip",
     hero_side_target_dir: "frontend/public/assets/img/hero-side",
+    menu_item_target_dir: "frontend/public/assets/food/client-menu",
   },
   images: [],
 };
@@ -144,12 +146,16 @@ function normalizeImageCatalog(data: unknown): EventImageCatalog {
         typeof helper.hero_side_target_dir === "string"
           ? helper.hero_side_target_dir
           : EMPTY_IMAGE_CATALOG.helper.hero_side_target_dir,
+      menu_item_target_dir:
+        typeof helper.menu_item_target_dir === "string"
+          ? helper.menu_item_target_dir
+          : EMPTY_IMAGE_CATALOG.helper.menu_item_target_dir,
     },
     images: images
       .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
       .map((entry): EventImage => ({
         key: typeof entry.key === "string" ? entry.key : "",
-        type: entry.type === "hero_side" ? "hero_side" : "tooltip",
+        type: entry.type === "hero_side" || entry.type === "menu_item" ? entry.type : "tooltip",
         label: typeof entry.label === "string" ? entry.label : "",
         path: typeof entry.path === "string" ? entry.path : "",
         alt: typeof entry.alt === "string" ? entry.alt : "",

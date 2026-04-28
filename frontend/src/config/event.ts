@@ -10,6 +10,8 @@ export interface Item {
   price: number;
   discounted_price?: number | null;
   minimum_order_quantity?: number;
+  image_key?: string | null;
+  image_path?: string | null;
 }
 
 export interface ComboRequirement {
@@ -99,6 +101,9 @@ export async function fetchEventConfig(eventId?: number | null): Promise<EventCo
   const query = params.size > 0 ? `?${params.toString()}` : "";
   const res = await fetch(`${API_URL}/api/config${query}`, { cache: "no-store" });
   if (res.status === 404) return null;
-  if (!res.ok) throw new Error("Failed to load event configuration");
+  if (!res.ok) {
+    const body = await res.text().catch(() => "unknown");
+    throw new Error(`Failed to load event configuration (${res.status}): ${body}`);
+  }
   return res.json();
 }

@@ -384,6 +384,25 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(len(result["upsell_opportunities"]), 1)
         self.assertIn("Fish Roll or Mutton Roll", result["upsell_opportunities"][0]["preview_text"])
         self.assertIn("Fish Roll or Mutton Roll", result["upsell_opportunities"][0]["message"])
+        missing_requirement = result["upsell_opportunities"][0]["missing_requirements"][0]
+        self.assertEqual(missing_requirement["group_min_quantity"], 1)
+        self.assertEqual(
+            missing_requirement["options"],
+            [
+                {
+                    "item_id": "fish_roll",
+                    "item_name": "Fish Roll",
+                    "missing_quantity": 1,
+                    "group_min_quantity": 1,
+                },
+                {
+                    "item_id": "mutton_roll",
+                    "item_name": "Mutton Roll",
+                    "missing_quantity": 1,
+                    "group_min_quantity": 1,
+                },
+            ],
+        )
 
     def test_effective_minimum_order_quantity_uses_lowest_enabled_combo_group_minimum(self):
         effective_minimum = effective_minimum_order_quantity(

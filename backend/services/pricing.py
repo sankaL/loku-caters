@@ -855,6 +855,15 @@ def quote_cart(
                     item_names=item_names,
                 )
                 hypothetical_quantities[preferred_item_id] = hypothetical_quantities.get(preferred_item_id, 0) + missing_qty
+                options = [
+                    {
+                        "item_id": item_id,
+                        "item_name": item_names.get(item_id, item_id),
+                        "missing_quantity": missing_qty,
+                        "group_min_quantity": group.min_quantity,
+                    }
+                    for item_id in group.item_ids
+                ]
                 missing_requirements.append(
                     {
                         "group_id": group.id,
@@ -862,6 +871,8 @@ def quote_cart(
                         "item_id": preferred_item_id,
                         "item_name": item_names.get(preferred_item_id, preferred_item_id),
                         "missing_quantity": missing_qty,
+                        "group_min_quantity": group.min_quantity,
+                        "options": options,
                     }
                 )
 

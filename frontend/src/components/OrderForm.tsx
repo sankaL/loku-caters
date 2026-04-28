@@ -1,4 +1,5 @@
 "use client";
+/* eslint-disable @next/next/no-img-element */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom";
@@ -65,17 +66,26 @@ interface QuoteLine {
   total_price: number;
 }
 
+interface UpsellRequirementOption {
+  item_id: string;
+  item_name: string;
+  missing_quantity: number;
+  group_min_quantity: number;
+}
+
+interface UpsellMissingRequirement extends UpsellRequirementOption {
+  group_id?: string;
+  group_name?: string;
+  options?: UpsellRequirementOption[];
+}
+
 interface UpsellOpportunity {
   combo_id: string;
   name: string;
   preview_text: string;
   message: string;
   potential_savings: number;
-  missing_requirements: Array<{
-    item_id: string;
-    item_name: string;
-    missing_quantity: number;
-  }>;
+  missing_requirements: UpsellMissingRequirement[];
 }
 
 interface QuoteResult {
@@ -185,6 +195,14 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
       (item.description ?? "").toLowerCase().includes(q)
     );
   }, [items, pickerSearch]);
+  const pickerImageItems = useMemo(
+    () => pickerItems.filter((item) => Boolean(item.image_path)),
+    [pickerItems]
+  );
+  const pickerTextItems = useMemo(
+    () => pickerItems.filter((item) => !item.image_path),
+    [pickerItems]
+  );
 
   useEffect(() => {
     if (!pickerOpen) {
@@ -300,21 +318,20 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
     setServerError("");
   }
 
-  function addMissingRequirements(opportunity: UpsellOpportunity) {
+  function addUpsellOption(option: UpsellRequirementOption) {
     setQuantities((prev) => {
       const next = { ...prev };
-      for (const missing of opportunity.missing_requirements) {
-        const existingQty = next[missing.item_id] ?? 0;
-        const item = items.find((entry) => entry.id === missing.item_id);
-        const minimumOrderQuantity = getMinimumOrderQuantity(item);
-        if (existingQty > 0) {
-          next[missing.item_id] = existingQty + missing.missing_quantity;
-        } else {
-          next[missing.item_id] = Math.max(minimumOrderQuantity, missing.missing_quantity);
-        }
+      const existingQty = next[option.item_id] ?? 0;
+      const quantityToAdd = Math.max(1, Math.ceil(Number(option.missing_quantity) || 1));
+      if (existingQty > 0) {
+        next[option.item_id] = existingQty + quantityToAdd;
+      } else {
+        next[option.item_id] = quantityToAdd;
       }
       return next;
     });
+    setErrors((prev) => ({ ...prev, items: "" }));
+    setServerError("");
   }
 
   function handleChange(event: React.ChangeEvent<HTMLInputElement>) {
@@ -468,90 +485,219 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
             />
           </div>
 
-          <div className="overflow-y-auto flex-1 min-h-0 px-4 py-2 md:px-5 md:py-3 space-y-2" style={{ overscrollBehavior: "contain" }}>
+          <div className="overflow-y-auto flex-1 min-h-0 px-4 py-3 md:px-5 md:py-4 space-y-4" style={{ overscrollBehavior: "contain" }}>
             {pickerItems.length === 0 ? (
               <p className="text-sm py-4 text-center" style={{ color: "var(--color-muted)" }}>No items match your search.</p>
             ) : (
-              pickerItems.map((item) => {
-                const qty = quantities[item.id] ?? 0;
-                const inCart = qty > 0;
-                const price = item.discounted_price ?? item.price;
-                const minimumOrderQuantity = getMinimumOrderQuantity(item);
-                return (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-2 md:gap-3 rounded-2xl px-3 py-2 md:px-4 md:py-3 transition-all"
-                    style={{
-                      border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
-                      background: inCart ? "#f0fdf4" : "white",
-                    }}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
-                      {item.description && (
-                        <DescriptionPopover
-                          description={item.description}
-                          open={openDescriptionItemId === item.id}
-                          onOpenChange={(nextOpen) => {
-                            setOpenDescriptionItemId(nextOpen ? item.id : null);
+              <>
+                {pickerImageItems.length > 0 && (
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    {pickerImageItems.map((item) => {
+                      const qty = quantities[item.id] ?? 0;
+                      const inCart = qty > 0;
+                      const price = item.discounted_price ?? item.price;
+                      const minimumOrderQuantity = getMinimumOrderQuantity(item);
+                      return (
+                        <div
+                          key={item.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => {
+                            if (!inCart) changeQty(item.id, 1);
                           }}
-                          className="text-xs mt-0.5"
-                        />
-                      )}
-                      <div className="mt-0.5 flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
-                          {formatCurrency(price)}
-                        </span>
-                        {item.discounted_price != null && (
-                          <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
-                            {formatCurrency(item.price)}
-                          </span>
-                        )}
-                        {minimumOrderQuantity > 1 && (
-                          <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
-                            Min {minimumOrderQuantity}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    {inCart ? (
-                      <div className="flex items-center gap-0 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => changeQty(item.id, -1)}
-                          className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
-                          style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                          aria-label={`Decrease ${item.name} quantity`}
+                          onKeyDown={(event) => {
+                            if (!inCart && (event.key === "Enter" || event.key === " ")) {
+                              event.preventDefault();
+                              changeQty(item.id, 1);
+                            }
+                          }}
+                          className="group overflow-hidden rounded-2xl transition-all active:scale-[0.99]"
+                          style={{
+                            border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
+                            background: inCart ? "rgba(114,145,82,0.12)" : "white",
+                            cursor: inCart ? "default" : "pointer",
+                          }}
                         >
-                          -
-                        </button>
-                        <div className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b" style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}>
-                          {qty}
+                          <div className="relative aspect-[4/3] overflow-hidden" style={{ background: "var(--color-cream)" }}>
+                            <img
+                              src={item.image_path ?? ""}
+                              alt={item.name}
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                            />
+                            {inCart && (
+                              <div className="absolute right-2 top-2 rounded-full px-2.5 py-1 text-xs font-bold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
+                                Added
+                              </div>
+                            )}
+                          </div>
+                          <div className="space-y-2 p-3">
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{item.name}</p>
+                              {item.description && (
+                                <div
+                                  onClick={(event) => event.stopPropagation()}
+                                  onKeyDown={(event) => event.stopPropagation()}
+                                >
+                                  <DescriptionPopover
+                                    description={item.description}
+                                    open={openDescriptionItemId === item.id}
+                                    onOpenChange={(nextOpen) => {
+                                      setOpenDescriptionItemId(nextOpen ? item.id : null);
+                                    }}
+                                    className="text-xs mt-0.5"
+                                  />
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+                                {formatCurrency(price)}
+                              </span>
+                              {item.discounted_price != null && (
+                                <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
+                                  {formatCurrency(item.price)}
+                                </span>
+                              )}
+                              {minimumOrderQuantity > 1 && (
+                                <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
+                                  Min {minimumOrderQuantity}
+                                </span>
+                              )}
+                            </div>
+                            {inCart ? (
+                              <div className="flex items-center gap-0" onClick={(event) => event.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => changeQty(item.id, -1)}
+                                  className="flex h-9 w-9 items-center justify-center rounded-l-xl border border-r-0 text-base font-semibold transition-all"
+                                  style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                                  aria-label={`Decrease ${item.name} quantity`}
+                                >
+                                  -
+                                </button>
+                                <div className="flex h-9 w-10 items-center justify-center border-b border-t text-sm font-semibold" style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}>
+                                  {qty}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => changeQty(item.id, 1)}
+                                  className="flex h-9 w-9 items-center justify-center rounded-r-xl border border-l-0 text-base font-semibold transition-all"
+                                  style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                                  aria-label={`Increase ${item.name} quantity`}
+                                >
+                                  +
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  changeQty(item.id, 1);
+                                }}
+                                className="w-full rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
+                                style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                              >
+                                + Add
+                              </button>
+                            )}
+                          </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => changeQty(item.id, 1)}
-                          className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
-                          style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                          aria-label={`Increase ${item.name} quantity`}
-                        >
-                          +
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => changeQty(item.id, 1)}
-                        className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
-                        style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                      >
-                        + Add
-                      </button>
-                    )}
+                      );
+                    })}
                   </div>
-                );
-              })
+                )}
+
+                {pickerTextItems.length > 0 && (
+                  <div className="space-y-2">
+                    {pickerImageItems.length > 0 && (
+                      <p className="px-1 text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--color-muted)" }}>
+                        More items
+                      </p>
+                    )}
+                    {pickerTextItems.map((item) => {
+                      const qty = quantities[item.id] ?? 0;
+                      const inCart = qty > 0;
+                      const price = item.discounted_price ?? item.price;
+                      const minimumOrderQuantity = getMinimumOrderQuantity(item);
+                      return (
+                        <div
+                          key={item.id}
+                          className="flex items-center gap-2 md:gap-3 rounded-2xl px-3 py-2 md:px-4 md:py-3 transition-all"
+                          style={{
+                            border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
+                            background: inCart ? "rgba(114,145,82,0.12)" : "white",
+                          }}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
+                            {item.description && (
+                              <DescriptionPopover
+                                description={item.description}
+                                open={openDescriptionItemId === item.id}
+                                onOpenChange={(nextOpen) => {
+                                  setOpenDescriptionItemId(nextOpen ? item.id : null);
+                                }}
+                                className="text-xs mt-0.5"
+                              />
+                            )}
+                            <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+                                {formatCurrency(price)}
+                              </span>
+                              {item.discounted_price != null && (
+                                <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
+                                  {formatCurrency(item.price)}
+                                </span>
+                              )}
+                              {minimumOrderQuantity > 1 && (
+                                <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
+                                  Min {minimumOrderQuantity}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {inCart ? (
+                            <div className="flex items-center gap-0 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => changeQty(item.id, -1)}
+                                className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
+                                style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                                aria-label={`Decrease ${item.name} quantity`}
+                              >
+                                -
+                              </button>
+                              <div className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b" style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}>
+                                {qty}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => changeQty(item.id, 1)}
+                                className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
+                                style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                                aria-label={`Increase ${item.name} quantity`}
+                              >
+                                +
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => changeQty(item.id, 1)}
+                              className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                              style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                            >
+                              + Add
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
             )}
           </div>
 
@@ -619,6 +765,14 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                   const minimumOrderQuantity = getMinimumOrderQuantity(item);
                   return (
                     <div key={item.id} className="flex items-center gap-3 rounded-xl px-4 py-2.5" style={{ border: "1px solid var(--color-sage)", background: "#f0fdf4" }}>
+                      {item.image_path && (
+                        <img
+                          src={item.image_path}
+                          alt={item.name}
+                          className="h-12 w-14 shrink-0 rounded-xl object-cover"
+                          style={{ border: "1px solid var(--color-border)" }}
+                        />
+                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
                         <p className="text-xs" style={{ color: "var(--color-muted)" }}>{formatCurrency(price)} each</p>
@@ -919,68 +1073,87 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
               {/* Upsell opportunities */}
               {quote.upsell_opportunities.length > 0 ? (
                 <div className="px-5 md:px-6 pb-5 md:pb-6" style={{ borderTop: quote.applied_combos.length > 0 ? "1px solid rgba(255,255,255,0.06)" : "none", paddingTop: quote.applied_combos.length > 0 ? "16px" : 0 }}>
-                  <div className="space-y-3">
-                    {quote.upsell_opportunities.map((opportunity) => (
-                      <div
-                        key={opportunity.combo_id}
-                        className="rounded-2xl overflow-hidden"
-                        style={{ background: "#F7F5F0", color: "var(--color-text)", border: "1px solid rgba(114,145,82,0.2)" }}
-                      >
-                        <div className="p-4 pb-3">
-                          <div className="flex items-start gap-2.5">
-                            {/* Tag icon */}
-                            <div className="shrink-0 mt-0.5">
-                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <div className="space-y-2">
+                    {quote.upsell_opportunities.map((opportunity) => {
+                      const detailsKey = `upsell-${opportunity.combo_id}`;
+                      const expanded = expandedDealIds.has(detailsKey);
+                      const optionRows = opportunity.missing_requirements.flatMap((requirement) => {
+                        const options = requirement.options && requirement.options.length > 0
+                          ? requirement.options
+                          : [requirement];
+                        return options.map((option) => ({
+                          ...option,
+                          group_id: requirement.group_id ?? "group",
+                        }));
+                      });
+
+                      return (
+                        <div
+                          key={opportunity.combo_id}
+                          className="rounded-2xl px-3 py-2"
+                          style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid rgba(114,145,82,0.28)" }}
+                        >
+                          <div className="flex items-center justify-between gap-3 pb-2">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <svg className="shrink-0" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" />
                                 <line x1="7" y1="7" x2="7.01" y2="7" />
                               </svg>
+                              <p className="text-sm font-bold truncate" style={{ color: "var(--color-forest)" }}>{opportunity.name}</p>
                             </div>
-                            <div
-                              className="flex-1 min-w-0 cursor-pointer"
+                            <button
+                              type="button"
                               onClick={() => setExpandedDealIds((prev) => {
                                 const next = new Set(prev);
-                                const key = `upsell-${opportunity.combo_id}`;
-                                if (next.has(key)) next.delete(key);
-                                else next.add(key);
+                                if (next.has(detailsKey)) next.delete(detailsKey);
+                                else next.add(detailsKey);
                                 return next;
                               })}
+                              className="shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold transition-all active:scale-[0.98]"
+                              style={{ border: "1px solid var(--color-border)", color: "var(--color-forest)", background: "white" }}
+                              aria-expanded={expanded}
                             >
-                              <p className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>{opportunity.name}</p>
-                              <p
-                                className="text-xs mt-1 leading-relaxed"
-                                style={{
-                                  color: "var(--color-muted)",
-                                  ...(!expandedDealIds.has(`upsell-${opportunity.combo_id}`) ? { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {}),
-                                }}
-                              >
-                                {opportunity.preview_text}
-                              </p>
-                              <p
-                                className="text-sm mt-2 font-medium"
-                                style={{
-                                  color: "var(--color-forest)",
-                                  ...(!expandedDealIds.has(`upsell-${opportunity.combo_id}`) ? { display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" as const, overflow: "hidden" } : {}),
-                                }}
-                              >
-                                {opportunity.message}
-                              </p>
+                              {expanded ? "Hide" : "Details"}
+                            </button>
+                          </div>
+
+                          {expanded && (
+                            <div className="mb-2 rounded-xl px-3 py-2 text-xs leading-relaxed" style={{ background: "white", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}>
+                              <p>{opportunity.preview_text}</p>
+                              <p className="mt-1 font-semibold" style={{ color: "var(--color-forest)" }}>{opportunity.message}</p>
                             </div>
+                          )}
+
+                          <div className="space-y-1.5">
+                            {optionRows.map((option) => (
+                              <div
+                                key={`${opportunity.combo_id}-${option.group_id}-${option.item_id}`}
+                                className="flex items-center gap-2 rounded-xl px-3 py-2"
+                                style={{ background: "white", border: "1px solid var(--color-border)" }}
+                              >
+                                <p className="min-w-0 flex-1 truncate text-sm font-semibold" style={{ color: "var(--color-text)" }}>
+                                  {option.item_name}
+                                </p>
+                                <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold" style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}>
+                                  Qty +{Math.max(1, Math.ceil(Number(option.missing_quantity) || 1))}
+                                </span>
+                                <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold" style={{ background: "rgba(114,145,82,0.14)", color: "var(--color-forest)", border: "1px solid rgba(114,145,82,0.3)" }}>
+                                  Min {Math.max(1, Math.ceil(Number(option.group_min_quantity) || 1))}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => addUpsellOption(option)}
+                                  className="shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold transition-all active:scale-[0.98]"
+                                  style={{ background: "var(--color-sage)", color: "white", border: "1px solid var(--color-sage)" }}
+                                >
+                                  Add
+                                </button>
+                              </div>
+                            ))}
                           </div>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => addMissingRequirements(opportunity)}
-                          className="w-full flex items-center justify-center gap-2 py-3 text-sm font-semibold transition-all"
-                          style={{ background: "var(--color-sage)", color: "white", borderTop: "1px solid rgba(114,145,82,0.3)" }}
-                        >
-                          Add and Save
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <line x1="5" y1="12" x2="19" y2="12" />
-                            <polyline points="12 5 19 12 12 19" />
-                          </svg>
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               ) : quote.applied_combos.length === 0 && !quoteLoading ? (

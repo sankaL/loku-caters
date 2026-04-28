@@ -43,7 +43,7 @@ def resolve_event_image_path(key: Optional[str]) -> Optional[str]:
     return path if isinstance(path, str) and path else None
 
 
-def validate_event_image_key(key: Optional[str], image_type: Literal["tooltip", "hero_side"]) -> Optional[str]:
+def validate_event_image_key(key: Optional[str], image_type: Literal["tooltip", "hero_side", "menu_item"]) -> Optional[str]:
     if key is None:
         return None
     normalized = key.strip()

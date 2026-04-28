@@ -315,13 +315,26 @@ class AppliedComboResponse(BaseModel):
     discount_scope_label: str
 
 
+class UpsellRequirementOptionResponse(BaseModel):
+    item_id: str
+    item_name: str
+    missing_quantity: int
+    group_min_quantity: int
+
+
+class UpsellMissingRequirementResponse(UpsellRequirementOptionResponse):
+    group_id: str
+    group_name: str
+    options: list[UpsellRequirementOptionResponse] = Field(default_factory=list)
+
+
 class UpsellOpportunityResponse(BaseModel):
     combo_id: str
     name: str
     preview_text: str
     message: str
     potential_savings: float
-    missing_requirements: list[dict]
+    missing_requirements: list[UpsellMissingRequirementResponse]
 
 
 class CartPricingResponse(BaseModel):
@@ -347,6 +360,7 @@ class ItemCreate(BaseModel):
     price: float
     discounted_price: Optional[float] = None
     minimum_order_quantity: Optional[int] = None
+    image_key: Optional[str] = None
 
     @field_validator("minimum_order_quantity")
     @classmethod
@@ -354,6 +368,14 @@ class ItemCreate(BaseModel):
         if v is not None and v < 1:
             raise ValueError("Minimum order quantity must be at least 1")
         return v
+
+    @field_validator("image_key", mode="before")
+    @classmethod
+    def normalize_image_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
 
 
 class ItemUpdate(BaseModel):
@@ -362,6 +384,7 @@ class ItemUpdate(BaseModel):
     price: float
     discounted_price: Optional[float] = None
     minimum_order_quantity: Optional[int] = None
+    image_key: Optional[str] = None
 
     @field_validator("minimum_order_quantity")
     @classmethod
@@ -369,6 +392,14 @@ class ItemUpdate(BaseModel):
         if v is not None and v < 1:
             raise ValueError("Minimum order quantity must be at least 1")
         return v
+
+    @field_validator("image_key", mode="before")
+    @classmethod
+    def normalize_image_key(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        stripped = str(v).strip()
+        return stripped or None
 
 
 class ItemResponse(BaseModel):
@@ -378,6 +409,8 @@ class ItemResponse(BaseModel):
     price: float
     discounted_price: Optional[float]
     minimum_order_quantity: int
+    image_key: Optional[str]
+    image_path: Optional[str]
     sort_order: int
 
 
