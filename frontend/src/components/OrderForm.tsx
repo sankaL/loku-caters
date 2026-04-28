@@ -1128,17 +1128,17 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                             </div>
                           )}
 
-                          <div className="space-y-1.5">
+                          <div className="combo-upsell-options space-y-1.5">
                             {optionRows.map((option) => (
                               <div
                                 key={`${opportunity.combo_id}-${option.group_id}-${option.item_id}`}
-                                className="flex items-center gap-2 rounded-xl px-3 py-2"
+                                className="flex items-center gap-2 rounded-xl px-2.5 py-2 sm:px-3"
                                 style={{ background: "white", border: "1px solid var(--color-border)" }}
                               >
                                 <p className="min-w-0 flex-1 truncate text-sm font-semibold" style={{ color: "var(--color-text)" }}>
                                   {option.item_name}
                                 </p>
-                                <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold" style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}>
+                                <span className="combo-upsell-qty shrink-0 rounded-full px-2 py-1 text-xs font-bold" style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}>
                                   Qty +{Math.max(1, Math.ceil(Number(option.missing_quantity) || 1))}
                                 </span>
                                 <span className="shrink-0 rounded-full px-2 py-1 text-xs font-bold" style={{ background: "rgba(114,145,82,0.14)", color: "var(--color-forest)", border: "1px solid rgba(114,145,82,0.3)" }}>

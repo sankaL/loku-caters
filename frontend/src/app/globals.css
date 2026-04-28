@@ -185,6 +185,16 @@ textarea {
   animation: slideUp 0.28s cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.combo-upsell-options {
+  container-type: inline-size;
+}
+
+@container (max-width: 320px) {
+  .combo-upsell-qty {
+    display: none;
+  }
+}
+
 @keyframes slideInLeft {
   from {
     opacity: 0;
