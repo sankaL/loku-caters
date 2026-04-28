@@ -511,7 +511,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                               changeQty(item.id, 1);
                             }
                           }}
-                          className="group overflow-hidden rounded-2xl transition-all active:scale-[0.99]"
+                          className="group flex h-full min-h-[22rem] flex-col overflow-hidden rounded-2xl transition-all active:scale-[0.99]"
                           style={{
                             border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
                             background: inCart ? "rgba(114,145,82,0.12)" : "white",
@@ -530,8 +530,8 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                               </div>
                             )}
                           </div>
-                          <div className="space-y-2 p-3">
-                            <div className="min-w-0">
+                          <div className="flex flex-1 flex-col gap-2 p-3">
+                            <div className="min-h-[3.6rem] min-w-0">
                               <p className="truncate text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{item.name}</p>
                               {item.description && (
                                 <div
@@ -549,7 +549,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                                 </div>
                               )}
                             </div>
-                            <div className="flex items-center gap-2 flex-wrap">
+                            <div className="flex min-h-5 items-center gap-2 flex-wrap">
                               <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
                                 {formatCurrency(price)}
                               </span>
@@ -565,7 +565,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                               )}
                             </div>
                             {inCart ? (
-                              <div className="flex items-center gap-0" onClick={(event) => event.stopPropagation()}>
+                              <div className="mt-auto flex items-center gap-0" onClick={(event) => event.stopPropagation()}>
                                 <button
                                   type="button"
                                   onClick={() => changeQty(item.id, -1)}
@@ -595,7 +595,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                                   event.stopPropagation();
                                   changeQty(item.id, 1);
                                 }}
-                                className="w-full rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
+                                className="mt-auto w-full rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
                                 style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
                               >
                                 + Add
@@ -764,25 +764,29 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                   const price = item.discounted_price ?? item.price;
                   const minimumOrderQuantity = getMinimumOrderQuantity(item);
                   return (
-                    <div key={item.id} className="flex items-center gap-3 rounded-xl px-4 py-2.5" style={{ border: "1px solid var(--color-sage)", background: "#f0fdf4" }}>
+                    <div
+                      key={item.id}
+                      className="grid min-h-[5.75rem] grid-cols-[3.5rem_minmax(0,1fr)_auto] grid-rows-[auto_auto] gap-x-3 gap-y-2 rounded-xl px-3 py-3 sm:flex sm:min-h-20 sm:items-center sm:px-4 sm:py-2.5"
+                      style={{ border: "1px solid var(--color-sage)", background: "#f0fdf4" }}
+                    >
                       {item.image_path && (
                         <img
                           src={item.image_path}
                           alt={item.name}
-                          className="h-12 w-14 shrink-0 rounded-xl object-cover"
+                          className="row-span-2 h-14 w-14 shrink-0 self-center rounded-xl object-cover sm:h-12"
                           style={{ border: "1px solid var(--color-border)" }}
                         />
                       )}
-                      <div className="flex-1 min-w-0">
+                      <div className="min-w-0 self-center sm:flex-1">
                         <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
-                        <p className="text-xs" style={{ color: "var(--color-muted)" }}>{formatCurrency(price)} each</p>
+                        <p className="truncate text-xs" style={{ color: "var(--color-muted)" }}>{formatCurrency(price)} each</p>
                         {minimumOrderQuantity > 1 && (
-                          <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                          <p className="truncate text-xs" style={{ color: "var(--color-muted)" }}>
                             Minimum order: {minimumOrderQuantity}
                           </p>
                         )}
                       </div>
-                      <div className="flex items-center gap-0 shrink-0">
+                      <div className="col-start-3 row-start-1 flex items-center gap-0 self-start justify-self-end shrink-0 sm:col-auto sm:row-auto sm:self-center">
                         <button
                           type="button"
                           onClick={() => changeQty(item.id, -1)}
@@ -805,7 +809,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                           +
                         </button>
                       </div>
-                      <p className="text-sm font-bold shrink-0" style={{ color: "var(--color-forest)" }}>
+                      <p className="col-start-3 row-start-2 self-end justify-self-end text-sm font-bold shrink-0 sm:col-auto sm:row-auto sm:self-center" style={{ color: "var(--color-forest)" }}>
                         {formatCurrency(price * qty)}
                       </p>
                     </div>
