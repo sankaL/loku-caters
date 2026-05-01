@@ -428,14 +428,65 @@ def _quantity_graphs(snapshot: dict[str, Any]) -> list[Flowable]:
     totals = snapshot.get("totals") or {}
     event_name = _text(source.get("name")) or "Event"
     total_quantity = _quantity(totals.get("planned_quantity"))
+    graph_locations = _split_quantity_graph_locations(locations)
     return [
         QuantityGraph(
             event_name=event_name,
             total_quantity=total_quantity,
-            locations=locations[index:index + 3],
+            locations=graph_locations[index:index + 3],
         )
-        for index in range(0, len(locations), 3)
+        for index in range(0, len(graph_locations), 3)
     ]
+
+
+def _split_quantity_graph_locations(locations: list[dict[str, Any]], max_items_per_graph: int = 6) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for location in locations:
+        current_slots: list[dict[str, Any]] = []
+        current_items = 0
+        part = 1
+
+        def flush() -> None:
+            nonlocal current_slots, current_items, part
+            if not current_slots:
+                return
+            suffix = f" part {part}" if part > 1 else ""
+            result.append(
+                {
+                    **location,
+                    "location": f"{location['location']}{suffix}",
+                    "quantity": sum(slot["quantity"] for slot in current_slots),
+                    "time_slots": current_slots,
+                }
+            )
+            current_slots = []
+            current_items = 0
+            part += 1
+
+        for time_slot in location.get("time_slots", []):
+            items = time_slot.get("items", [])
+            if not items:
+                if current_items + 1 > max_items_per_graph:
+                    flush()
+                current_slots.append(time_slot)
+                current_items += 1
+                continue
+
+            for index in range(0, len(items), max_items_per_graph):
+                chunk = items[index:index + max_items_per_graph]
+                if current_items + len(chunk) > max_items_per_graph:
+                    flush()
+                current_slots.append(
+                    {
+                        **time_slot,
+                        "quantity": sum(item["quantity"] for item in chunk),
+                        "items": chunk,
+                    }
+                )
+                current_items += len(chunk)
+
+        flush()
+    return result
 
 
 def build_event_plan_pdf(*, plan_name: str, status: str, snapshot: dict[str, Any]) -> bytes:

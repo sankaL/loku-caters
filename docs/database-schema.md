@@ -98,7 +98,7 @@ Stores admin-created planning snapshots for a single source event or the reserve
 | `planned_quantity` | `INTEGER` | NOT NULL, default `0` | Total active planned quantity, including extras |
 | `issue_count` | `INTEGER` | NOT NULL, default `0` | Blocking issue count, such as under-planning or refresh conflicts |
 | `warning_count` | `INTEGER` | NOT NULL, default `0` | Non-blocking warning count, such as over-planning or extras |
-| `snapshot` | `JSONB` | NOT NULL, default `'{}'::jsonb` | Full saved payload with source event metadata, bundles, original order lines, planned rows, notes, totals, issues, warnings, and status breakdowns |
+| `snapshot` | `JSONB` | NOT NULL, default `'{}'::jsonb` | Full saved payload with source event metadata, source order fingerprint, bundles, original order lines, planned rows, notes, totals, issues, warnings, and status breakdowns |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | UTC |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | Used for optimistic concurrency on admin saves |
 
@@ -336,6 +336,7 @@ alembic upgrade head
 | `7b1d5f8c2a4e_enable_rls_catering_and_alembic_version` | enables RLS on `catering_requests`, `catering_request_comments`, and `alembic_version`; revokes `anon` and `authenticated` access when those roles exist |
 | `a4d7e3b91c2f_add_combo_deals_and_grouped_order_pricing` | adds `events.combo_deals` and grouped cart pricing columns on `orders` (`group_id`, `base_total_price`, `discount_total`, `pricing_meta`) |
 | `0021_feedback_rating_and_show_in_reviews` | adds `rating` (Integer, nullable) and `show_in_reviews` (Boolean, default false) to `feedback` |
+| `0023_event_plans` | adds `orders.updated_at`, creates backend-managed `event_plans`, enables RLS, and revokes direct API-role access |
 
 ---
 

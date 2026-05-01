@@ -94,6 +94,33 @@ def _order_line_snapshot(order: Any) -> dict[str, Any]:
     }
 
 
+def build_source_order_fingerprint(order_lines: Iterable[dict[str, Any]]) -> dict[str, Any]:
+    rows = []
+    for line in order_lines:
+        rows.append(
+            {
+                "id": str(line.get("id") or ""),
+                "group_id": line.get("group_id"),
+                "customer_name": line.get("customer_name") or "",
+                "item_id": line.get("item_id") or "",
+                "item_name": line.get("item_name") or "",
+                "quantity": _quantity(line.get("quantity")),
+                "pickup_location": line.get("pickup_location") or "",
+                "pickup_time_slot": line.get("pickup_time_slot") or "",
+                "pickup_date": line.get("pickup_date"),
+                "status": line.get("status") or OrderStatus.PENDING,
+                "updated_at": line.get("updated_at"),
+            }
+        )
+    rows.sort(key=lambda row: row["id"])
+    return {
+        "version": 1,
+        "count": len(rows),
+        "ids": [row["id"] for row in rows],
+        "rows": rows,
+    }
+
+
 def _default_planned_row(line: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": _new_planned_row_id(),
@@ -266,6 +293,7 @@ def build_event_plan_snapshot(
         "source_event": _event_snapshot(event),
         "created_from_orders_at": iso_now(),
         "refreshed_at": iso_now(),
+        "source_fingerprint": build_source_order_fingerprint(order_lines),
         "plan_notes": (previous_snapshot or {}).get("plan_notes", ""),
         "bundles": _build_bundles(order_lines, previous_snapshot),
         "order_lines": order_lines,
@@ -392,7 +420,4 @@ def assert_plan_can_mark_ready(snapshot: dict[str, Any]) -> None:
 
 
 def duplicate_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:
-    next_snapshot = deepcopy(snapshot)
-    next_snapshot["created_from_orders_at"] = iso_now()
-    next_snapshot["refreshed_at"] = iso_now()
-    return next_snapshot
+    return deepcopy(snapshot)

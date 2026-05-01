@@ -46,6 +46,7 @@ from services.event_planning import (
     PLAN_STATUS_DRAFT,
     PLAN_STATUS_READY,
     assert_plan_can_mark_ready,
+    build_source_order_fingerprint,
     build_event_plan_snapshot,
     duplicate_snapshot,
     make_default_plan_name,
@@ -562,8 +563,11 @@ def _event_plan_dict(plan: EventPlan, *, include_snapshot: bool = False, is_out_
     return data
 
 
-def _require_event_plan(db: Session, plan_id: str) -> EventPlan:
-    plan = db.query(EventPlan).filter(EventPlan.id == plan_id).first()
+def _require_event_plan(db: Session, plan_id: str, *, for_update: bool = False) -> EventPlan:
+    query = db.query(EventPlan).filter(EventPlan.id == plan_id)
+    if for_update:
+        query = query.with_for_update()
+    plan = query.first()
     if plan is None:
         raise HTTPException(status_code=404, detail="Event plan not found")
     return plan
@@ -583,6 +587,56 @@ def _source_orders_for_plan(db: Session, event_id: int) -> list[Order]:
         .order_by(Order.created_at.asc(), Order.id.asc())
         .all()
     )
+
+
+def _source_order_line_dict(order: Order) -> dict:
+    return {
+        "id": str(order.id),
+        "group_id": order.group_id,
+        "customer_name": order.name or "",
+        "item_id": order.item_id or "",
+        "item_name": order.item_name or order.item_id or "",
+        "quantity": int(order.quantity or 0),
+        "pickup_location": order.pickup_location or "",
+        "pickup_time_slot": order.pickup_time_slot or "",
+        "pickup_date": order.pickup_date.isoformat() if getattr(order, "pickup_date", None) is not None else None,
+        "status": order.status or OrderStatus.PENDING,
+        "updated_at": (order.updated_at or order.created_at).isoformat() if (order.updated_at or order.created_at) else None,
+    }
+
+
+def _source_fingerprint_for_event(db: Session, event_id: int) -> dict:
+    orders = (
+        db.query(Order)
+        .filter(Order.event_id == event_id, Order.status != OrderStatus.CANCELLED)
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .all()
+    )
+    return build_source_order_fingerprint(_source_order_line_dict(order) for order in orders)
+
+
+def _source_fingerprints_for_events(db: Session, event_ids: set[int]) -> dict[int, dict]:
+    grouped: dict[int, list[dict]] = {event_id: [] for event_id in event_ids}
+    if not event_ids:
+        return grouped
+    orders = (
+        db.query(Order)
+        .filter(Order.event_id.in_(event_ids), Order.status != OrderStatus.CANCELLED)
+        .order_by(Order.event_id.asc(), Order.created_at.asc(), Order.id.asc())
+        .all()
+    )
+    for order in orders:
+        grouped.setdefault(int(order.event_id), []).append(_source_order_line_dict(order))
+    return {
+        event_id: build_source_order_fingerprint(lines)
+        for event_id, lines in grouped.items()
+    }
+
+
+def _stored_source_fingerprint(plan: EventPlan) -> Optional[dict]:
+    snapshot = plan.snapshot if isinstance(plan.snapshot, dict) else {}
+    fingerprint = snapshot.get("source_fingerprint")
+    return fingerprint if isinstance(fingerprint, dict) else None
 
 
 def _apply_event_plan_summary(plan: EventPlan, snapshot: dict) -> None:
@@ -607,26 +661,41 @@ def _ensure_event_plan_editable(plan: EventPlan) -> None:
         raise HTTPException(status_code=409, detail="Archived event plans must be restored before editing")
 
 
-def _is_event_plan_out_of_date(db: Session, plan: EventPlan) -> bool:
-    latest = (
-        db.query(func.max(Order.updated_at))
-        .filter(Order.event_id == plan.source_event_id)
-        .scalar()
-    )
-    if latest is None:
-        return False
-    refreshed_at_raw = (plan.snapshot or {}).get("refreshed_at") if isinstance(plan.snapshot, dict) else None
-    if not refreshed_at_raw:
+def _validate_event_plan_snapshot(snapshot: dict) -> None:
+    if not isinstance(snapshot, dict):
+        raise HTTPException(status_code=422, detail="Invalid event plan snapshot")
+    if snapshot.get("version") != 1:
+        raise HTTPException(status_code=422, detail="Unsupported event plan snapshot version")
+    source_event = snapshot.get("source_event")
+    if not isinstance(source_event, dict) or source_event.get("id") is None:
+        raise HTTPException(status_code=422, detail="Snapshot source event is missing")
+    if not isinstance(snapshot.get("source_fingerprint"), dict):
+        raise HTTPException(status_code=422, detail="Snapshot source fingerprint is missing")
+    for key in ("bundles", "order_lines", "planned_rows", "issues", "warnings"):
+        if not isinstance(snapshot.get(key), list):
+            raise HTTPException(status_code=422, detail=f"Snapshot {key} must be a list")
+    for row in snapshot.get("planned_rows", []):
+        if not isinstance(row, dict):
+            raise HTTPException(status_code=422, detail="Snapshot planned row is invalid")
+        if row.get("row_type") not in {"order", "extra"}:
+            raise HTTPException(status_code=422, detail="Snapshot planned row type is invalid")
+        if not str(row.get("id") or "").strip():
+            raise HTTPException(status_code=422, detail="Snapshot planned row id is missing")
+        if row.get("row_state", "active") not in {"active", "removed"}:
+            raise HTTPException(status_code=422, detail="Snapshot planned row state is invalid")
+
+
+def _is_event_plan_out_of_date(db: Session, plan: EventPlan, *, current_fingerprint: Optional[dict] = None) -> bool:
+    stored = _stored_source_fingerprint(plan)
+    if stored is None:
         return True
-    try:
-        refreshed_at = datetime.fromisoformat(refreshed_at_raw)
-    except (TypeError, ValueError):
-        return True
-    if getattr(latest, "tzinfo", None) is None and getattr(refreshed_at, "tzinfo", None) is not None:
-        latest = latest.replace(tzinfo=refreshed_at.tzinfo)
-    if getattr(latest, "tzinfo", None) is not None and getattr(refreshed_at, "tzinfo", None) is None:
-        refreshed_at = refreshed_at.replace(tzinfo=latest.tzinfo)
-    return latest > refreshed_at
+    current = current_fingerprint if current_fingerprint is not None else _source_fingerprint_for_event(db, plan.source_event_id)
+    return stored != current
+
+
+def _ensure_event_plan_source_fresh(db: Session, plan: EventPlan) -> None:
+    if _is_event_plan_out_of_date(db, plan):
+        raise HTTPException(status_code=409, detail="Refresh this event plan before continuing")
 
 
 @router.get("/event-plans")
@@ -639,8 +708,16 @@ def admin_list_event_plans(
     if not include_archived:
         query = query.filter(EventPlan.status != PLAN_STATUS_ARCHIVED)
     plans = query.order_by(EventPlan.updated_at.desc(), EventPlan.created_at.desc()).all()
+    fingerprints = _source_fingerprints_for_events(db, {int(plan.source_event_id) for plan in plans})
     return [
-        _event_plan_dict(plan, is_out_of_date=_is_event_plan_out_of_date(db, plan))
+        _event_plan_dict(
+            plan,
+            is_out_of_date=_is_event_plan_out_of_date(
+                db,
+                plan,
+                current_fingerprint=fingerprints.get(int(plan.source_event_id)),
+            ),
+        )
         for plan in plans
     ]
 
@@ -690,12 +767,13 @@ def admin_save_event_plan(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    plan = _require_event_plan(db, plan_id)
+    plan = _require_event_plan(db, plan_id, for_update=True)
     _ensure_event_plan_editable(plan)
     _check_event_plan_fresh(plan, body.expected_updated_at)
     if body.name:
         plan.name = body.name
     snapshot = body.snapshot
+    _validate_event_plan_snapshot(snapshot)
     _apply_event_plan_summary(plan, snapshot)
     if plan.status == PLAN_STATUS_READY and plan.issue_count > 0:
         plan.status = PLAN_STATUS_DRAFT
@@ -711,7 +789,7 @@ def admin_refresh_event_plan(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    plan = _require_event_plan(db, plan_id)
+    plan = _require_event_plan(db, plan_id, for_update=True)
     _ensure_event_plan_editable(plan)
     _check_event_plan_fresh(plan, body.expected_updated_at)
     event = _require_source_event(db, plan.source_event_id)
@@ -731,9 +809,10 @@ def admin_mark_event_plan_ready(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    plan = _require_event_plan(db, plan_id)
+    plan = _require_event_plan(db, plan_id, for_update=True)
     _ensure_event_plan_editable(plan)
     _check_event_plan_fresh(plan, body.expected_updated_at)
+    _ensure_event_plan_source_fresh(db, plan)
     try:
         assert_plan_can_mark_ready(plan.snapshot or {})
     except ValueError as exc:
@@ -752,7 +831,7 @@ def admin_archive_event_plan(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    plan = _require_event_plan(db, plan_id)
+    plan = _require_event_plan(db, plan_id, for_update=True)
     _check_event_plan_fresh(plan, body.expected_updated_at)
     plan.status = PLAN_STATUS_ARCHIVED
     plan.updated_at = utc_now()
@@ -768,7 +847,7 @@ def admin_restore_event_plan(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    plan = _require_event_plan(db, plan_id)
+    plan = _require_event_plan(db, plan_id, for_update=True)
     _check_event_plan_fresh(plan, body.expected_updated_at)
     plan.status = PLAN_STATUS_DRAFT
     plan.updated_at = utc_now()
@@ -811,6 +890,7 @@ def admin_export_event_plan_pdf(
 ):
     plan = _require_event_plan(db, plan_id)
     snapshot = plan.snapshot or {}
+    _ensure_event_plan_source_fresh(db, plan)
     summary = summarize_snapshot(snapshot)
     if summary["issue_count"] > 0:
         raise HTTPException(status_code=409, detail="Resolve blocking issues before exporting this plan")

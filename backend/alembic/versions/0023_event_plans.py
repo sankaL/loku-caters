@@ -20,6 +20,32 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _revoke_api_role_access(schema: str, table: str) -> None:
+    op.execute(
+        sa.text(
+            f"""
+            DO $$
+            DECLARE
+                role_name text;
+            BEGIN
+                FOREACH role_name IN ARRAY ARRAY['anon', 'authenticated']
+                LOOP
+                    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = role_name) THEN
+                        EXECUTE format(
+                            'REVOKE ALL ON TABLE %I.%I FROM %I',
+                            '{schema}',
+                            '{table}',
+                            role_name
+                        );
+                    END IF;
+                END LOOP;
+            END
+            $$;
+            """
+        )
+    )
+
+
 def upgrade() -> None:
     op.add_column("orders", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
     op.execute(sa.text("UPDATE orders SET updated_at = COALESCE(created_at, NOW())"))
@@ -46,6 +72,8 @@ def upgrade() -> None:
     )
     op.create_index("ix_event_plans_source_event_id", "event_plans", ["source_event_id"])
     op.create_index("ix_event_plans_status", "event_plans", ["status"])
+    op.execute(sa.text("ALTER TABLE IF EXISTS public.event_plans ENABLE ROW LEVEL SECURITY"))
+    _revoke_api_role_access("public", "event_plans")
 
 
 def downgrade() -> None:

@@ -171,7 +171,7 @@ function DraggablePlanRow({
   onDelete: (rowId: string) => void;
   readOnly: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: row.id });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: row.id, disabled: readOnly });
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
     : undefined;
@@ -189,7 +189,7 @@ function DraggablePlanRow({
         background: "white",
         border: "1px solid var(--color-border)",
       }}
-      className="cursor-grab rounded-2xl p-3 shadow-[0_12px_30px_-24px_rgba(18,39,15,0.5)] transition-shadow active:cursor-grabbing"
+      className={`${readOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing"} rounded-2xl p-3 shadow-[0_12px_30px_-24px_rgba(18,39,15,0.5)] transition-shadow`}
     >
       <div className="flex items-start gap-3">
         <button
@@ -302,7 +302,7 @@ function DraggableSubRow({
   onDelete: (rowId: string) => void;
   readOnly: boolean;
 }) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: row.id });
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({ id: row.id, disabled: readOnly });
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
     : undefined;
@@ -318,7 +318,7 @@ function DraggableSubRow({
         background: "var(--color-cream)",
         borderColor: "var(--color-border)",
       }}
-      className="cursor-grab rounded-xl border p-2.5 active:cursor-grabbing"
+      className={`${readOnly ? "cursor-default" : "cursor-grab active:cursor-grabbing"} rounded-xl border p-2.5`}
     >
       <div className="flex items-start gap-2">
         <button
@@ -522,14 +522,16 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
     };
   }, []);
 
-  const loadPlan = useCallback(async () => {
+  const loadPlan = useCallback(async (signal?: AbortSignal) => {
     const token = await getAdminToken();
     if (!token) return;
     const res = await fetch(`${API_URL}/api/admin/event-plans/${planId}`, {
       headers: { Authorization: `Bearer ${token}` },
+      signal,
     });
     if (!res.ok) throw new Error(await getApiErrorMessage(res, "Failed to load event plan"));
     const data = (await res.json()) as EventPlan;
+    if (signal?.aborted) return;
     const nextSnapshot = normalizeSnapshot(data.snapshot as EventPlanSnapshot);
     setPlan(data);
     setSnapshot(nextSnapshot);
@@ -542,10 +544,17 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
   }, [planId]);
 
   useEffect(() => {
+    const controller = new AbortController();
     setLoading(true);
-    loadPlan()
-      .catch((error) => showToast(error instanceof Error ? error.message : "Failed to load event plan", "error"))
-      .finally(() => setLoading(false));
+    loadPlan(controller.signal)
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        showToast(error instanceof Error ? error.message : "Failed to load event plan", "error");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
   }, [loadPlan, showToast]);
 
   const isDirty = useMemo(() => {
@@ -1032,11 +1041,17 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
   }
 
   function handleDragEnd(event: DragEndEvent) {
+    if (readOnly) return;
     const rowId = String(event.active.id);
     const overId = event.over?.id ? String(event.over.id) : "";
     if (!overId) return;
     const { location, timeSlot } = parseDropId(overId);
     updateRow(rowId, { pickup_location: location, pickup_time_slot: timeSlot });
+  }
+
+  function goBackToPlanning() {
+    if (isDirty && !window.confirm("Discard unsaved plan changes?")) return;
+    router.push("/admin/planning");
   }
 
   function handleConfirmDialog() {
@@ -1096,25 +1111,30 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
 
   async function stateAction(path: string, successMessage: string) {
     if (!plan || isDirty) return;
-    const token = await getAdminToken();
-    if (!token) return;
-    const res = await fetch(`${API_URL}/api/admin/event-plans/${plan.id}/${path}`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ expected_updated_at: plan.updated_at }),
-    });
-    if (!res.ok) throw new Error(await getApiErrorMessage(res, `Failed to ${path.replace("-", " ")}`));
-    const data = (await res.json()) as EventPlan;
-    const nextSnapshot = normalizeSnapshot(data.snapshot as EventPlanSnapshot);
-    setPlan(data);
-    setSnapshot(nextSnapshot);
-    setSavedSnapshotText(JSON.stringify(nextSnapshot));
-    setSavedName(data.name);
-    setName(data.name);
-    showToast(successMessage, "success");
+    setSaving(true);
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const res = await fetch(`${API_URL}/api/admin/event-plans/${plan.id}/${path}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ expected_updated_at: plan.updated_at }),
+      });
+      if (!res.ok) throw new Error(await getApiErrorMessage(res, `Failed to ${path.replace("-", " ")}`));
+      const data = (await res.json()) as EventPlan;
+      const nextSnapshot = normalizeSnapshot(data.snapshot as EventPlanSnapshot);
+      setPlan(data);
+      setSnapshot(nextSnapshot);
+      setSavedSnapshotText(JSON.stringify(nextSnapshot));
+      setSavedName(data.name);
+      setName(data.name);
+      showToast(successMessage, "success");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function performRefresh() {
@@ -1214,7 +1234,7 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
     }
   }
 
-  const readOnly = plan?.status === "archived";
+  const readOnly = plan?.status === "archived" || saving;
   const cleanStateRequired = isDirty || saving || readOnly;
   const currentIssues = snapshot?.issues ?? [];
   const exportDisabled = isDirty || saving || currentIssues.length > 0;
@@ -1251,7 +1271,7 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
         <header className="space-y-5">
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_auto] xl:items-start">
             <div className="min-w-0">
-              <button type="button" onClick={() => router.push("/admin/planning")} className="mb-4 text-sm font-semibold" style={{ color: "var(--color-sage)" }}>
+              <button type="button" onClick={goBackToPlanning} className="mb-4 text-sm font-semibold" style={{ color: "var(--color-sage)" }}>
                 Back to planning
               </button>
               <input
@@ -1314,6 +1334,7 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
 	                <button
 	                  type="button"
 	                  onClick={() => setActionsOpen((value) => !value)}
+                    disabled={saving}
 	                  className="inline-flex h-10 min-w-28 items-center justify-center gap-2 rounded-xl border px-3 text-sm font-semibold transition-all active:scale-[0.98]"
 	                  style={{ background: "white", borderColor: "var(--color-border)", color: "var(--color-text)" }}
 	                >
@@ -1343,7 +1364,7 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
 	                          setActionsOpen(false);
 	                          void handleRestore();
 	                        }}
-	                        disabled={isDirty}
+	                        disabled={isDirty || saving}
 	                        className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
 	                        style={{ color: "var(--color-text)" }}
 	                      >
@@ -1386,7 +1407,7 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
 	                        setActionsOpen(false);
 	                        void handleDuplicate();
 	                      }}
-	                      disabled={isDirty}
+	                      disabled={isDirty || saving}
 	                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50"
 	                      style={{ color: "var(--color-text)" }}
 	                    >

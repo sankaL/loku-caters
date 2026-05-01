@@ -13,6 +13,7 @@ from constants import OrderStatus  # noqa: E402
 from services.event_plan_pdf import build_event_plan_pdf  # noqa: E402
 from services.event_planning import (  # noqa: E402
     assert_plan_can_mark_ready,
+    build_source_order_fingerprint,
     build_event_plan_snapshot,
     duplicate_snapshot,
     summarize_snapshot,
@@ -183,12 +184,25 @@ class EventPlanningServiceTests(unittest.TestCase):
         self.assertEqual(refreshed["totals"]["planned_quantity"], 0)
         self.assertEqual(refreshed["totals"]["issue_count"], 1)
 
-    def test_duplicate_snapshot_keeps_payload_but_updates_refresh_time(self):
+    def test_snapshot_fingerprint_changes_when_source_order_is_removed(self):
+        snapshot = build_event_plan_snapshot(
+            make_event(),
+            [
+                make_order(id="kept", quantity=2),
+                make_order(id="removed", quantity=3),
+            ],
+        )
+        current_fingerprint = build_source_order_fingerprint([snapshot["order_lines"][0]])
+
+        self.assertNotEqual(snapshot["source_fingerprint"], current_fingerprint)
+
+    def test_duplicate_snapshot_preserves_source_freshness_marker(self):
         snapshot = build_event_plan_snapshot(make_event(), [make_order()])
         duplicate = duplicate_snapshot(snapshot)
 
         self.assertEqual(duplicate["source_event"], snapshot["source_event"])
-        self.assertNotEqual(duplicate["refreshed_at"], "")
+        self.assertEqual(duplicate["refreshed_at"], snapshot["refreshed_at"])
+        self.assertEqual(duplicate["source_fingerprint"], snapshot["source_fingerprint"])
 
     def test_build_event_plan_pdf_returns_pdf_bytes_without_contact_fields(self):
         snapshot = build_event_plan_snapshot(make_event(), [make_order(name="Anura Perera")])
@@ -198,6 +212,24 @@ class EventPlanningServiceTests(unittest.TestCase):
 
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 1000)
+
+    def test_build_event_plan_pdf_handles_dense_quantity_graphs(self):
+        snapshot = build_event_plan_snapshot(make_event(), [make_order(quantity=1)])
+        snapshot["planned_rows"] = [
+            {
+                **snapshot["planned_rows"][0],
+                "id": f"row-{index}",
+                "planned_item_id": None,
+                "planned_item_name": f"Custom Item {index}",
+                "quantity": 1,
+            }
+            for index in range(40)
+        ]
+        summarize_snapshot(snapshot)
+
+        pdf = build_event_plan_pdf(plan_name="Dense Plan", status="ready", snapshot=snapshot)
+
+        self.assertTrue(pdf.startswith(b"%PDF"))
 
 
 if __name__ == "__main__":
