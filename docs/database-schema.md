@@ -60,6 +60,7 @@ Stores the backend-managed customer contact registry keyed by normalized email. 
 | `payment_method` | `TEXT` | NULLABLE | Required when `paid = true`; one of `cash`, `etransfer`, `other` |
 | `payment_method_other` | `TEXT` | NULLABLE | Required when `payment_method = 'other'`; cleared when `paid = false` |
 | `created_at` | `TIMESTAMPTZ` | default `NOW()` | UTC |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL | Updated when an order row changes; used by planning snapshots to detect source changes |
 
 ### Order status values
 
@@ -78,6 +79,41 @@ Payment is tracked separately from `status` and enforced via API validation and 
 - When `paid = true`, `payment_method` must be set to one of `cash`, `etransfer`, `other`.
 - When `payment_method = 'other'`, `payment_method_other` must be non-empty.
 - When `payment_method` is `cash` or `etransfer`, `payment_method_other` must be NULL.
+
+---
+
+## Table: `event_plans`
+
+Stores admin-created planning snapshots for a single source event or the reserved `Random Requests` bucket. Plans are snapshot records, so edits in planning do not modify `orders`, pricing, emails, contact fields, payment fields, items, locations, or event config.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `name` | `TEXT` | NOT NULL | Admin-facing snapshot name, auto-filled on create and editable later |
+| `source_event_id` | `INTEGER` | NOT NULL, indexed | Source `events.id` used to create or refresh the snapshot |
+| `source_event_kind` | `TEXT` | NOT NULL, default `'event'`, check `source_event_kind IN ('event', 'random_requests')` | Mirrors the source event kind |
+| `status` | `TEXT` | NOT NULL, default `'draft'`, indexed, check `status IN ('draft', 'ready', 'archived')` | Planning lifecycle state |
+| `included_order_count` | `INTEGER` | NOT NULL, default `0` | Count of non-cancelled source order lines in the snapshot |
+| `ordered_quantity` | `INTEGER` | NOT NULL, default `0` | Total quantity from source order lines |
+| `planned_quantity` | `INTEGER` | NOT NULL, default `0` | Total active planned quantity, including extras |
+| `issue_count` | `INTEGER` | NOT NULL, default `0` | Blocking issue count, such as under-planning or refresh conflicts |
+| `warning_count` | `INTEGER` | NOT NULL, default `0` | Non-blocking warning count, such as over-planning or extras |
+| `snapshot` | `JSONB` | NOT NULL, default `'{}'::jsonb` | Full saved payload with source event metadata, bundles, original order lines, planned rows, notes, totals, issues, warnings, and status breakdowns |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | UTC |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | Used for optimistic concurrency on admin saves |
+
+### Event plan behavior
+
+- Plans include all source orders except `cancelled`.
+- Plans store bundles and original order lines as the audit source, then store planned rows as the editable kitchen and handoff output.
+- Planned rows may split quantities, change planned item identity, use custom item names, move to custom pickup labels, and add notes without changing real orders.
+- Plans support notes at the plan, order bundle, and planned row levels.
+- Refresh regenerates source order metadata and preserves existing planned rows by `source_order_id` when possible.
+- If refresh sees an increased source quantity, the added quantity is placed into an `Unassigned` planned row for review.
+- If refresh sees a decreased source quantity below preserved planned rows, the plan gets a blocking refresh conflict.
+- Planned quantity below ordered quantity is blocking.
+- Planned quantity above ordered quantity is allowed and recorded as a warning.
+- Archived plans are read-only until restored.
 
 ---
 
