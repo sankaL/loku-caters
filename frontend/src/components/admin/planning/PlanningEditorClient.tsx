@@ -85,6 +85,12 @@ interface ReportLocationTotal {
   timeSlots: ReportTimeSlotTotal[];
 }
 
+interface ReportItemTypeTotal {
+  item: string;
+  quantity: number;
+  share: number;
+}
+
 interface ConfirmDialogState {
   intent: ConfirmIntent;
   title: string;
@@ -782,6 +788,24 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
       .sort((a, b) => b.totalQuantity - a.totalQuantity || a.location.localeCompare(b.location));
   }, [snapshot]);
 
+  const itemTypeTotals = useMemo<ReportItemTypeTotal[]>(() => {
+    if (!snapshot) return [];
+    const totals = new Map<string, number>();
+    for (const row of snapshot.planned_rows) {
+      if (row.row_state === "removed") continue;
+      const item = row.planned_item_name || "Unassigned";
+      totals.set(item, (totals.get(item) ?? 0) + Number(row.quantity || 0));
+    }
+    const totalQuantity = Array.from(totals.values()).reduce((sum, quantity) => sum + quantity, 0);
+    return Array.from(totals.entries())
+      .map(([item, quantity]) => ({
+        item,
+        quantity,
+        share: totalQuantity > 0 ? Math.round((quantity / totalQuantity) * 100) : 0,
+      }))
+      .sort((a, b) => b.quantity - a.quantity || a.item.localeCompare(b.item));
+  }, [snapshot]);
+
   const customerHandoffRows = useMemo(() => {
     if (!snapshot) return [];
     const bundleNotes = new Map(snapshot.bundles.map((bundle) => [bundle.bundle_id, bundle.order_notes || ""]));
@@ -1426,33 +1450,39 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
 	              { label: "Ordered", value: clientTotals.orderedQuantity, detail: "quantity", tone: "sage" },
 	              { label: "Planned", value: clientTotals.plannedQuantity, detail: clientTotals.overCount > 0 ? `${clientTotals.overCount} over` : "quantity", tone: "accent" },
 	              { label: "Issues", value: `${issues.length} / ${warnings.length}`, detail: "issues / warnings", tone: issues.length > 0 ? "error" : "forest" },
-	            ].map((metric) => (
-	              <div
-	                key={metric.label}
-	                className="relative overflow-hidden rounded-2xl px-4 py-3 shadow-[0_18px_40px_-34px_rgba(18,39,15,0.45)]"
-	                style={{
-	                  background: "white",
-	                  border: "1px solid var(--color-border)",
-	                }}
-	              >
-	                <span
-	                  className="absolute left-0 top-0 h-full w-1.5"
+	            ].map((metric) => {
+	              const isFeaturedMetric = metric.label === "Ordered";
+	              return (
+	                <div
+	                  key={metric.label}
+	                  className="relative overflow-hidden rounded-2xl px-4 py-3 shadow-[0_18px_40px_-34px_rgba(18,39,15,0.45)]"
 	                  style={{
-	                    background:
-	                      metric.tone === "accent"
-	                        ? "var(--color-accent)"
-	                        : metric.tone === "sage"
-	                          ? "var(--color-sage)"
-	                          : metric.tone === "error"
-	                            ? "var(--color-error-border)"
-	                            : "var(--color-forest)",
+	                    background: isFeaturedMetric ? "var(--color-forest)" : "white",
+	                    border: `1px solid ${isFeaturedMetric ? "var(--color-forest)" : "var(--color-border)"}`,
+	                    color: isFeaturedMetric ? "var(--color-cream)" : "var(--color-text)",
 	                  }}
-	                />
-	                <p className="pl-2 text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--color-muted)" }}>{metric.label}</p>
-	                <p className="mt-1 pl-2 text-3xl font-bold tabular-nums" style={{ color: "var(--color-forest)" }}>{metric.value}</p>
-	                <p className="mt-0.5 pl-2 text-xs font-semibold" style={{ color: "var(--color-muted)" }}>{metric.detail}</p>
-	              </div>
-	            ))}
+	                >
+	                  {!isFeaturedMetric && (
+	                    <span
+	                      className="absolute left-0 top-0 h-full w-1.5"
+	                      style={{
+	                        background:
+	                          metric.tone === "accent"
+	                            ? "var(--color-accent)"
+	                            : metric.tone === "sage"
+	                              ? "var(--color-sage)"
+	                              : metric.tone === "error"
+	                                ? "var(--color-error-border)"
+	                                : "var(--color-forest)",
+	                      }}
+	                    />
+	                  )}
+	                  <p className="pl-2 text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: isFeaturedMetric ? "var(--color-accent)" : "var(--color-muted)" }}>{metric.label}</p>
+	                  <p className="mt-1 pl-2 text-3xl font-bold tabular-nums" style={{ color: isFeaturedMetric ? "white" : "var(--color-forest)" }}>{metric.value}</p>
+	                  <p className="mt-0.5 pl-2 text-xs font-semibold" style={{ color: isFeaturedMetric ? "var(--color-cream)" : "var(--color-muted)" }}>{metric.detail}</p>
+	                </div>
+	              );
+	            })}
 	          </div>
         </header>
 
@@ -1603,16 +1633,11 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
         ) : (
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_340px]">
             <section className="rounded-[1.5rem] border p-5" style={{ background: "white", borderColor: "var(--color-border)" }}>
-              <div className="mb-5 flex flex-wrap items-start justify-between gap-3 border-b pb-4" style={{ borderColor: "var(--color-border)" }}>
+	              <div className="mb-5 border-b pb-4" style={{ borderColor: "var(--color-border)" }}>
                 <div>
                   <h2 className="text-2xl font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>{name}</h2>
                   <p className="mt-1 text-sm" style={{ color: "var(--color-muted)" }}>{snapshot.source_event.name} | {snapshot.source_event.event_date}</p>
                 </div>
-	                <div className="rounded-[1.1rem] px-4 py-3 text-right shadow-[0_18px_42px_-34px_rgba(18,39,15,0.45)]" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
-	                  <p className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--color-accent)" }}>Event Total</p>
-	                  <p className="mt-0.5 text-3xl font-bold tabular-nums">{clientTotals.plannedQuantity}</p>
-	                  <p className="text-xs font-semibold">planned item quantity</p>
-	                </div>
 	              </div>
               {snapshot.plan_notes && (
                 <div className="mb-5 rounded-2xl border p-4 text-sm" style={{ borderColor: "var(--color-border)", background: "var(--color-cream)", color: "var(--color-text)" }}>
@@ -1701,6 +1726,60 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
             </section>
 
             <aside className="space-y-4">
+              <section className="rounded-xl border p-4" style={{ background: "white", borderColor: "var(--color-border)" }}>
+                <div className="mb-3">
+                  <div>
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em]" style={{ color: "var(--color-muted)" }}>
+                      Item totals
+                    </p>
+                    <h3 className="mt-1 text-lg font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
+                      By item type
+                    </h3>
+                  </div>
+                </div>
+                {itemTypeTotals.length === 0 ? (
+                  <p className="rounded-xl border px-3 py-3 text-sm" style={{ background: "var(--color-cream)", borderColor: "var(--color-border)", color: "var(--color-muted)" }}>
+                    No planned items.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {itemTypeTotals.map((item) => (
+                      <div
+                        key={item.item}
+                        className="rounded-xl border p-3"
+                        style={{
+                          background: "white",
+                          borderColor: "var(--color-border)",
+                          color: "var(--color-text)",
+                        }}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-bold" style={{ color: "var(--color-text)" }}>
+                              {item.item}
+                            </p>
+                            <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.14em]" style={{ color: "var(--color-muted)" }}>
+                              {item.share}% of plan
+                            </p>
+                          </div>
+                          <span className="shrink-0 text-3xl font-bold leading-none tabular-nums" style={{ color: "var(--color-forest)" }}>
+                            {item.quantity}
+                          </span>
+                        </div>
+                        <div className="mt-3 h-1.5 overflow-hidden rounded-full" style={{ background: "rgba(18, 39, 15, 0.08)" }}>
+                          <div
+                            className="h-full rounded-full"
+                            style={{
+                              width: `${Math.max(4, item.share)}%`,
+                              background: "var(--color-sage)",
+                            }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
               <section className="rounded-[1.5rem] border p-4" style={{ background: "white", borderColor: "var(--color-border)" }}>
                 <h3 className="mb-3 flex items-center gap-2 text-lg font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
                   <WarningCircle size={19} weight="bold" />
