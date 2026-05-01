@@ -195,15 +195,6 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
       (item.description ?? "").toLowerCase().includes(q)
     );
   }, [items, pickerSearch]);
-  const pickerImageItems = useMemo(
-    () => pickerItems.filter((item) => Boolean(item.image_path)),
-    [pickerItems]
-  );
-  const pickerTextItems = useMemo(
-    () => pickerItems.filter((item) => !item.image_path),
-    [pickerItems]
-  );
-
   useEffect(() => {
     if (!pickerOpen) {
       setOpenDescriptionItemId(null);
@@ -489,193 +480,99 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
             {pickerItems.length === 0 ? (
               <p className="text-sm py-4 text-center" style={{ color: "var(--color-muted)" }}>No items match your search.</p>
             ) : (
-              <>
-                {pickerImageItems.length > 0 && (
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    {pickerImageItems.map((item) => {
-                      const qty = quantities[item.id] ?? 0;
-                      const inCart = qty > 0;
-                      const price = item.discounted_price ?? item.price;
-                      const minimumOrderQuantity = getMinimumOrderQuantity(item);
-                      return (
-                        <div
-                          key={item.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => {
-                            if (!inCart) changeQty(item.id, 1);
-                          }}
-                          onKeyDown={(event) => {
-                            if (!inCart && (event.key === "Enter" || event.key === " ")) {
-                              event.preventDefault();
-                              changeQty(item.id, 1);
-                            }
-                          }}
-                          className="group flex h-full min-h-[22rem] flex-col overflow-hidden rounded-2xl transition-all active:scale-[0.99]"
-                          style={{
-                            border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
-                            background: inCart ? "rgba(114,145,82,0.12)" : "white",
-                            cursor: inCart ? "default" : "pointer",
-                          }}
-                        >
-                          <div className="relative aspect-[4/3] overflow-hidden" style={{ background: "var(--color-cream)" }}>
-                            <img
-                              src={item.image_path ?? ""}
-                              alt={item.name}
-                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-                            />
-                            {inCart && (
-                              <div className="absolute right-2 top-2 rounded-full px-2.5 py-1 text-xs font-bold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
-                                Added
-                              </div>
-                            )}
-                          </div>
-                          <div className="flex flex-1 flex-col gap-2 p-3">
-                            <div className="min-h-[3.6rem] min-w-0">
-                              <p className="truncate text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{item.name}</p>
-                              {item.description && (
-                                <div
-                                  onClick={(event) => event.stopPropagation()}
-                                  onKeyDown={(event) => event.stopPropagation()}
-                                >
-                                  <DescriptionPopover
-                                    description={item.description}
-                                    open={openDescriptionItemId === item.id}
-                                    onOpenChange={(nextOpen) => {
-                                      setOpenDescriptionItemId(nextOpen ? item.id : null);
-                                    }}
-                                    className="text-xs mt-0.5"
-                                  />
-                                </div>
-                              )}
+              <div className="space-y-3">
+                {pickerItems.map((item) => {
+                  const qty = quantities[item.id] ?? 0;
+                  const inCart = qty > 0;
+                  const price = item.discounted_price ?? item.price;
+                  const minimumOrderQuantity = getMinimumOrderQuantity(item);
+
+                  if (item.image_path) {
+                    return (
+                      <div
+                        key={item.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          if (!inCart) changeQty(item.id, 1);
+                        }}
+                        onKeyDown={(event) => {
+                          if (!inCart && (event.key === "Enter" || event.key === " ")) {
+                            event.preventDefault();
+                            changeQty(item.id, 1);
+                          }
+                        }}
+                        className="group flex min-h-[22rem] flex-col overflow-hidden rounded-2xl transition-all active:scale-[0.99]"
+                        style={{
+                          border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
+                          background: inCart ? "rgba(114,145,82,0.12)" : "white",
+                          cursor: inCart ? "default" : "pointer",
+                        }}
+                      >
+                        <div className="relative aspect-[4/3] overflow-hidden" style={{ background: "var(--color-cream)" }}>
+                          <img
+                            src={item.image_path}
+                            alt={item.name}
+                            className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                          />
+                          {inCart && (
+                            <div className="absolute right-2 top-2 rounded-full px-2.5 py-1 text-xs font-bold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
+                              Added
                             </div>
-                            <div className="flex min-h-5 items-center gap-2 flex-wrap">
-                              <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
-                                {formatCurrency(price)}
-                              </span>
-                              {item.discounted_price != null && (
-                                <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
-                                  {formatCurrency(item.price)}
-                                </span>
-                              )}
-                              {minimumOrderQuantity > 1 && (
-                                <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
-                                  Min {minimumOrderQuantity}
-                                </span>
-                              )}
-                            </div>
-                            {inCart ? (
-                              <div className="mt-auto flex items-center gap-0" onClick={(event) => event.stopPropagation()}>
-                                <button
-                                  type="button"
-                                  onClick={() => changeQty(item.id, -1)}
-                                  className="flex h-9 w-9 items-center justify-center rounded-l-xl border border-r-0 text-base font-semibold transition-all"
-                                  style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                                  aria-label={`Decrease ${item.name} quantity`}
-                                >
-                                  -
-                                </button>
-                                <div className="flex h-9 w-10 items-center justify-center border-b border-t text-sm font-semibold" style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}>
-                                  {qty}
-                                </div>
-                                <button
-                                  type="button"
-                                  onClick={() => changeQty(item.id, 1)}
-                                  className="flex h-9 w-9 items-center justify-center rounded-r-xl border border-l-0 text-base font-semibold transition-all"
-                                  style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                                  aria-label={`Increase ${item.name} quantity`}
-                                >
-                                  +
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={(event) => {
-                                  event.stopPropagation();
-                                  changeQty(item.id, 1);
-                                }}
-                                className="mt-auto w-full rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
-                                style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
-                              >
-                                + Add
-                              </button>
-                            )}
-                          </div>
+                          )}
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-
-                {pickerTextItems.length > 0 && (
-                  <div className="space-y-2">
-                    {pickerImageItems.length > 0 && (
-                      <p className="px-1 text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: "var(--color-muted)" }}>
-                        More items
-                      </p>
-                    )}
-                    {pickerTextItems.map((item) => {
-                      const qty = quantities[item.id] ?? 0;
-                      const inCart = qty > 0;
-                      const price = item.discounted_price ?? item.price;
-                      const minimumOrderQuantity = getMinimumOrderQuantity(item);
-                      return (
-                        <div
-                          key={item.id}
-                          className="flex items-center gap-2 md:gap-3 rounded-2xl px-3 py-2 md:px-4 md:py-3 transition-all"
-                          style={{
-                            border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
-                            background: inCart ? "rgba(114,145,82,0.12)" : "white",
-                          }}
-                        >
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
+                        <div className="flex flex-1 flex-col gap-2 p-3">
+                          <div className="min-h-[3.6rem] min-w-0">
+                            <p className="truncate text-sm font-semibold" style={{ color: "var(--color-forest)" }}>{item.name}</p>
                             {item.description && (
-                              <DescriptionPopover
-                                description={item.description}
-                                open={openDescriptionItemId === item.id}
-                                onOpenChange={(nextOpen) => {
-                                  setOpenDescriptionItemId(nextOpen ? item.id : null);
-                                }}
-                                className="text-xs mt-0.5"
-                              />
+                              <div
+                                onClick={(event) => event.stopPropagation()}
+                                onKeyDown={(event) => event.stopPropagation()}
+                              >
+                                <DescriptionPopover
+                                  description={item.description}
+                                  open={openDescriptionItemId === item.id}
+                                  onOpenChange={(nextOpen) => {
+                                    setOpenDescriptionItemId(nextOpen ? item.id : null);
+                                  }}
+                                  className="text-xs mt-0.5"
+                                />
+                              </div>
                             )}
-                            <div className="mt-0.5 flex items-center gap-2 flex-wrap">
-                              <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
-                                {formatCurrency(price)}
-                              </span>
-                              {item.discounted_price != null && (
-                                <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
-                                  {formatCurrency(item.price)}
-                                </span>
-                              )}
-                              {minimumOrderQuantity > 1 && (
-                                <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
-                                  Min {minimumOrderQuantity}
-                                </span>
-                              )}
-                            </div>
                           </div>
-
+                          <div className="flex min-h-5 items-center gap-2 flex-wrap">
+                            <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+                              {formatCurrency(price)}
+                            </span>
+                            {item.discounted_price != null && (
+                              <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
+                                {formatCurrency(item.price)}
+                              </span>
+                            )}
+                            {minimumOrderQuantity > 1 && (
+                              <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
+                                Min {minimumOrderQuantity}
+                              </span>
+                            )}
+                          </div>
                           {inCart ? (
-                            <div className="flex items-center gap-0 shrink-0">
+                            <div className="mt-auto flex items-center gap-0" onClick={(event) => event.stopPropagation()}>
                               <button
                                 type="button"
                                 onClick={() => changeQty(item.id, -1)}
-                                className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
+                                className="flex h-9 w-9 items-center justify-center rounded-l-xl border border-r-0 text-base font-semibold transition-all"
                                 style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
                                 aria-label={`Decrease ${item.name} quantity`}
                               >
                                 -
                               </button>
-                              <div className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b" style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}>
+                              <div className="flex h-9 w-10 items-center justify-center border-b border-t text-sm font-semibold" style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}>
                                 {qty}
                               </div>
                               <button
                                 type="button"
                                 onClick={() => changeQty(item.id, 1)}
-                                className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
+                                className="flex h-9 w-9 items-center justify-center rounded-r-xl border border-l-0 text-base font-semibold transition-all"
                                 style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
                                 aria-label={`Increase ${item.name} quantity`}
                               >
@@ -685,19 +582,97 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                           ) : (
                             <button
                               type="button"
-                              onClick={() => changeQty(item.id, 1)}
-                              className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                changeQty(item.id, 1);
+                              }}
+                              className="mt-auto w-full rounded-xl px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
                               style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
                             >
                               + Add
                             </button>
                           )}
                         </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={item.id}
+                      className="flex items-center gap-2 md:gap-3 rounded-2xl px-3 py-2 md:px-4 md:py-3 transition-all"
+                      style={{
+                        border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
+                        background: inCart ? "rgba(114,145,82,0.12)" : "white",
+                      }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{item.name}</p>
+                        {item.description && (
+                          <DescriptionPopover
+                            description={item.description}
+                            open={openDescriptionItemId === item.id}
+                            onOpenChange={(nextOpen) => {
+                              setOpenDescriptionItemId(nextOpen ? item.id : null);
+                            }}
+                            className="text-xs mt-0.5"
+                          />
+                        )}
+                        <div className="mt-0.5 flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+                            {formatCurrency(price)}
+                          </span>
+                          {item.discounted_price != null && (
+                            <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
+                              {formatCurrency(item.price)}
+                            </span>
+                          )}
+                          {minimumOrderQuantity > 1 && (
+                            <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
+                              Min {minimumOrderQuantity}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {inCart ? (
+                        <div className="flex items-center gap-0 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => changeQty(item.id, -1)}
+                            className="flex items-center justify-center w-9 h-9 rounded-l-xl border border-r-0 text-base font-semibold transition-all"
+                            style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                            aria-label={`Decrease ${item.name} quantity`}
+                          >
+                            -
+                          </button>
+                          <div className="w-10 h-9 flex items-center justify-center text-sm font-semibold border-t border-b" style={{ borderColor: "var(--color-sage)", color: "var(--color-text)", background: "white" }}>
+                            {qty}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => changeQty(item.id, 1)}
+                            className="flex items-center justify-center w-9 h-9 rounded-r-xl border border-l-0 text-base font-semibold transition-all"
+                            style={{ borderColor: "var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                            aria-label={`Increase ${item.name} quantity`}
+                          >
+                            +
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => changeQty(item.id, 1)}
+                          className="shrink-0 px-3 py-1.5 rounded-xl text-xs font-semibold transition-all"
+                          style={{ border: "1px solid var(--color-sage)", color: "var(--color-forest)", background: "white" }}
+                        >
+                          + Add
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
 
