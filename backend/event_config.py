@@ -70,6 +70,10 @@ def _build_config_from_event(db: Session, event) -> dict:
             .order_by(Item.sort_order)
             .all()
         ) if item_ids else []
+        item_order = {}
+        for index, item_id in enumerate(item_ids):
+            item_order.setdefault(item_id, index)
+        items = sorted(items, key=lambda item: item_order.get(item.id, len(item_order)))
 
         locations = (
             db.query(Location)

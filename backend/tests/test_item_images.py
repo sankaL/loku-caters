@@ -22,6 +22,7 @@ class FakeQuery:
         return self
 
     def order_by(self, *args, **kwargs):
+        self.rows = sorted(self.rows, key=lambda row: getattr(row, "sort_order", 0))
         return self
 
     def all(self):
@@ -109,6 +110,154 @@ class ItemImageTests(unittest.TestCase):
 
         self.assertEqual(payload["items"][0]["image_key"], "menu-item-lamprais")
         self.assertEqual(payload["items"][0]["image_path"], resolve_event_image_path("menu-item-lamprais"))
+
+    def test_public_config_items_follow_event_item_id_order(self):
+        first = SimpleNamespace(
+            id="item-1",
+            name="First",
+            description="First item",
+            price=10,
+            discounted_price=None,
+            minimum_order_quantity=1,
+            image_key=None,
+            sort_order=0,
+        )
+        second = SimpleNamespace(
+            id="item-2",
+            name="Second",
+            description="Second item",
+            price=12,
+            discounted_price=None,
+            minimum_order_quantity=1,
+            image_key=None,
+            sort_order=1,
+        )
+        third = SimpleNamespace(
+            id="item-3",
+            name="Third",
+            description="Third item",
+            price=14,
+            discounted_price=None,
+            minimum_order_quantity=1,
+            image_key=None,
+            sort_order=2,
+        )
+        event = SimpleNamespace(
+            id=1,
+            event_date="April 28th, 2026",
+            kind="event",
+            item_ids=["item-3", "item-1", "item-2"],
+            location_ids=[],
+            combo_deals=[],
+            hero_header="",
+            hero_header_sage="",
+            hero_subheader="",
+            promo_details=None,
+            tooltip_enabled=False,
+            tooltip_header=None,
+            tooltip_body=None,
+            tooltip_image_key=None,
+            hero_side_image_key=None,
+            etransfer_enabled=False,
+            etransfer_email=None,
+            is_active=True,
+        )
+
+        payload = _build_config_from_event(FakeSession(items=[first, second, third]), event)
+
+        self.assertEqual([item["id"] for item in payload["items"]], ["item-3", "item-1", "item-2"])
+
+    def test_random_requests_items_keep_global_sort_order(self):
+        first = SimpleNamespace(
+            id="item-1",
+            name="First",
+            description="First item",
+            price=10,
+            discounted_price=None,
+            minimum_order_quantity=1,
+            image_key=None,
+            sort_order=0,
+        )
+        second = SimpleNamespace(
+            id="item-2",
+            name="Second",
+            description="Second item",
+            price=12,
+            discounted_price=None,
+            minimum_order_quantity=1,
+            image_key=None,
+            sort_order=1,
+        )
+        event = SimpleNamespace(
+            id=1,
+            event_date="April 28th, 2026",
+            kind="random_requests",
+            item_ids=["item-2", "item-1"],
+            location_ids=[],
+            combo_deals=[],
+            hero_header="",
+            hero_header_sage="",
+            hero_subheader="",
+            promo_details=None,
+            tooltip_enabled=False,
+            tooltip_header=None,
+            tooltip_body=None,
+            tooltip_image_key=None,
+            hero_side_image_key=None,
+            etransfer_enabled=False,
+            etransfer_email=None,
+            is_active=True,
+        )
+
+        payload = _build_config_from_event(FakeSession(items=[second, first]), event)
+
+        self.assertEqual([item["id"] for item in payload["items"]], ["item-1", "item-2"])
+
+    def test_public_config_duplicate_item_ids_use_first_position(self):
+        first = SimpleNamespace(
+            id="item-1",
+            name="First",
+            description="First item",
+            price=10,
+            discounted_price=None,
+            minimum_order_quantity=1,
+            image_key=None,
+            sort_order=0,
+        )
+        second = SimpleNamespace(
+            id="item-2",
+            name="Second",
+            description="Second item",
+            price=12,
+            discounted_price=None,
+            minimum_order_quantity=1,
+            image_key=None,
+            sort_order=1,
+        )
+        event = SimpleNamespace(
+            id=1,
+            event_date="April 28th, 2026",
+            kind="event",
+            item_ids=["item-2", "item-1", "item-2"],
+            location_ids=[],
+            combo_deals=[],
+            hero_header="",
+            hero_header_sage="",
+            hero_subheader="",
+            promo_details=None,
+            tooltip_enabled=False,
+            tooltip_header=None,
+            tooltip_body=None,
+            tooltip_image_key=None,
+            hero_side_image_key=None,
+            etransfer_enabled=False,
+            etransfer_email=None,
+            is_active=True,
+        )
+
+        payload = _build_config_from_event(FakeSession(items=[first, second]), event)
+
+        self.assertEqual([item["id"] for item in payload["items"]], ["item-2", "item-1"])
 
 
 if __name__ == "__main__":

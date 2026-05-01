@@ -3,6 +3,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { closestCenter, DndContext, DragEndEvent, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
@@ -424,6 +427,134 @@ function SelectionGrid({
   );
 }
 
+function SortableOrderedItem({
+  item,
+  index,
+  total,
+  onMove,
+}: {
+  item: AdminItem;
+  index: number;
+  total: number;
+  onMove: (itemId: string, direction: -1 | 1) => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: item.id });
+
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex items-center gap-3 rounded-2xl border p-3 transition-all"
+      style={{
+        background: isDragging ? "var(--color-cream)" : "white",
+        borderColor: isDragging ? "var(--color-sage)" : "var(--color-border)",
+        boxShadow: isDragging ? "0 12px 28px rgba(18, 39, 15, 0.14)" : "none",
+        transform: CSS.Transform.toString(transform),
+        transition,
+      }}
+    >
+      <button
+        type="button"
+        className="flex h-10 w-10 shrink-0 cursor-grab items-center justify-center rounded-xl border text-lg leading-none active:cursor-grabbing"
+        style={{ borderColor: "var(--color-border)", color: "var(--color-muted)", background: "var(--color-cream)" }}
+        aria-label={`Drag ${item.name}`}
+        {...attributes}
+        {...listeners}
+      >
+        ::
+      </button>
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <span
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold tabular-nums"
+          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+        >
+          {index + 1}
+        </span>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-semibold" style={{ color: "var(--color-text)" }}>{item.name}</p>
+          <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+            {CURRENCY} {(item.discounted_price ?? item.price).toFixed(2)}
+          </p>
+        </div>
+      </div>
+      <div className="flex shrink-0 gap-2">
+        <button
+          type="button"
+          onClick={() => onMove(item.id, -1)}
+          disabled={index === 0}
+          className="rounded-xl border px-3 py-2 text-xs font-semibold disabled:opacity-40"
+          style={{ borderColor: "var(--color-border)", background: "white", color: "var(--color-text)" }}
+        >
+          Up
+        </button>
+        <button
+          type="button"
+          onClick={() => onMove(item.id, 1)}
+          disabled={index === total - 1}
+          className="rounded-xl border px-3 py-2 text-xs font-semibold disabled:opacity-40"
+          style={{ borderColor: "var(--color-border)", background: "white", color: "var(--color-text)" }}
+        >
+          Down
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ItemOrderList({
+  items,
+  onReorder,
+  onMove,
+}: {
+  items: AdminItem[];
+  onReorder: (activeId: string, overId: string) => void;
+  onMove: (itemId: string, direction: -1 | 1) => void;
+}) {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    onReorder(String(active.id), String(over.id));
+  }
+
+  return (
+    <div className="rounded-[28px] p-6" style={{ background: "white", border: "1px solid var(--color-border)" }}>
+      {sectionTitle("Item Display Order", "Drag selected items into the order customers should see on the event order page.")}
+      {items.length === 0 ? (
+        <div className="rounded-3xl p-6 text-sm" style={{ background: "var(--color-cream)", color: "var(--color-muted)" }}>
+          Select items above to arrange their display order.
+        </div>
+      ) : (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={items.map((item) => item.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-3">
+              {items.map((item, index) => (
+                <SortableOrderedItem
+                  key={item.id}
+                  item={item}
+                  index={index}
+                  total={items.length}
+                  onMove={onMove}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      )}
+    </div>
+  );
+}
+
 export default function EventEditor({ mode }: { mode: "create" | "edit" }) {
   const router = useRouter();
   const params = useParams();
@@ -448,6 +579,12 @@ export default function EventEditor({ mode }: { mode: "create" | "edit" }) {
   const selectedHeroSideImage = useMemo(
     () => heroSideImageOptions.find((image) => image.key === form.hero_side_image_key) ?? null,
     [heroSideImageOptions, form.hero_side_image_key]
+  );
+  const orderedSelectedItems = useMemo(
+    () => form.item_ids
+      .map((itemId) => itemsById.get(itemId))
+      .filter((item): item is AdminItem => Boolean(item)),
+    [form.item_ids, itemsById]
   );
 
   const showToast = useCallback((message: string, type: "success" | "error") => {
@@ -564,6 +701,34 @@ export default function EventEditor({ mode }: { mode: "create" | "edit" }) {
         ...previous,
         [field]: Array.from(selectedSet),
         combo_deals: nextComboDeals,
+      };
+    });
+  }, []);
+
+  const reorderSelectedItem = useCallback((activeId: string, overId: string) => {
+    setForm((previous) => {
+      const oldIndex = previous.item_ids.indexOf(activeId);
+      const newIndex = previous.item_ids.indexOf(overId);
+      if (oldIndex < 0 || newIndex < 0 || oldIndex === newIndex) {
+        return previous;
+      }
+      return {
+        ...previous,
+        item_ids: arrayMove(previous.item_ids, oldIndex, newIndex),
+      };
+    });
+  }, []);
+
+  const moveSelectedItem = useCallback((itemId: string, direction: -1 | 1) => {
+    setForm((previous) => {
+      const currentIndex = previous.item_ids.indexOf(itemId);
+      const nextIndex = currentIndex + direction;
+      if (currentIndex < 0 || nextIndex < 0 || nextIndex >= previous.item_ids.length) {
+        return previous;
+      }
+      return {
+        ...previous,
+        item_ids: arrayMove(previous.item_ids, currentIndex, nextIndex),
       };
     });
   }, []);
@@ -1025,6 +1190,12 @@ export default function EventEditor({ mode }: { mode: "create" | "edit" }) {
           }))}
           selectedIds={form.item_ids}
           onToggle={(id) => toggleSelection("item_ids", id)}
+        />
+
+        <ItemOrderList
+          items={orderedSelectedItems}
+          onReorder={reorderSelectedItem}
+          onMove={moveSelectedItem}
         />
 
         <SelectionGrid
