@@ -28,4 +28,4 @@
 
 ## Config
 All business data (items, prices, currency, locations, time slots, event date) lives in a single source-of-truth file:
-`config/event-config.json` — copied to `frontend/src/config/` and `backend/` at sync time.
+`config/event-config.json` - copied to `frontend/src/config/` and `backend/` at sync time.

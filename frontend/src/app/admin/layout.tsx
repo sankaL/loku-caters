@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+import { CalendarCheck } from "@phosphor-icons/react";
 import { supabase } from "@/lib/supabase";
 
 interface NavItem {
@@ -35,6 +36,11 @@ const navItems: NavItem[] = [
         <line x1="9" y1="16" x2="13" y2="16" />
       </svg>
     ),
+  },
+  {
+    href: "/admin/planning",
+    label: "Planning",
+    icon: <CalendarCheck size={18} weight="bold" />,
   },
   {
     href: "/admin/customers",

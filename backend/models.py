@@ -91,6 +91,35 @@ class Order(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class EventPlan(Base):
+    __tablename__ = "event_plans"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    source_event_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    source_event_kind: Mapped[str] = mapped_column(Text, nullable=False, default="event")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
+    included_order_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ordered_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    planned_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    issue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    warning_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
 
 
 class Customer(Base):
