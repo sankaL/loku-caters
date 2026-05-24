@@ -68,14 +68,22 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
                   No active events at this moment!
                 </h2>
                 <p className="text-[color:var(--color-cream)] opacity-80 text-sm mb-6">
-                  Our next batch of Loku Caters is still taking shape. We will share it the moment it is ready. In the meantime, let us cater your next event.
+                  Our next batch of Loku Caters is still taking shape. We will share it the moment it is ready. In the meantime, we are always happy to hear from you.
                 </p>
-                <Link
-                  href="/catering-request"
-                  className="inline-block bg-[color:var(--color-sage)] text-white px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-forest)] hover:scale-105 transition-all duration-300 shadow-lg"
-                >
-                  Request Catering
-                </Link>
+                <div className="flex flex-col sm:flex-row gap-4 justify-center">
+                  <Link
+                    href="/contact"
+                    className="inline-block bg-white text-[color:var(--color-forest)] px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-cream)] hover:scale-105 transition-all duration-300 shadow-lg"
+                  >
+                    Contact Us
+                  </Link>
+                  <Link
+                    href="/menu"
+                    className="inline-block bg-[color:var(--color-sage)] text-white px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-forest)] hover:scale-105 transition-all duration-300 shadow-lg"
+                  >
+                    View Our Menu
+                  </Link>
+                </div>
               </>
             )}
           </div>
