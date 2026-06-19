@@ -264,6 +264,8 @@ const cateringMenus: CateringMenu[] = [
     {
         name: "International Buffet",
         subtitle: "A fusion of Sri Lankan and international cuisine",
+        price: "$38",
+        priceNote: "per person (min. 30 persons)",
         image: "/assets/food/menu/international-buffet.png",
         cards: [
             {
