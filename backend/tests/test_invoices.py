@@ -2,7 +2,9 @@ import os
 import sys
 import unittest
 from datetime import date, datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from pydantic import ValidationError
 from sqlalchemy import create_engine, text
@@ -108,6 +110,22 @@ class InvoiceServiceTests(unittest.TestCase):
         self.assertEqual(snapshot["amounts"]["total"], 30.0)
         self.assertEqual(snapshot["vendor"]["business_address"], "Toronto, ON")
 
+    def test_short_order_id_is_preserved_as_reference(self):
+        order = make_order(id="abc", group_id=None)
+        snapshot = build_invoice_snapshot(
+            orders=[order],
+            settings=make_settings(),
+            event_name="July Batch",
+            issue_date=date(2026, 6, 30),
+            due_date=date(2026, 7, 4),
+            customer_name=order.name,
+            customer_email=order.email,
+            customer_phone=order.phone_number,
+            memo=None,
+        )
+
+        self.assertEqual(snapshot["order"]["reference"], "ABC")
+
     def test_number_counter_resets_by_year_and_never_reuses_prior_values(self):
         engine = create_engine("sqlite:///:memory:")
         with engine.begin() as connection:
@@ -120,6 +138,9 @@ class InvoiceServiceTests(unittest.TestCase):
             self.assertEqual(next_invoice_number(session, 2026), ("INV-2026-0003", 3))
 
     def test_create_schema_rejects_client_pricing(self):
+        # InvoiceCreate uses ConfigDict(extra="forbid"), so client-supplied price
+        # fields (e.g. "total") are rejected at the schema boundary.  If this
+        # behaviour ever changes, ensure pricing cannot be accepted from clients.
         with self.assertRaises(ValidationError):
             InvoiceCreate(source_bundle_id="bundle-1", total=1)
 
@@ -143,6 +164,24 @@ class InvoiceServiceTests(unittest.TestCase):
 
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 3000)
+
+    def test_pdf_still_builds_when_logo_asset_is_missing(self):
+        snapshot = build_invoice_snapshot(
+            orders=[make_order()],
+            settings=make_settings(),
+            event_name="July Batch",
+            issue_date=date(2026, 6, 30),
+            due_date=date(2026, 7, 4),
+            customer_name="Test Customer",
+            customer_email="customer@example.com",
+            customer_phone="555-0100",
+            memo=None,
+        )
+
+        with patch("services.invoice_pdf._ASSETS_DIR", Path("/missing-invoice-assets")):
+            pdf = build_invoice_pdf(invoice_number="INV-2026-0001", snapshot=snapshot, payment={"paid": False})
+
+        self.assertTrue(pdf.startswith(b"%PDF"))
 
 
 if __name__ == "__main__":

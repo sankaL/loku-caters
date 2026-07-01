@@ -38,9 +38,18 @@ def _money(value: Any, currency: str) -> str:
 
 
 def _logo() -> Drawing:
-    """Load the real SVG logo and scale it to 54x54 for the PDF header."""
+    """Load the real SVG logo and scale it to 54x54 for the PDF header.
+
+    Returns an empty Drawing if the SVG file is missing or fails to parse,
+    so a missing asset does not crash the PDF export endpoint.
+    """
     svg_path = _ASSETS_DIR / "logo-color.svg"
-    drawing = svg2rlg(str(svg_path))
+    try:
+        drawing = svg2rlg(str(svg_path))
+    except Exception:
+        drawing = None
+    if drawing is None or drawing.width == 0:
+        return Drawing(54, 54)
     # Scale from the SVG's native size (120x120 viewBox) down to 54x54
     scale = 54.0 / drawing.width
     drawing.width = 54

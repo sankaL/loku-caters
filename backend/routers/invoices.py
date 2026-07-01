@@ -115,7 +115,15 @@ def _get_settings(db: Session) -> InvoiceSettings:
         return settings
     settings = InvoiceSettings(id=1, business_name="Loku Caters", payment_method="none")
     db.add(settings)
-    db.flush()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another request created the row concurrently; load and return it.
+        db.rollback()
+        settings = db.query(InvoiceSettings).filter(InvoiceSettings.id == 1).first()
+        if settings is None:
+            raise
+    db.refresh(settings)
     return settings
 
 
