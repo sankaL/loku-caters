@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
-import { CalendarCheck } from "@phosphor-icons/react";
+import { CalendarCheck, Receipt } from "@phosphor-icons/react";
 import { supabase } from "@/lib/supabase";
 
 interface NavItem {
@@ -41,6 +41,11 @@ const navItems: NavItem[] = [
     href: "/admin/planning",
     label: "Planning",
     icon: <CalendarCheck size={18} weight="bold" />,
+  },
+  {
+    href: "/admin/invoices",
+    label: "Invoices",
+    icon: <Receipt size={18} weight="bold" />,
   },
   {
     href: "/admin/customers",

@@ -67,13 +67,6 @@
       "label": "Seeni Sambol",
       "path": "/assets/food/client-menu/seeni-sambol.webp",
       "alt": "Seeni sambol tray"
-    },
-    {
-      "key": "menu-item-fish-lamprais",
-      "type": "menu_item",
-      "label": "Fish Lamprais",
-      "path": "/assets/food/client-menu/fish-lamprais.webp",
-      "alt": "Fish lamprais wrapped in banana leaf"
     }
   ]
 }

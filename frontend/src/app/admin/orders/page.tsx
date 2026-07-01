@@ -745,6 +745,8 @@ export default function AdminOrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [bundleLines, setBundleLines] = useState<OrderLine[]>([]);
   const [selectedBundle, setSelectedBundle] = useState<Order | null>(null);
+  const [bundleInvoiceId, setBundleInvoiceId] = useState<string | null>(null);
+  const [loadingBundleInvoice, setLoadingBundleInvoice] = useState(false);
   const [loadingBundleDetails, setLoadingBundleDetails] = useState(false);
   const [showBundleDetailsModal, setShowBundleDetailsModal] = useState(false);
   const [showEditBundleModal, setShowEditBundleModal] = useState(false);
@@ -1093,6 +1095,21 @@ export default function AdminOrdersPage() {
       setSelectedBundle(nextBundle);
       setBundleLines(Array.isArray(payload.lines) ? payload.lines : []);
       setShowBundleDetailsModal(true);
+      setBundleInvoiceId(null);
+      setLoadingBundleInvoice(true);
+      try {
+        const invoiceRes = await fetch(`${API_URL}/api/admin/invoices/by-bundle/${encodeURIComponent(nextBundle.bundle_id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (invoiceRes.ok) {
+          const invoice = (await invoiceRes.json()) as { id: string };
+          setBundleInvoiceId(invoice.id);
+        }
+      } catch {
+        setBundleInvoiceId(null);
+      } finally {
+        setLoadingBundleInvoice(false);
+      }
       return true;
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to load bundle details", "error");
@@ -1678,6 +1695,7 @@ export default function AdminOrdersPage() {
     setShowBundleDetailsModal(false);
     setSelectedBundle(null);
     setBundleLines([]);
+    setBundleInvoiceId(null);
     setShowEditBundleModal(false);
   }
 
@@ -3535,6 +3553,14 @@ export default function AdminOrdersPage() {
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
+                  <button
+                    onClick={() => router.push(bundleInvoiceId ? `/admin/invoices/${bundleInvoiceId}` : `/admin/invoices/new?bundle_id=${encodeURIComponent(selectedBundle.bundle_id)}`)}
+                    disabled={loadingBundleInvoice}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                    style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                  >
+                    {loadingBundleInvoice ? "Checking Invoice..." : bundleInvoiceId ? "View Invoice" : "Create Invoice"}
+                  </button>
                   <button
                     onClick={() => setShowEditBundleModal(true)}
                     className="px-4 py-2 rounded-xl text-sm font-semibold"
