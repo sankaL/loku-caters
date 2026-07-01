@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Inter, Playfair_Display } from "next/font/google";
+import { buildPageMetadata, SITE_URL } from "@/config/metadata";
 import "./globals.css";
 
 const inter = Inter({
@@ -14,14 +15,22 @@ const playfair = Playfair_Display({
   display: "swap",
 });
 
+const homeMetadata = buildPageMetadata("home");
+
 export const metadata: Metadata = {
-  title: "Loku Caters | Authentic Sri Lankan Cuisine",
-  description:
-    "Pre-order authentic Sri Lankan Lamprais, lovingly prepared and available for pickup. Limited quantities - reserve yours today.",
-  openGraph: {
-    title: "Loku Caters | Authentic Sri Lankan Cuisine",
-    description: "Pre-order authentic Sri Lankan Lamprais. Limited quantities - reserve yours today.",
-    type: "website",
+  ...homeMetadata,
+  metadataBase: SITE_URL,
+  applicationName: "Loku Caters",
+  title: {
+    default: "Loku Caters | Authentic Sri Lankan Cuisine",
+    template: "%s | Loku Caters",
+  },
+  icons: {
+    icon: [
+      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/logo-color.svg", type: "image/svg+xml" },
+    ],
+    apple: [{ url: "/logo-color.svg", type: "image/svg+xml" }],
   },
 };
 

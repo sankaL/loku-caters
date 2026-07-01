@@ -72,7 +72,7 @@ jobs:
           RAILWAY_ENVIRONMENT: production
         run: |
           set -euo pipefail
-          npx -y @railway/cli up --ci --detach --path-as-root -p "$RAILWAY_PROJECT_ID" -e "$RAILWAY_ENVIRONMENT" -s loku-caters-backend backend
+          npx -y @railway/cli up --ci -p "$RAILWAY_PROJECT_ID" -e "$RAILWAY_ENVIRONMENT" -s loku-caters-backend
 
   deploy-frontend:
     name: Deploy frontend
@@ -110,4 +110,4 @@ jobs:
           RAILWAY_ENVIRONMENT: production
         run: |
           set -euo pipefail
-          npx -y @railway/cli up --ci --detach --path-as-root -p "$RAILWAY_PROJECT_ID" -e "$RAILWAY_ENVIRONMENT" -s loku-caters-frontend frontend
+          npx -y @railway/cli up --ci -p "$RAILWAY_PROJECT_ID" -e "$RAILWAY_ENVIRONMENT" -s loku-caters-frontend

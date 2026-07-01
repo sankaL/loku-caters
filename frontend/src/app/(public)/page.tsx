@@ -1,5 +1,8 @@
 import HomeClient from "@/app/HomeClient";
 import { fetchEventConfig } from "@/config/event";
+import { buildPageMetadata } from "@/config/metadata";
+
+export const metadata = buildPageMetadata("home");
 
 export default async function Home() {
   let eventConfig = null;

@@ -1,10 +1,8 @@
 import OrdersClient from "./OrdersClient";
 import { fetchEventConfig } from "@/config/event";
+import { buildPageMetadata } from "@/config/metadata";
 
-export const metadata = {
-    title: "Live Orders | Loku Caters",
-    description: "Place your order for our current Loku Caters pop-up event.",
-};
+export const metadata = buildPageMetadata("orders");
 
 function parseRequestedEventId(rawValue: string | string[] | undefined): number | null {
     const value = Array.isArray(rawValue) ? rawValue[0] : rawValue;
