@@ -1,10 +1,8 @@
 import MenuClient from "./MenuClient";
 import { fetchEventConfig } from "@/config/event";
+import { buildPageMetadata } from "@/config/metadata";
 
-export const metadata = {
-    title: "Catering Menu | Loku Caters",
-    description: "Explore our rich selection of authentic Sri Lankan appetizers, classic curries, lamprais, and desserts.",
-};
+export const metadata = buildPageMetadata("menu");
 
 export default async function MenuPage() {
     let eventConfig = null;
