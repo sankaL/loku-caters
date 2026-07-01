@@ -2,19 +2,13 @@ export interface InvoicePayment {
   paid: boolean;
   payment_method: string | null;
   payment_method_other: string | null;
-  source: "order" | "snapshot";
-  order_exists: boolean;
 }
 
 export interface InvoiceLine {
-  source_order_id: string;
-  item_id: string;
   description: string;
   quantity: number;
   unit_price: number;
   subtotal: number;
-  discount: number;
-  total: number;
 }
 
 export interface InvoiceSnapshot {
@@ -34,21 +28,14 @@ export interface InvoiceSnapshot {
     pickup_address: string | null;
     pickup_date: string | null;
     ordered_at: string | null;
-    lines: InvoiceLine[];
-  };
-  amounts: { subtotal: number; discount_total: number; total: number };
-  payment_fallback: {
-    paid: boolean;
-    payment_method: string | null;
-    payment_method_other: string | null;
-  };
+  } | null;
 }
 
 export interface InvoiceSummary {
   id: string;
   invoice_number: string;
   number_year: number;
-  source_bundle_id: string;
+  source_bundle_id: string | null;
   source_order_id: string | null;
   source_event_id: number | null;
   order_reference: string | null;
@@ -60,6 +47,7 @@ export interface InvoiceSummary {
   due_date: string;
   memo: string | null;
   currency: string;
+  line_items: InvoiceLine[];
   subtotal: number;
   discount_total: number;
   total: number;

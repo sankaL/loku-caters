@@ -119,7 +119,7 @@ Stores admin-created planning snapshots for a single source event or the reserve
 
 ## Table: `invoices`
 
-Stores one current invoice snapshot per order bundle. Invoice records do not use a foreign key to `orders`, so an invoice remains readable and exportable after its source order is deleted.
+Stores independent invoice records. An invoice can optionally reference an order bundle, and multiple invoices can reference the same bundle. Order data is copied as reference metadata only and is never synchronized back into the invoice.
 
 | Column | Type | Constraints | Notes |
 |---|---|---|---|
@@ -127,9 +127,10 @@ Stores one current invoice snapshot per order bundle. Invoice records do not use
 | `invoice_number` | `TEXT` | NOT NULL, UNIQUE | Permanent display number such as `INV-2026-0001` |
 | `number_year` | `INTEGER` | NOT NULL, indexed | Year selected from the approved issue date |
 | `number_sequence` | `INTEGER` | NOT NULL, unique with `number_year` | Annual sequence value |
-| `source_bundle_id` | `TEXT` | NOT NULL, UNIQUE, indexed | Order `group_id`, or the order ID for an ungrouped order |
+| `source_bundle_id` | `TEXT` | nullable, indexed | Optional order `group_id`, or the order ID for an ungrouped order. No foreign key or uniqueness constraint |
 | `source_order_id` | `TEXT` | nullable | Primary order row used for admin navigation when it still exists |
 | `source_event_id` | `INTEGER` | nullable, indexed | Event associated with the source order at creation time |
+| `order_reference` | `TEXT` | nullable | Saved display reference for the optional order |
 | `customer_name` | `TEXT` | NOT NULL | Editable invoice customer name |
 | `customer_email` | `TEXT` | nullable | Editable invoice customer email |
 | `customer_phone` | `TEXT` | nullable | Editable invoice customer phone |
@@ -137,14 +138,18 @@ Stores one current invoice snapshot per order bundle. Invoice records do not use
 | `due_date` | `DATE` | NOT NULL, CHECK `>= issue_date` | Defaults to a future pickup date or the issue date |
 | `memo` | `TEXT` | nullable | Optional customer-facing invoice note |
 | `currency` | `TEXT` | NOT NULL | Snapshot from backend `event_config.get_currency()` |
-| `subtotal` | `DECIMAL(10,2)` | NOT NULL | Sum of trusted order base totals |
-| `discount_total` | `DECIMAL(10,2)` | NOT NULL, default `0` | Sum of trusted order discounts |
-| `total` | `DECIMAL(10,2)` | NOT NULL | Sum of trusted server-calculated order totals |
-| `snapshot` | `JSONB` | NOT NULL | Frozen vendor, customer, order-line, pickup, amount, and fallback payment data |
+| `subtotal` | `DECIMAL(10,2)` | NOT NULL | Server-calculated sum of invoice line subtotals |
+| `discount_total` | `DECIMAL(10,2)` | NOT NULL, default `0` | Editable invoice-level discount validated by the server |
+| `total` | `DECIMAL(10,2)` | NOT NULL | Server-calculated subtotal minus discount |
+| `line_items` | `JSONB` | NOT NULL | Editable invoice-owned descriptions, quantities, unit prices, and calculated subtotals |
+| `paid` | `BOOLEAN` | NOT NULL, default `FALSE` | Invoice-owned payment state |
+| `payment_method` | `TEXT` | nullable | Actual payment method: `etransfer`, `cash`, or `other` |
+| `payment_method_other` | `TEXT` | nullable | Details for an `other` payment method |
+| `snapshot` | `JSONB` | NOT NULL | Frozen vendor settings and optional order reference metadata |
 | `created_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | UTC |
 | `updated_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | UTC |
 
-Payment state is read from the current order bundle when available. The snapshot payment state is used only after the source order no longer exists. Deleting an invoice does not release or reuse its number.
+Invoice lines, totals, customer details, and payment state are owned by the invoice. Attaching, changing, or removing an order reference does not replace those fields. The backend calculates line subtotals and totals from editable quantities and unit prices. Deleting an invoice does not release or reuse its number.
 
 ## Table: `invoice_settings`
 

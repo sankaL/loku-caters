@@ -3,9 +3,10 @@ from __future__ import annotations
 import copy
 import uuid
 from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -14,10 +15,20 @@ from database import get_db
 from models import Event, Invoice, InvoiceSettings, Order
 from routers.admin import verify_admin_token
 from services.invoice_pdf import build_invoice_pdf
-from services.invoices import build_invoice_snapshot, default_due_date, next_invoice_number, optional_text
+from services.invoices import (
+    build_invoice_document_snapshot,
+    calculate_invoice_amounts,
+    default_due_date,
+    invoice_lines_from_orders,
+    money,
+    next_invoice_number,
+    optional_text,
+    order_snapshot,
+)
 
 
 router = APIRouter(prefix="/api/admin", tags=["admin-invoices"])
+PaymentMethod = Literal["etransfer", "cash", "other"]
 
 
 class InvoiceSettingsUpdate(BaseModel):
@@ -51,48 +62,81 @@ class InvoiceSettingsUpdate(BaseModel):
         return self
 
 
+class InvoiceLineInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=300)
+    quantity: int = Field(ge=1, le=100000)
+    unit_price: Decimal = Field(ge=0, max_digits=10, decimal_places=2)
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def normalize_description(cls, value: Any) -> str:
+        return str(value or "").strip()
+
+
 class InvoiceCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    source_bundle_id: str = Field(min_length=1, max_length=255)
+    source_bundle_id: Optional[str] = Field(default=None, max_length=255)
     issue_date: date = Field(default_factory=date.today)
     due_date: Optional[date] = None
     customer_name: Optional[str] = Field(default=None, max_length=200)
     customer_email: Optional[EmailStr] = None
     customer_phone: Optional[str] = Field(default=None, max_length=80)
     memo: Optional[str] = Field(default=None, max_length=2000)
+    line_items: Optional[list[InvoiceLineInput]] = Field(default=None, min_length=1, max_length=200)
+    discount_total: Optional[Decimal] = Field(default=None, ge=0, max_digits=10, decimal_places=2)
+    paid: Optional[bool] = None
+    payment_method: Optional[PaymentMethod] = None
+    payment_method_other: Optional[str] = Field(default=None, max_length=200)
 
-    @field_validator("source_bundle_id", mode="before")
-    @classmethod
-    def normalize_bundle_id(cls, value: Any) -> str:
-        return str(value or "").strip()
-
-    @field_validator("customer_name", "customer_phone", "memo", mode="before")
+    @field_validator("source_bundle_id", "customer_name", "customer_phone", "memo", "payment_method_other", mode="before")
     @classmethod
     def normalize_optional_fields(cls, value: Any) -> Optional[str]:
         return optional_text(value)
 
     @model_validator(mode="after")
-    def validate_dates(self) -> "InvoiceCreate":
+    def validate_fields(self) -> "InvoiceCreate":
         if self.due_date is not None and self.due_date < self.issue_date:
             raise ValueError("Due date cannot be earlier than issue date")
+        if self.source_bundle_id is None and self.line_items is None:
+            raise ValueError("At least one invoice item is required")
+        if self.payment_method == "other" and not self.payment_method_other:
+            raise ValueError("Other payment method details are required")
+        if self.payment_method != "other":
+            self.payment_method_other = None
         return self
 
 
 class InvoiceUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    source_bundle_id: Optional[str] = Field(default=None, max_length=255)
     issue_date: Optional[date] = None
     due_date: Optional[date] = None
     customer_name: Optional[str] = Field(default=None, max_length=200)
     customer_email: Optional[EmailStr] = None
     customer_phone: Optional[str] = Field(default=None, max_length=80)
     memo: Optional[str] = Field(default=None, max_length=2000)
+    line_items: Optional[list[InvoiceLineInput]] = Field(default=None, min_length=1, max_length=200)
+    discount_total: Optional[Decimal] = Field(default=None, ge=0, max_digits=10, decimal_places=2)
+    paid: Optional[bool] = None
+    payment_method: Optional[PaymentMethod] = None
+    payment_method_other: Optional[str] = Field(default=None, max_length=200)
 
-    @field_validator("customer_name", "customer_phone", "memo", mode="before")
+    @field_validator("source_bundle_id", "customer_name", "customer_phone", "memo", "payment_method_other", mode="before")
     @classmethod
     def normalize_optional_fields(cls, value: Any) -> Optional[str]:
         return optional_text(value)
+
+    @model_validator(mode="after")
+    def validate_payment_details(self) -> "InvoiceUpdate":
+        if self.payment_method == "other" and not self.payment_method_other:
+            raise ValueError("Other payment method details are required")
+        if self.payment_method is not None and self.payment_method != "other":
+            self.payment_method_other = None
+        return self
 
 
 def _settings_dict(settings: InvoiceSettings) -> dict[str, Any]:
@@ -118,7 +162,7 @@ def _get_settings(db: Session) -> InvoiceSettings:
     try:
         db.commit()
     except IntegrityError:
-        # Another request created the row concurrently; load and return it.
+        # Another request created the singleton concurrently. Load that row.
         db.rollback()
         settings = db.query(InvoiceSettings).filter(InvoiceSettings.id == 1).first()
         if settings is None:
@@ -135,30 +179,29 @@ def _get_bundle_orders(db: Session, bundle_id: str) -> list[Order]:
     return [order] if order is not None else []
 
 
-def _current_payment(db: Session, invoice: Invoice) -> dict[str, Any]:
-    current_orders = _get_bundle_orders(db, invoice.source_bundle_id)
-    fallback = (invoice.snapshot or {}).get("payment_fallback") or {}
-    if not current_orders:
-        return {
-            "paid": bool(fallback.get("paid")),
-            "payment_method": fallback.get("payment_method"),
-            "payment_method_other": fallback.get("payment_method_other"),
-            "source": "snapshot",
-            "order_exists": False,
-        }
-    primary = current_orders[0]
+def _source_details(db: Session, bundle_id: str) -> tuple[list[Order], dict[str, Any]]:
+    orders = _get_bundle_orders(db, bundle_id)
+    if not orders:
+        raise HTTPException(status_code=404, detail="Order bundle not found")
+    event_id = getattr(orders[0], "event_id", None)
+    event = db.query(Event).filter(Event.id == event_id).first() if event_id is not None else None
+    source = order_snapshot(orders, event.name if event is not None else None)
+    if source is None:
+        raise HTTPException(status_code=404, detail="Order bundle not found")
+    return orders, source
+
+
+def _payment_dict(invoice: Invoice) -> dict[str, Any]:
     return {
-        "paid": all(bool(order.paid) for order in current_orders),
-        "payment_method": primary.payment_method,
-        "payment_method_other": primary.payment_method_other,
-        "source": "order",
-        "order_exists": True,
+        "paid": bool(invoice.paid),
+        "payment_method": invoice.payment_method,
+        "payment_method_other": invoice.payment_method_other,
     }
 
 
-def _invoice_dict(db: Session, invoice: Invoice, *, include_snapshot: bool) -> dict[str, Any]:
+def _invoice_dict(invoice: Invoice, *, include_snapshot: bool) -> dict[str, Any]:
     snapshot = invoice.snapshot or {}
-    order_snapshot = snapshot.get("order") or {}
+    order_data = snapshot.get("order") or {}
     payload = {
         "id": invoice.id,
         "invoice_number": invoice.invoice_number,
@@ -166,8 +209,8 @@ def _invoice_dict(db: Session, invoice: Invoice, *, include_snapshot: bool) -> d
         "source_bundle_id": invoice.source_bundle_id,
         "source_order_id": invoice.source_order_id,
         "source_event_id": invoice.source_event_id,
-        "order_reference": order_snapshot.get("reference"),
-        "event_name": order_snapshot.get("event_name"),
+        "order_reference": invoice.order_reference,
+        "event_name": order_data.get("event_name"),
         "customer_name": invoice.customer_name,
         "customer_email": invoice.customer_email,
         "customer_phone": invoice.customer_phone,
@@ -175,10 +218,11 @@ def _invoice_dict(db: Session, invoice: Invoice, *, include_snapshot: bool) -> d
         "due_date": invoice.due_date.isoformat(),
         "memo": invoice.memo,
         "currency": invoice.currency,
+        "line_items": invoice.line_items or [],
         "subtotal": float(invoice.subtotal),
         "discount_total": float(invoice.discount_total),
         "total": float(invoice.total),
-        "payment": _current_payment(db, invoice),
+        "payment": _payment_dict(invoice),
         "created_at": invoice.created_at.isoformat() if invoice.created_at else None,
         "updated_at": invoice.updated_at.isoformat() if invoice.updated_at else None,
     }
@@ -194,21 +238,39 @@ def _require_invoice(db: Session, invoice_id: str) -> Invoice:
     return invoice
 
 
+def _validate_amounts(lines: list[dict[str, Any]], discount_total: Any) -> tuple[list[dict[str, Any]], dict[str, float]]:
+    normalized, amounts = calculate_invoice_amounts(lines, discount_total)
+    if money(amounts["discount_total"]) > money(amounts["subtotal"]):
+        raise HTTPException(status_code=422, detail="Discount cannot exceed the invoice subtotal")
+    return normalized, amounts
+
+
+def _sync_snapshot(invoice: Invoice, source: Optional[dict[str, Any]] = None, *, source_changed: bool = False) -> None:
+    snapshot = copy.deepcopy(invoice.snapshot or {})
+    snapshot["version"] = 2
+    snapshot["currency"] = invoice.currency
+    snapshot.setdefault("customer", {}).update({
+        "name": invoice.customer_name,
+        "email": invoice.customer_email,
+        "phone": invoice.customer_phone,
+    })
+    snapshot.setdefault("invoice", {}).update({
+        "issue_date": invoice.issue_date.isoformat(),
+        "due_date": invoice.due_date.isoformat(),
+        "memo": invoice.memo,
+    })
+    if source_changed:
+        snapshot["order"] = source
+    invoice.snapshot = snapshot
+
+
 @router.get("/invoice-settings")
-def get_invoice_settings(
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
-    settings = _get_settings(db)
-    return _settings_dict(settings)
+def get_invoice_settings(db: Session = Depends(get_db), _: dict = Depends(verify_admin_token)):
+    return _settings_dict(_get_settings(db))
 
 
 @router.put("/invoice-settings")
-def update_invoice_settings(
-    body: InvoiceSettingsUpdate,
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
+def update_invoice_settings(body: InvoiceSettingsUpdate, db: Session = Depends(get_db), _: dict = Depends(verify_admin_token)):
     settings = _get_settings(db)
     for field_name, value in body.model_dump().items():
         setattr(settings, field_name, str(value) if isinstance(value, EmailStr) else value)
@@ -220,108 +282,94 @@ def update_invoice_settings(
 
 @router.get("/invoices")
 def list_invoices(
+    source_bundle_id: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    invoices = db.query(Invoice).order_by(Invoice.created_at.desc(), Invoice.invoice_number.desc()).all()
-    return [_invoice_dict(db, invoice, include_snapshot=False) for invoice in invoices]
+    query = db.query(Invoice)
+    if source_bundle_id is not None:
+        query = query.filter(Invoice.source_bundle_id == source_bundle_id)
+    invoices = query.order_by(Invoice.created_at.desc(), Invoice.invoice_number.desc()).all()
+    return [_invoice_dict(invoice, include_snapshot=False) for invoice in invoices]
 
 
 @router.post("/invoices", status_code=status.HTTP_201_CREATED)
-def create_invoice(
-    body: InvoiceCreate,
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
-    existing = db.query(Invoice).filter(Invoice.source_bundle_id == body.source_bundle_id).first()
-    if existing is not None:
-        raise HTTPException(status_code=409, detail={"message": "This order already has an invoice", "invoice_id": existing.id})
+def create_invoice(body: InvoiceCreate, db: Session = Depends(get_db), _: dict = Depends(verify_admin_token)):
+    orders: list[Order] = []
+    source: Optional[dict[str, Any]] = None
+    if body.source_bundle_id:
+        orders, source = _source_details(db, body.source_bundle_id)
 
-    orders = _get_bundle_orders(db, body.source_bundle_id)
-    if not orders:
-        raise HTTPException(status_code=404, detail="Order bundle not found")
-    primary = orders[0]
-    customer_name = body.customer_name or str(primary.name or "").strip()
+    primary = orders[0] if orders else None
+    customer_name = body.customer_name or str(getattr(primary, "name", "") or "").strip()
     if not customer_name:
         raise HTTPException(status_code=422, detail="Customer name is required")
     due_date = body.due_date or default_due_date(body.issue_date, getattr(primary, "pickup_date", None))
+
+    raw_lines = [line.model_dump() for line in body.line_items] if body.line_items is not None else invoice_lines_from_orders(orders)
+    order_discount = sum((money(getattr(order, "discount_total", 0)) for order in orders), Decimal("0.00"))
+    discount = body.discount_total if body.discount_total is not None else order_discount
+    lines, amounts = _validate_amounts(raw_lines, discount)
+
+    paid = body.paid if body.paid is not None else bool(orders and all(bool(order.paid) for order in orders))
+    payment_method = body.payment_method if body.paid is not None or body.payment_method is not None else optional_text(getattr(primary, "payment_method", None))
+    payment_method_other = body.payment_method_other if payment_method == "other" else None
+    if not paid:
+        payment_method = None
+        payment_method_other = None
+
     settings = _get_settings(db)
-    event = db.query(Event).filter(Event.id == primary.event_id).first()
-    snapshot = build_invoice_snapshot(
-        orders=orders,
+    customer_email = str(body.customer_email) if body.customer_email is not None else getattr(primary, "email", None)
+    customer_phone = body.customer_phone if body.customer_phone is not None else getattr(primary, "phone_number", None)
+    snapshot = build_invoice_document_snapshot(
         settings=settings,
-        event_name=event.name if event is not None else None,
+        source_order=source,
         issue_date=body.issue_date,
         due_date=due_date,
         customer_name=customer_name,
-        customer_email=str(body.customer_email) if body.customer_email is not None else primary.email,
-        customer_phone=body.customer_phone if body.customer_phone is not None else primary.phone_number,
+        customer_email=customer_email,
+        customer_phone=customer_phone,
         memo=body.memo,
     )
     invoice_number, sequence = next_invoice_number(db, body.issue_date.year)
-    amounts = snapshot["amounts"]
-    customer = snapshot["customer"]
     invoice = Invoice(
         id=str(uuid.uuid4()),
         invoice_number=invoice_number,
         number_year=body.issue_date.year,
         number_sequence=sequence,
         source_bundle_id=body.source_bundle_id,
-        source_order_id=str(primary.id),
-        source_event_id=int(primary.event_id) if primary.event_id is not None else None,
-        customer_name=customer["name"],
-        customer_email=customer.get("email"),
-        customer_phone=customer.get("phone"),
+        source_order_id=source.get("primary_order_id") if source else None,
+        source_event_id=source.get("event_id") if source else None,
+        order_reference=source.get("reference") if source else None,
+        customer_name=customer_name,
+        customer_email=optional_text(customer_email),
+        customer_phone=optional_text(customer_phone),
         issue_date=body.issue_date,
         due_date=due_date,
         memo=optional_text(body.memo),
         currency=snapshot["currency"],
+        line_items=lines,
         subtotal=amounts["subtotal"],
         discount_total=amounts["discount_total"],
         total=amounts["total"],
+        paid=paid,
+        payment_method=payment_method,
+        payment_method_other=payment_method_other,
         snapshot=snapshot,
     )
     db.add(invoice)
-    try:
-        db.commit()
-    except IntegrityError as exc:
-        db.rollback()
-        duplicate = db.query(Invoice).filter(Invoice.source_bundle_id == body.source_bundle_id).first()
-        if duplicate is not None:
-            raise HTTPException(status_code=409, detail={"message": "This order already has an invoice", "invoice_id": duplicate.id}) from exc
-        raise
+    db.commit()
     db.refresh(invoice)
-    return _invoice_dict(db, invoice, include_snapshot=True)
-
-
-@router.get("/invoices/by-bundle/{bundle_id}")
-def get_invoice_by_bundle(
-    bundle_id: str,
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
-    invoice = db.query(Invoice).filter(Invoice.source_bundle_id == bundle_id).first()
-    if invoice is None:
-        raise HTTPException(status_code=404, detail="Invoice not found")
-    return _invoice_dict(db, invoice, include_snapshot=False)
+    return _invoice_dict(invoice, include_snapshot=True)
 
 
 @router.get("/invoices/{invoice_id}")
-def get_invoice(
-    invoice_id: str,
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
-    return _invoice_dict(db, _require_invoice(db, invoice_id), include_snapshot=True)
+def get_invoice(invoice_id: str, db: Session = Depends(get_db), _: dict = Depends(verify_admin_token)):
+    return _invoice_dict(_require_invoice(db, invoice_id), include_snapshot=True)
 
 
 @router.patch("/invoices/{invoice_id}")
-def update_invoice(
-    invoice_id: str,
-    body: InvoiceUpdate,
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
+def update_invoice(invoice_id: str, body: InvoiceUpdate, db: Session = Depends(get_db), _: dict = Depends(verify_admin_token)):
     invoice = _require_invoice(db, invoice_id)
     fields = body.model_fields_set
     next_issue_date = body.issue_date if "issue_date" in fields and body.issue_date is not None else invoice.issue_date
@@ -330,6 +378,21 @@ def update_invoice(
         raise HTTPException(status_code=422, detail="Issue date must remain in the invoice number year")
     if next_due_date < next_issue_date:
         raise HTTPException(status_code=422, detail="Due date cannot be earlier than issue date")
+
+    source: Optional[dict[str, Any]] = None
+    source_changed = "source_bundle_id" in fields
+    if source_changed:
+        if body.source_bundle_id:
+            _, source = _source_details(db, body.source_bundle_id)
+            invoice.source_bundle_id = body.source_bundle_id
+            invoice.source_order_id = source["primary_order_id"]
+            invoice.source_event_id = source["event_id"]
+            invoice.order_reference = source["reference"]
+        else:
+            invoice.source_bundle_id = None
+            invoice.source_order_id = None
+            invoice.source_event_id = None
+            invoice.order_reference = None
 
     if "customer_name" in fields:
         if not body.customer_name:
@@ -341,48 +404,57 @@ def update_invoice(
         invoice.customer_phone = body.customer_phone
     if "memo" in fields:
         invoice.memo = body.memo
+
+    raw_lines = [line.model_dump() for line in body.line_items] if "line_items" in fields and body.line_items is not None else list(invoice.line_items or [])
+    discount = body.discount_total if "discount_total" in fields and body.discount_total is not None else invoice.discount_total
+    lines, amounts = _validate_amounts(raw_lines, discount)
+    invoice.line_items = lines
+    invoice.subtotal = amounts["subtotal"]
+    invoice.discount_total = amounts["discount_total"]
+    invoice.total = amounts["total"]
+
+    if "paid" in fields and body.paid is not None:
+        invoice.paid = body.paid
+    if "payment_method" in fields:
+        invoice.payment_method = body.payment_method
+    if "payment_method_other" in fields:
+        invoice.payment_method_other = body.payment_method_other
+    if not invoice.paid:
+        invoice.payment_method = None
+        invoice.payment_method_other = None
+    elif invoice.payment_method != "other":
+        invoice.payment_method_other = None
+
     invoice.issue_date = next_issue_date
     invoice.due_date = next_due_date
     invoice.updated_at = datetime.now(timezone.utc)
-
-    snapshot = copy.deepcopy(invoice.snapshot or {})
-    snapshot.setdefault("customer", {}).update({
-        "name": invoice.customer_name,
-        "email": invoice.customer_email,
-        "phone": invoice.customer_phone,
-    })
-    snapshot.setdefault("invoice", {}).update({
-        "issue_date": invoice.issue_date.isoformat(),
-        "due_date": invoice.due_date.isoformat(),
-        "memo": invoice.memo,
-    })
-    invoice.snapshot = snapshot
+    _sync_snapshot(invoice, source, source_changed=source_changed)
     db.commit()
     db.refresh(invoice)
-    return _invoice_dict(db, invoice, include_snapshot=True)
+    return _invoice_dict(invoice, include_snapshot=True)
 
 
 @router.delete("/invoices/{invoice_id}")
-def delete_invoice(
-    invoice_id: str,
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
-    invoice = _require_invoice(db, invoice_id)
-    db.delete(invoice)
+def delete_invoice(invoice_id: str, db: Session = Depends(get_db), _: dict = Depends(verify_admin_token)):
+    db.delete(_require_invoice(db, invoice_id))
     db.commit()
     return {"success": True}
 
 
 @router.get("/invoices/{invoice_id}/pdf")
-def export_invoice_pdf(
-    invoice_id: str,
-    db: Session = Depends(get_db),
-    _: dict = Depends(verify_admin_token),
-):
+def export_invoice_pdf(invoice_id: str, db: Session = Depends(get_db), _: dict = Depends(verify_admin_token)):
     invoice = _require_invoice(db, invoice_id)
-    payment = _current_payment(db, invoice)
-    pdf = build_invoice_pdf(invoice_number=invoice.invoice_number, snapshot=invoice.snapshot or {}, payment=payment)
+    pdf = build_invoice_pdf(
+        invoice_number=invoice.invoice_number,
+        snapshot=invoice.snapshot or {},
+        payment=_payment_dict(invoice),
+        line_items=invoice.line_items or [],
+        amounts={
+            "subtotal": float(invoice.subtotal),
+            "discount_total": float(invoice.discount_total),
+            "total": float(invoice.total),
+        },
+    )
     return Response(
         content=pdf,
         media_type="application/pdf",

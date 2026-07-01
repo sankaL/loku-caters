@@ -17,7 +17,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from routers.invoices import InvoiceCreate, InvoiceSettingsUpdate  # noqa: E402
 from services.invoice_pdf import build_invoice_pdf  # noqa: E402
-from services.invoices import build_invoice_snapshot, default_due_date, next_invoice_number  # noqa: E402
+from services.invoices import (  # noqa: E402
+    build_invoice_document_snapshot,
+    calculate_invoice_amounts,
+    default_due_date,
+    invoice_lines_from_orders,
+    next_invoice_number,
+    order_snapshot,
+)
 
 
 def make_order(**overrides):
@@ -62,6 +69,24 @@ def make_settings(**overrides):
     return SimpleNamespace(**values)
 
 
+def make_document(orders=None, memo="Prepared for pickup."):
+    rows = orders or [make_order()]
+    lines = invoice_lines_from_orders(rows)
+    discount = sum(float(order.discount_total) for order in rows)
+    lines, amounts = calculate_invoice_amounts(lines, discount)
+    snapshot = build_invoice_document_snapshot(
+        settings=make_settings(),
+        source_order=order_snapshot(rows, "July Batch"),
+        issue_date=date(2026, 6, 30),
+        due_date=date(2026, 7, 4),
+        customer_name="Test Customer",
+        customer_email="customer@example.com",
+        customer_phone="555-0100",
+        memo=memo,
+    )
+    return snapshot, lines, amounts
+
+
 class InvoiceServiceTests(unittest.TestCase):
     def test_default_due_date_uses_future_pickup_and_never_precedes_issue(self):
         issue = date(2026, 6, 30)
@@ -69,34 +94,25 @@ class InvoiceServiceTests(unittest.TestCase):
         self.assertEqual(default_due_date(issue, date(2026, 6, 1)), issue)
         self.assertEqual(default_due_date(issue, None), issue)
 
-    def test_snapshot_aggregates_trusted_order_amounts_and_discounts(self):
-        snapshot = build_invoice_snapshot(
-            orders=[
-                make_order(),
-                make_order(id="order-2", item_id="rolls", item_name="Rolls", quantity=5, base_total_price=15, discount_total=0, total_price=15),
-            ],
-            settings=make_settings(),
-            event_name="July Batch",
-            issue_date=date(2026, 6, 30),
-            due_date=date(2026, 7, 4),
-            customer_name="Test Customer",
-            customer_email="customer@example.com",
-            customer_phone="555-0100",
-            memo="Prepared for pickup.",
-        )
+    def test_invoice_data_aggregates_order_amounts_and_discounts(self):
+        snapshot, lines, amounts = make_document([
+            make_order(),
+            make_order(id="order-2", item_id="rolls", item_name="Rolls", quantity=5, base_total_price=15, discount_total=0, total_price=15),
+        ])
 
-        self.assertEqual(snapshot["amounts"], {"subtotal": 47.0, "discount_total": 2.0, "total": 45.0})
-        self.assertEqual(len(snapshot["order"]["lines"]), 2)
+        self.assertEqual(amounts, {"subtotal": 47.0, "discount_total": 2.0, "total": 45.0})
+        self.assertEqual(len(lines), 2)
         self.assertEqual(snapshot["order"]["reference"], "ORDER-12")
         self.assertEqual(snapshot["vendor"]["payment_email"], "pay@example.com")
+        self.assertNotIn("lines", snapshot["order"])
+        self.assertNotIn("amounts", snapshot)
 
     def test_snapshot_stays_unchanged_when_source_objects_change(self):
         order = make_order()
         settings = make_settings()
-        snapshot = build_invoice_snapshot(
-            orders=[order],
+        snapshot = build_invoice_document_snapshot(
             settings=settings,
-            event_name="July Batch",
+            source_order=order_snapshot([order], "July Batch"),
             issue_date=date(2026, 6, 30),
             due_date=date(2026, 7, 4),
             customer_name=order.name,
@@ -107,15 +123,14 @@ class InvoiceServiceTests(unittest.TestCase):
         order.total_price = 999
         settings.business_address = "Changed"
 
-        self.assertEqual(snapshot["amounts"]["total"], 30.0)
         self.assertEqual(snapshot["vendor"]["business_address"], "Toronto, ON")
+        self.assertEqual(snapshot["order"]["reference"], "ORDER-12")
 
     def test_short_order_id_is_preserved_as_reference(self):
         order = make_order(id="abc", group_id=None)
-        snapshot = build_invoice_snapshot(
-            orders=[order],
+        snapshot = build_invoice_document_snapshot(
             settings=make_settings(),
-            event_name="July Batch",
+            source_order=order_snapshot([order], "July Batch"),
             issue_date=date(2026, 6, 30),
             due_date=date(2026, 7, 4),
             customer_name=order.name,
@@ -149,37 +164,29 @@ class InvoiceServiceTests(unittest.TestCase):
             InvoiceSettingsUpdate(business_name="Loku Caters", payment_method="etransfer")
 
     def test_pdf_contains_professional_invoice_document(self):
-        snapshot = build_invoice_snapshot(
-            orders=[make_order()],
-            settings=make_settings(),
-            event_name="July Batch",
-            issue_date=date(2026, 6, 30),
-            due_date=date(2026, 7, 4),
-            customer_name="Test Customer",
-            customer_email="customer@example.com",
-            customer_phone="555-0100",
-            memo="Prepared for pickup.",
+        snapshot, lines, amounts = make_document()
+        pdf = build_invoice_pdf(
+            invoice_number="INV-2026-0001",
+            snapshot=snapshot,
+            payment={"paid": False},
+            line_items=lines,
+            amounts=amounts,
         )
-        pdf = build_invoice_pdf(invoice_number="INV-2026-0001", snapshot=snapshot, payment={"paid": False})
 
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 3000)
 
     def test_pdf_still_builds_when_logo_asset_is_missing(self):
-        snapshot = build_invoice_snapshot(
-            orders=[make_order()],
-            settings=make_settings(),
-            event_name="July Batch",
-            issue_date=date(2026, 6, 30),
-            due_date=date(2026, 7, 4),
-            customer_name="Test Customer",
-            customer_email="customer@example.com",
-            customer_phone="555-0100",
-            memo=None,
-        )
+        snapshot, lines, amounts = make_document(memo=None)
 
         with patch("services.invoice_pdf._ASSETS_DIR", Path("/missing-invoice-assets")):
-            pdf = build_invoice_pdf(invoice_number="INV-2026-0001", snapshot=snapshot, payment={"paid": False})
+            pdf = build_invoice_pdf(
+                invoice_number="INV-2026-0001",
+                snapshot=snapshot,
+                payment={"paid": False},
+                line_items=lines,
+                amounts=amounts,
+            )
 
         self.assertTrue(pdf.startswith(b"%PDF"))
 

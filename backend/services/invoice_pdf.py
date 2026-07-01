@@ -3,7 +3,7 @@ from __future__ import annotations
 from html import escape
 from io import BytesIO
 from pathlib import Path as FilePath
-from typing import Any, Optional
+from typing import Any
 
 from reportlab.graphics.shapes import Drawing
 from reportlab.lib import colors
@@ -90,6 +90,8 @@ def build_invoice_pdf(
     invoice_number: str,
     snapshot: dict[str, Any],
     payment: dict[str, Any],
+    line_items: list[dict[str, Any]],
+    amounts: dict[str, Any],
 ) -> bytes:
     buffer = BytesIO()
     doc = SimpleDocTemplate(
@@ -107,7 +109,7 @@ def build_invoice_pdf(
     customer = snapshot.get("customer") or {}
     invoice = snapshot.get("invoice") or {}
     order = snapshot.get("order") or {}
-    amounts = snapshot.get("amounts") or {}
+    invoice_amounts = amounts
     currency = str(snapshot.get("currency") or "")
 
     story: list[Any] = []
@@ -136,8 +138,9 @@ def build_invoice_pdf(
     meta_rows = [
         [Paragraph("ISSUE DATE", styles["label"]), Paragraph(_p(invoice.get("issue_date")), styles["body_bold"])],
         [Paragraph("DUE DATE", styles["label"]), Paragraph(_p(invoice.get("due_date")), styles["body_bold"])],
-        [Paragraph("ORDER REF", styles["label"]), Paragraph(_p(order.get("reference")), styles["body_bold"])],
     ]
+    if order.get("reference"):
+        meta_rows.append([Paragraph("ORDER REF", styles["label"]), Paragraph(_p(order.get("reference")), styles["body_bold"])])
     meta_inner = Table(meta_rows, colWidths=[0.78 * inch, 1.25 * inch])
     meta_inner.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0), ("TOPPADDING", (0, 0), (-1, -1), 2), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
     blocks = Table([[from_block, bill_block, meta_inner]], colWidths=[2.29 * inch, 2.29 * inch, 2.28 * inch])
@@ -148,13 +151,13 @@ def build_invoice_pdf(
     status_text = "PAID" if paid else "PAYMENT DUE"
     status_bg = SUCCESS_BG if paid else WARNING_BG
     status_color = SUCCESS_TEXT if paid else WARNING_TEXT
-    status_detail = _payment_label(payment) if paid else _money(amounts.get("total"), currency)
+    status_detail = _payment_label(payment) if paid else _money(invoice_amounts.get("total"), currency)
     status = Table([[Paragraph(f"<b>{status_text}</b>", ParagraphStyle("status", fontName="Helvetica-Bold", fontSize=8, textColor=status_color)), Paragraph(_p(status_detail), ParagraphStyle("status_detail", fontName="Helvetica-Bold", fontSize=8, textColor=status_color, alignment=TA_RIGHT))]], colWidths=[CONTENT_W / 2, CONTENT_W / 2])
     status.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), status_bg), ("BOX", (0, 0), (-1, -1), 0.5, status_color), ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10), ("TOPPADDING", (0, 0), (-1, -1), 7), ("BOTTOMPADDING", (0, 0), (-1, -1), 7)]))
     story.extend([status, Spacer(1, 14)])
 
     rows = [[Paragraph("ITEM", styles["table_head"]), Paragraph("QTY", styles["table_head"]), Paragraph("UNIT PRICE", styles["table_head"]), Paragraph("SUBTOTAL", styles["table_head"])]]
-    for line in order.get("lines") or []:
+    for line in line_items:
         rows.append([
             Paragraph(_p(line.get("description")), styles["table_cell"]),
             Paragraph(str(int(line.get("quantity") or 0)), styles["table_right"]),
@@ -169,10 +172,10 @@ def build_invoice_pdf(
     items.setStyle(TableStyle(item_style))
     story.extend([items, Spacer(1, 12)])
 
-    totals_data = [[Paragraph("Subtotal", styles["body"]), Paragraph(_money(amounts.get("subtotal"), currency), styles["table_right"])]]
-    if float(amounts.get("discount_total") or 0) > 0:
-        totals_data.append([Paragraph("Discount", styles["body"]), Paragraph(f"-{_money(amounts.get('discount_total'), currency)}", styles["table_right"])])
-    totals_data.append([Paragraph("TOTAL", styles["body_bold"]), Paragraph(_money(amounts.get("total"), currency), styles["total"])])
+    totals_data = [[Paragraph("Subtotal", styles["body"]), Paragraph(_money(invoice_amounts.get("subtotal"), currency), styles["table_right"])]]
+    if float(invoice_amounts.get("discount_total") or 0) > 0:
+        totals_data.append([Paragraph("Discount", styles["body"]), Paragraph(f"-{_money(invoice_amounts.get('discount_total'), currency)}", styles["table_right"])])
+    totals_data.append([Paragraph("TOTAL", styles["body_bold"]), Paragraph(_money(invoice_amounts.get("total"), currency), styles["total"])])
     totals = Table(totals_data, colWidths=[1.4 * inch, 1.55 * inch], hAlign="RIGHT")
     totals.setStyle(TableStyle([("LINEABOVE", (0, -1), (-1, -1), 1, FOREST), ("TOPPADDING", (0, 0), (-1, -1), 6), ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("LEFTPADDING", (0, 0), (-1, -1), 4), ("RIGHTPADDING", (0, 0), (-1, -1), 4)]))
     story.extend([totals, Spacer(1, 18)])

@@ -201,7 +201,7 @@ class InvoiceRouteTests(unittest.TestCase):
         self.assertEqual(racing_session.commit_count, 1)
         self.assertEqual(racing_session.rollback_count, 1)
 
-    def test_invoice_http_lifecycle_duplicate_and_snapshot_payment_fallback(self):
+    def test_invoice_http_lifecycle_supports_editing_and_multiple_per_order(self):
         rejected = self.client.post(
             "/api/admin/invoices",
             json={"source_bundle_id": self.order.id, "total": 1},
@@ -223,18 +223,24 @@ class InvoiceRouteTests(unittest.TestCase):
         invoice = created.json()
         self.assertEqual(invoice["invoice_number"], "INV-2026-0001")
         self.assertEqual(invoice["total"], 30.0)
-        self.assertEqual(invoice["payment"]["source"], "order")
+        self.assertFalse(invoice["payment"]["paid"])
+        self.assertEqual(invoice["line_items"][0]["subtotal"], 32.0)
 
-        duplicate = self.client.post(
-            "/api/admin/invoices",
-            json={"source_bundle_id": self.order.id},
-        )
-        self.assertEqual(duplicate.status_code, 409)
-        self.assertEqual(duplicate.json()["detail"]["invoice_id"], invoice["id"])
+        with patch("routers.invoices.next_invoice_number", return_value=("INV-2026-0002", 2)):
+            second = self.client.post(
+                "/api/admin/invoices",
+                json={"source_bundle_id": self.order.id, "issue_date": "2026-06-30"},
+            )
+        self.assertEqual(second.status_code, 201)
+        self.assertEqual(second.json()["source_bundle_id"], self.order.id)
 
         listed = self.client.get("/api/admin/invoices")
         self.assertEqual(listed.status_code, 200)
-        self.assertEqual([row["id"] for row in listed.json()], [invoice["id"]])
+        self.assertEqual(len(listed.json()), 2)
+
+        filtered = self.client.get("/api/admin/invoices", params={"source_bundle_id": self.order.id})
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(len(filtered.json()), 2)
 
         fetched = self.client.get(f"/api/admin/invoices/{invoice['id']}")
         self.assertEqual(fetched.status_code, 200)
@@ -242,25 +248,32 @@ class InvoiceRouteTests(unittest.TestCase):
 
         updated = self.client.patch(
             f"/api/admin/invoices/{invoice['id']}",
-            json={"customer_name": "Updated Customer", "memo": "Updated memo"},
+            json={
+                "source_bundle_id": None,
+                "customer_name": "Updated Customer",
+                "memo": "Updated memo",
+                "line_items": [
+                    {"description": "Custom tray", "quantity": 3, "unit_price": 12.5},
+                    {"description": "Delivery", "quantity": 1, "unit_price": 8},
+                ],
+                "discount_total": 5,
+                "paid": True,
+                "payment_method": "cash",
+            },
         )
         self.assertEqual(updated.status_code, 200)
         self.assertEqual(updated.json()["customer_name"], "Updated Customer")
         self.assertEqual(updated.json()["snapshot"]["invoice"]["memo"], "Updated memo")
+        self.assertIsNone(updated.json()["source_bundle_id"])
+        self.assertIsNone(updated.json()["snapshot"]["order"])
+        self.assertEqual(updated.json()["subtotal"], 45.5)
+        self.assertEqual(updated.json()["total"], 40.5)
+        self.assertTrue(updated.json()["payment"]["paid"])
+        self.assertEqual(updated.json()["payment"]["payment_method"], "cash")
 
-        self.session.orders.clear()
-        fallback = self.client.get(f"/api/admin/invoices/{invoice['id']}")
-        self.assertEqual(fallback.status_code, 200)
-        self.assertEqual(
-            fallback.json()["payment"],
-            {
-                "paid": False,
-                "payment_method": None,
-                "payment_method_other": None,
-                "source": "snapshot",
-                "order_exists": False,
-            },
-        )
+        self.order.paid = False
+        independent = self.client.get(f"/api/admin/invoices/{invoice['id']}")
+        self.assertTrue(independent.json()["payment"]["paid"])
 
         exported = self.client.get(f"/api/admin/invoices/{invoice['id']}/pdf")
         self.assertEqual(exported.status_code, 200)
@@ -271,6 +284,40 @@ class InvoiceRouteTests(unittest.TestCase):
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.json(), {"success": True})
         self.assertEqual(self.client.get(f"/api/admin/invoices/{invoice['id']}").status_code, 404)
+
+    def test_standalone_invoice_requires_lines_and_recalculates_totals(self):
+        missing_lines = self.client.post(
+            "/api/admin/invoices",
+            json={"customer_name": "Standalone Customer"},
+        )
+        self.assertEqual(missing_lines.status_code, 422)
+
+        with patch("routers.invoices.next_invoice_number", return_value=("INV-2026-0003", 3)):
+            created = self.client.post(
+                "/api/admin/invoices",
+                json={
+                    "issue_date": "2026-06-30",
+                    "customer_name": "Standalone Customer",
+                    "line_items": [{"description": "Catering service", "quantity": 4, "unit_price": 9.99}],
+                    "discount_total": 4.96,
+                    "paid": True,
+                    "payment_method": "etransfer",
+                },
+            )
+
+        self.assertEqual(created.status_code, 201)
+        payload = created.json()
+        self.assertIsNone(payload["source_bundle_id"])
+        self.assertIsNone(payload["order_reference"])
+        self.assertEqual(payload["subtotal"], 39.96)
+        self.assertEqual(payload["total"], 35.0)
+        self.assertEqual(payload["snapshot"]["order"], None)
+
+        invalid_discount = self.client.patch(
+            f"/api/admin/invoices/{payload['id']}",
+            json={"discount_total": 100},
+        )
+        self.assertEqual(invalid_discount.status_code, 422)
 
 
 if __name__ == "__main__":

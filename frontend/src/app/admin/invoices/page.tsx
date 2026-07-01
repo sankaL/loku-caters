@@ -56,6 +56,7 @@ export default function InvoicesPage() {
   const [search, setSearch] = useState("");
   const [eventFilter, setEventFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
+  const [bundleFilter, setBundleFilter] = useState("");
   const [pickerSearch, setPickerSearch] = useState("");
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
@@ -90,25 +91,34 @@ export default function InvoicesPage() {
   }, [showToast]);
 
   useEffect(() => {
+    setBundleFilter(new URLSearchParams(window.location.search).get("bundle_id") ?? "");
+  }, []);
+
+  useEffect(() => {
     void loadData();
   }, [loadData]);
 
   const eventNames = useMemo(() => new Map(events.map((event) => [event.id, event.name])), [events]);
-  const invoiceByBundle = useMemo(() => new Map(invoices.map((invoice) => [invoice.source_bundle_id, invoice])), [invoices]);
   const filtered = useMemo(() => {
     const query = search.trim().toLowerCase();
     return invoices.filter((invoice) => {
+      if (bundleFilter && invoice.source_bundle_id !== bundleFilter) return false;
       if (eventFilter !== "all" && String(invoice.source_event_id) !== eventFilter) return false;
       if (paymentFilter === "paid" && !invoice.payment.paid) return false;
       if (paymentFilter === "due" && invoice.payment.paid) return false;
       if (!query) return true;
       return `${invoice.invoice_number} ${invoice.customer_name} ${invoice.customer_email ?? ""} ${invoice.order_reference ?? ""} ${invoice.event_name ?? ""}`.toLowerCase().includes(query);
     });
-  }, [eventFilter, invoices, paymentFilter, search]);
+  }, [bundleFilter, eventFilter, invoices, paymentFilter, search]);
 
   useEffect(() => {
     setPage(1);
-  }, [eventFilter, paymentFilter, search]);
+  }, [bundleFilter, eventFilter, paymentFilter, search]);
+
+  function clearBundleFilter() {
+    setBundleFilter("");
+    window.history.replaceState(null, "", "/admin/invoices");
+  }
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -147,7 +157,7 @@ export default function InvoicesPage() {
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="mb-1 text-2xl font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>Invoices</h1>
-          <p className="text-sm" style={{ color: "var(--color-muted)" }}>Create, review, and export professional invoices from order bundles.</p>
+          <p className="text-sm" style={{ color: "var(--color-muted)" }}>Create, edit, and export standalone or order-referenced invoices.</p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button onClick={() => router.push("/admin/invoices/settings")} className="inline-flex items-center gap-2 rounded-2xl px-4 py-2.5 text-sm font-semibold" style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}>
@@ -174,6 +184,7 @@ export default function InvoicesPage() {
           <option value="due">Payment due</option>
         </select>
       </div>
+      {bundleFilter && <div className="mb-4 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}><span>Showing invoices linked to the selected order.</span><button onClick={clearBundleFilter} className="font-semibold underline" style={{ color: "var(--color-forest)" }}>Show all invoices</button></div>}
 
       {loading ? (
         <div className="space-y-3">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="h-16 animate-pulse rounded-2xl" style={{ background: "var(--color-cream-dark)" }} />)}</div>
@@ -182,7 +193,7 @@ export default function InvoicesPage() {
           <div className="w-full max-w-xl rounded-[2rem] border bg-white p-9 text-left" style={{ borderColor: "var(--color-border)" }}>
             <div className="mb-6 inline-flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}><Receipt size={28} weight="duotone" /></div>
             <h2 className="text-2xl font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>No invoices yet</h2>
-            <p className="mt-2 text-sm leading-6" style={{ color: "var(--color-muted)" }}>Choose an existing order bundle and review its details before creating the first invoice.</p>
+            <p className="mt-2 text-sm leading-6" style={{ color: "var(--color-muted)" }}>Create a standalone invoice or use an order as a starting point.</p>
             <button onClick={() => setPickerOpen(true)} className="mt-7 inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}><Plus size={18} weight="bold" /> Create Invoice</button>
           </div>
         </div>
@@ -197,7 +208,7 @@ export default function InvoicesPage() {
                     <tr key={invoice.id} onClick={() => router.push(`/admin/invoices/${invoice.id}`)} className="cursor-pointer transition-colors hover:bg-[color:var(--color-cream)]/70">
                       <td className="px-5 py-4 font-semibold" style={{ color: "var(--color-forest)" }}>{invoice.invoice_number}</td>
                       <td className="px-5 py-4"><div className="font-semibold" style={{ color: "var(--color-text)" }}>{invoice.customer_name}</div><div className="text-xs" style={{ color: "var(--color-muted)" }}>{invoice.customer_email ?? "No email"}</div></td>
-                      <td className="px-5 py-4"><div style={{ color: "var(--color-text)" }}>#{invoice.order_reference ?? "Unavailable"}</div><div className="text-xs" style={{ color: "var(--color-muted)" }}>{invoice.event_name ?? "Event unavailable"}</div></td>
+                      <td className="px-5 py-4"><div style={{ color: "var(--color-text)" }}>{invoice.order_reference ? `#${invoice.order_reference}` : "Standalone"}</div><div className="text-xs" style={{ color: "var(--color-muted)" }}>{invoice.event_name ?? (invoice.order_reference ? "Event unavailable" : "No order reference")}</div></td>
                       <td className="px-5 py-4" style={{ color: "var(--color-muted)" }}>{formatInvoiceDate(invoice.issue_date)}</td>
                       <td className="px-5 py-4" style={{ color: "var(--color-muted)" }}>{formatInvoiceDate(invoice.due_date)}</td>
                       <td className="px-5 py-4 font-semibold" style={{ color: "var(--color-forest)" }}>{formatInvoiceMoney(invoice.total, invoice.currency)}</td>
@@ -213,14 +224,13 @@ export default function InvoicesPage() {
         </>
       )}
 
-      <Modal isOpen={pickerOpen} onClose={() => setPickerOpen(false)} title="Choose an Order" size="xl">
+      <Modal isOpen={pickerOpen} onClose={() => setPickerOpen(false)} title="Create Invoice" size="xl">
         <div className="space-y-4">
+          <button onClick={() => router.push("/admin/invoices/new")} className="flex w-full items-center justify-between rounded-2xl p-4 text-left" style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}><span><span className="block font-semibold" style={{ color: "var(--color-forest)" }}>Standalone invoice</span><span className="mt-1 block text-xs" style={{ color: "var(--color-muted)" }}>Start with a blank editable item.</span></span><Plus size={20} weight="bold" style={{ color: "var(--color-forest)" }} /></button>
+          <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: "var(--color-sage)" }}>Or prefill from an order</p>
           <label className="relative block"><MagnifyingGlass size={15} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-muted)" }} /><input value={pickerSearch} onChange={(event) => setPickerSearch(event.target.value)} placeholder="Search customer, order, or event" className="w-full rounded-xl border py-2.5 pl-9 pr-4 text-sm outline-none" style={{ borderColor: "var(--color-border)" }} /></label>
           <div className="max-h-[55vh] space-y-2 overflow-y-auto pr-1">
-            {pickerOrders.length === 0 ? <p className="py-8 text-center text-sm" style={{ color: "var(--color-muted)" }}>No orders found.</p> : pickerOrders.map((order) => {
-              const existing = invoiceByBundle.get(order.bundle_id);
-              return <div key={order.bundle_id} className="flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center" style={{ borderColor: "var(--color-border)", background: "white" }}><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold" style={{ color: "var(--color-text)" }}>{order.name}</p><span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--color-cream)", color: "var(--color-muted)" }}>{order.status.replaceAll("_", " ")}</span></div><p className="mt-1 text-xs" style={{ color: "var(--color-muted)" }}>{eventNames.get(order.event_id) ?? `Event ${order.event_id}`} | {order.quantity_total} items | {formatInvoiceMoney(order.total_price, existing?.currency ?? CURRENCY)}</p></div><button onClick={() => router.push(existing ? `/admin/invoices/${existing.id}` : `/admin/invoices/new?bundle_id=${encodeURIComponent(order.bundle_id)}`)} className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold" style={{ background: existing ? "white" : "var(--color-forest)", color: existing ? "var(--color-forest)" : "var(--color-cream)", border: existing ? "1px solid var(--color-border)" : "none" }}>{existing ? "View Invoice" : "Review Invoice"}</button></div>;
-            })}
+            {pickerOrders.length === 0 ? <p className="py-8 text-center text-sm" style={{ color: "var(--color-muted)" }}>No orders found.</p> : pickerOrders.map((order) => <div key={order.bundle_id} className="flex flex-col gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center" style={{ borderColor: "var(--color-border)", background: "white" }}><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold" style={{ color: "var(--color-text)" }}>{order.name}</p><span className="rounded-full px-2 py-0.5 text-xs" style={{ background: "var(--color-cream)", color: "var(--color-muted)" }}>{order.status.replaceAll("_", " ")}</span></div><p className="mt-1 text-xs" style={{ color: "var(--color-muted)" }}>{eventNames.get(order.event_id) ?? `Event ${order.event_id}`} | {order.quantity_total} items | {formatInvoiceMoney(order.total_price, CURRENCY)}</p></div><button onClick={() => router.push(`/admin/invoices/new?bundle_id=${encodeURIComponent(order.bundle_id)}`)} className="shrink-0 rounded-xl px-4 py-2 text-sm font-semibold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>Use Order</button></div>)}
           </div>
         </div>
       </Modal>
