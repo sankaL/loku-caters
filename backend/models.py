@@ -122,6 +122,68 @@ class EventPlan(Base):
     )
 
 
+class Invoice(Base):
+    __tablename__ = "invoices"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    invoice_number: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    number_year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    number_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_bundle_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
+    source_order_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    source_event_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    order_reference: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    customer_phone: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    issue_date: Mapped[date] = mapped_column(Date, nullable=False)
+    due_date: Mapped[date] = mapped_column(Date, nullable=False)
+    memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    currency: Mapped[str] = mapped_column(String, nullable=False)
+    subtotal: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    discount_total: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    total: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    line_items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    payment_method: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    payment_method_other: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class InvoiceSettings(Base):
+    __tablename__ = "invoice_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    business_name: Mapped[str] = mapped_column(Text, nullable=False, default="Loku Caters")
+    business_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_phone: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    payment_method: Mapped[str] = mapped_column(String, nullable=False, default="none")
+    payment_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    payment_instructions: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    default_footer_note: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class InvoiceNumberCounter(Base):
+    __tablename__ = "invoice_number_counters"
+
+    year: Mapped[int] = mapped_column(Integer, primary_key=True)
+    last_value: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+
 class Customer(Base):
     __tablename__ = "customers"
 

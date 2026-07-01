@@ -4,7 +4,7 @@
 
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
-        db-up db-down db-migrate db-seed db-reset \
+        db-up db-down db-migrate db-seed db-seed-if-empty db-reset \
         stop stop-backend-port logs-backend help
 
 # ----------------------------------------------------------------------------
@@ -64,11 +64,19 @@ restart-backend:
 ## Sync config then restart backend (production .env)
 sync-and-restart: sync-config restart-backend
 
-## Start both services with production .env (background backend, foreground frontend)
-dev:
-	@echo "Starting backend on :8000 ..."
-	cd backend && python3 -m uvicorn main:app --reload --port 8000 &
-	@echo "Starting frontend on :3000 ..."
+## Start both services with local DB (local Postgres + backend + frontend)
+dev: sync-config db-up db-migrate db-seed-if-empty
+	@echo ""
+	@$(MAKE) stop-backend-port
+	@echo "  Starting backend (local DB, DEV_MODE=true)..."
+	@echo "  Backend logs: /tmp/loku-backend.log"
+	@echo "  Admin dev login: POST http://localhost:8000/api/admin/dev-login"
+	@echo ""
+	@(cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
+	    --reload --port 8000 > /tmp/loku-backend.log 2>&1 \
+	    & echo $$! > /tmp/loku-backend.pid)
+	@sleep 1
+	@echo "  Starting frontend on http://localhost:3000 ..."
 	cd frontend && npm run dev
 
 # ============================================================================
@@ -126,6 +134,10 @@ db-migrate: sync-config
 ## Seed the local DB with comprehensive test data (removes existing orders first)
 db-seed:
 	cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py
+
+## Seed the local DB with comprehensive test data only if it is empty
+db-seed-if-empty:
+	cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py --only-if-empty
 
 ## Drop all tables, re-run migrations, and seed fresh test data
 db-reset: db-up

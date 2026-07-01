@@ -117,6 +117,50 @@ Stores admin-created planning snapshots for a single source event or the reserve
 
 ---
 
+## Table: `invoices`
+
+Stores independent invoice records. An invoice can optionally reference an order bundle, and multiple invoices can reference the same bundle. Order data is copied as reference metadata only and is never synchronized back into the invoice.
+
+| Column | Type | Constraints | Notes |
+|---|---|---|---|
+| `id` | `TEXT` (UUID) | Primary key | Python-generated UUID string |
+| `invoice_number` | `TEXT` | NOT NULL, UNIQUE | Permanent display number such as `INV-2026-0001` |
+| `number_year` | `INTEGER` | NOT NULL, indexed | Year selected from the approved issue date |
+| `number_sequence` | `INTEGER` | NOT NULL, unique with `number_year` | Annual sequence value |
+| `source_bundle_id` | `TEXT` | nullable, indexed | Optional order `group_id`, or the order ID for an ungrouped order. No foreign key or uniqueness constraint |
+| `source_order_id` | `TEXT` | nullable | Primary order row used for admin navigation when it still exists |
+| `source_event_id` | `INTEGER` | nullable, indexed | Event associated with the source order at creation time |
+| `order_reference` | `TEXT` | nullable | Saved display reference for the optional order |
+| `customer_name` | `TEXT` | NOT NULL | Editable invoice customer name |
+| `customer_email` | `TEXT` | nullable | Editable invoice customer email |
+| `customer_phone` | `TEXT` | nullable | Editable invoice customer phone |
+| `issue_date` | `DATE` | NOT NULL | Must remain in the invoice number year |
+| `due_date` | `DATE` | NOT NULL, CHECK `>= issue_date` | Defaults to a future pickup date or the issue date |
+| `memo` | `TEXT` | nullable | Optional customer-facing invoice note |
+| `currency` | `TEXT` | NOT NULL | Snapshot from backend `event_config.get_currency()` |
+| `subtotal` | `DECIMAL(10,2)` | NOT NULL | Server-calculated sum of invoice line subtotals |
+| `discount_total` | `DECIMAL(10,2)` | NOT NULL, default `0` | Editable invoice-level discount validated by the server |
+| `total` | `DECIMAL(10,2)` | NOT NULL | Server-calculated subtotal minus discount |
+| `line_items` | `JSONB` | NOT NULL | Editable invoice-owned descriptions, quantities, unit prices, and calculated subtotals |
+| `paid` | `BOOLEAN` | NOT NULL, default `FALSE` | Invoice-owned payment state |
+| `payment_method` | `TEXT` | nullable | Actual payment method: `etransfer`, `cash`, or `other` |
+| `payment_method_other` | `TEXT` | nullable | Details for an `other` payment method |
+| `snapshot` | `JSONB` | NOT NULL | Frozen vendor settings and optional order reference metadata |
+| `created_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | UTC |
+| `updated_at` | `TIMESTAMPTZ` | NOT NULL, default `NOW()` | UTC |
+
+Invoice lines, totals, customer details, and payment state are owned by the invoice. Attaching, changing, or removing an order reference does not replace those fields. The backend calculates line subtotals and totals from editable quantities and unit prices. Deleting an invoice does not release or reuse its number.
+
+## Table: `invoice_settings`
+
+Singleton admin configuration copied into new invoice snapshots. The single row uses `id = 1` and stores business contact details, preferred payment method, optional e-transfer email, payment instructions, and a footer note. Existing invoices are not changed when this row is updated.
+
+## Table: `invoice_number_counters`
+
+Concurrency-safe annual counters used to allocate invoice numbers atomically. Each `year` is a primary key with a monotonically increasing `last_value`. Counter rows are never decremented when invoices are deleted.
+
+---
+
 ## Table: `items`
 
 Relational table for menu items. Managed via `/admin/items` in the admin panel.

@@ -479,8 +479,23 @@ def seed_catering_requests(db):
 # ---------------------------------------------------------------------------
 
 def main():
+    import sys
     db = SessionLocal()
     try:
+        if "--only-if-empty" in sys.argv:
+            try:
+                # A fresh migration database contains 'Event 1' and one default item ('Lamprais')
+                # We check if there are any regular events (not 'Event 1' or 'Random Requests'),
+                # any orders, or more than the default 1 item.
+                regular_events = db.query(Event).filter(Event.name != "Event 1", Event.kind != "random_requests").count()
+                item_count = db.query(Item).count()
+                order_count = db.query(Order).count()
+                if regular_events > 0 or order_count > 0 or item_count > 1:
+                    print("Database already has data (found existing regular events, orders, or items). Skipping seeding.")
+                    return
+            except Exception as e:
+                print(f"Error checking database contents: {e}. Proceeding with seeding.")
+
         # Clear existing data
         clear_all_tables(db)
         

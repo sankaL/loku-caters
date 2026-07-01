@@ -746,6 +746,8 @@ export default function AdminOrdersPage() {
   const [bundleLines, setBundleLines] = useState<OrderLine[]>([]);
   const [selectedBundle, setSelectedBundle] = useState<Order | null>(null);
   const [loadingBundleDetails, setLoadingBundleDetails] = useState(false);
+  const [loadingBundleInvoices, setLoadingBundleInvoices] = useState(false);
+  const [bundleInvoiceCount, setBundleInvoiceCount] = useState(0);
   const [showBundleDetailsModal, setShowBundleDetailsModal] = useState(false);
   const [showEditBundleModal, setShowEditBundleModal] = useState(false);
   const [filter, setFilter] = useState<string>("all");
@@ -1093,6 +1095,21 @@ export default function AdminOrdersPage() {
       setSelectedBundle(nextBundle);
       setBundleLines(Array.isArray(payload.lines) ? payload.lines : []);
       setShowBundleDetailsModal(true);
+      setBundleInvoiceCount(0);
+      setLoadingBundleInvoices(true);
+      try {
+        const invoiceRes = await fetch(`${API_URL}/api/admin/invoices?source_bundle_id=${encodeURIComponent(nextBundle.bundle_id)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (invoiceRes.ok) {
+          const linkedInvoices = (await invoiceRes.json()) as Array<{ id: string }>;
+          setBundleInvoiceCount(linkedInvoices.length);
+        }
+      } catch {
+        setBundleInvoiceCount(0);
+      } finally {
+        setLoadingBundleInvoices(false);
+      }
       return true;
     } catch (err) {
       showToast(err instanceof Error ? err.message : "Failed to load bundle details", "error");
@@ -1678,6 +1695,8 @@ export default function AdminOrdersPage() {
     setShowBundleDetailsModal(false);
     setSelectedBundle(null);
     setBundleLines([]);
+    setBundleInvoiceCount(0);
+    setLoadingBundleInvoices(false);
     setShowEditBundleModal(false);
   }
 
@@ -3535,6 +3554,23 @@ export default function AdminOrdersPage() {
                 </div>
 
                 <div className="flex items-center justify-end gap-2">
+                  {(loadingBundleInvoices || bundleInvoiceCount > 0) && (
+                    <button
+                      onClick={() => router.push(`/admin/invoices?bundle_id=${encodeURIComponent(selectedBundle.bundle_id)}`)}
+                      disabled={loadingBundleInvoices}
+                      className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+                      style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
+                    >
+                      {loadingBundleInvoices ? "Checking Invoices..." : `View Invoices (${bundleInvoiceCount})`}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => router.push(`/admin/invoices/new?bundle_id=${encodeURIComponent(selectedBundle.bundle_id)}`)}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold"
+                    style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+                  >
+                    Create Invoice
+                  </button>
                   <button
                     onClick={() => setShowEditBundleModal(true)}
                     className="px-4 py-2 rounded-xl text-sm font-semibold"
