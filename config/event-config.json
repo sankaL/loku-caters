@@ -26,10 +26,10 @@
         "image": "/assets/food/flyer/pastries.jpeg",
         "minOrder": 10,
         "varieties": [
-          { "name": "Vegetable", "price": 2.0 },
-          { "name": "Fish", "price": 2.0 },
-          { "name": "Chicken", "price": 2.1 },
-          { "name": "Mutton", "price": 2.5 }
+          { "name": "Vegetable", "price": 2.5 },
+          { "name": "Fish", "price": 2.5 },
+          { "name": "Chicken", "price": 2.75 },
+          { "name": "Mutton", "price": 2.75 }
         ]
       },
       {

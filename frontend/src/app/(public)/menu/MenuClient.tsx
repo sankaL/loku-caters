@@ -4,15 +4,10 @@ import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import type { EventConfig } from "@/config/event";
+import { CURRENCY } from "@/config/event";
+import EVENT_CONFIG from "@/config/event-config.json";
 
 /* ───────────────────────────── types ───────────────────────────── */
-
-interface MenuItem {
-    name: string;
-    description: string;
-    diet?: string[];
-    hasTooltip?: boolean;
-}
 
 interface MenuCard {
     title: string;
@@ -30,50 +25,22 @@ interface CateringMenu {
     cards: MenuCard[];
 }
 
+type AppetizerItem = EventConfig["flyer"]["appetizers"][number];
+type TrayItem = EventConfig["flyer"]["trays"][number];
+
 /* ─────────────────────── individual items data ─────────────────── */
 
-const individualItems = {
-    title: "Individual Items & Signature Dishes",
-    categories: [
-        {
-            name: "Dishes",
-            items: [
-                {
-                    name: "Lamprais",
-                    description:
-                        "Wrapped in a banana leaf with Ghee Rice, Baked Chicken Curry, Fried boiled egg, Seeni Sambal, Fricadells (Beef and Pork), Ash Plantain curry, Brinjal Pahie, and Blachan.",
-                    diet: ["Signature"],
-                    hasTooltip: true,
-                },
-            ] as MenuItem[],
-        },
-        {
-            name: "Appetizers",
-            items: [
-                {
-                    name: "Fish Cutlets",
-                    description:
-                        "Spiced fish and potato croquettes, breaded and fried golden.",
-                },
-                {
-                    name: "Mutton Roll",
-                    description:
-                        "Crispy fried rolls filled with savoury spiced mutton.",
-                },
-                {
-                    name: "Fish Roll",
-                    description:
-                        "Crispy fried rolls filled with spiced fish and herbs.",
-                },
-                {
-                    name: "Fish Pastries",
-                    description:
-                        "Delicate golden pastries stuffed with a fragrant fish filling.",
-                },
-            ] as MenuItem[],
-        },
-    ],
-};
+const appetizers = EVENT_CONFIG.flyer.appetizers as AppetizerItem[];
+const trays = EVENT_CONFIG.flyer.trays as TrayItem[];
+
+function formatPrice(price: number): string {
+    return new Intl.NumberFormat("en-CA", {
+        style: "currency",
+        currency: CURRENCY,
+        minimumFractionDigits: price % 1 === 0 ? 0 : 2,
+        maximumFractionDigits: 2,
+    }).format(price);
+}
 
 /* ─────────────────────── catering menus data ──────────────────── */
 
@@ -538,6 +505,77 @@ function CateringMenuModal({
     );
 }
 
+function AppetizerCard({ item }: { item: AppetizerItem }) {
+    return (
+        <article className="group bg-white rounded-3xl border border-[color:var(--color-border)] overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300">
+            <div className="relative h-36 overflow-hidden">
+                <Image
+                    src={item.image}
+                    alt={item.name}
+                    fill
+                    className="object-cover group-hover:scale-105 transition-transform duration-500"
+                    style={item.imagePosition ? { objectPosition: item.imagePosition } : undefined}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent" />
+                <span className="absolute top-3 right-3 bg-[color:var(--color-forest)]/90 text-white text-[10px] font-semibold px-2.5 py-1 rounded-full">
+                    Min. {item.minOrder} pcs
+                </span>
+                <h4
+                    className="absolute bottom-3 left-4 text-xl font-bold text-white drop-shadow-md"
+                    style={{ fontFamily: "var(--font-serif)" }}
+                >
+                    {item.name}
+                </h4>
+            </div>
+            <div className="px-4 py-3">
+                {item.varieties.map((variety, index) => (
+                    <div
+                        key={variety.name}
+                        className={`flex items-center justify-between py-1.5 text-sm ${
+                            index < item.varieties.length - 1
+                                ? "border-b border-[color:var(--color-border)]/60"
+                                : ""
+                        }`}
+                    >
+                        <span className="text-[color:var(--color-text)]">{variety.name}</span>
+                        <span className="font-bold text-[color:var(--color-forest)] tabular-nums">
+                            {formatPrice(variety.price)}
+                        </span>
+                    </div>
+                ))}
+            </div>
+        </article>
+    );
+}
+
+function TrayCard({ item }: { item: TrayItem }) {
+    return (
+        <article className="group bg-white rounded-3xl border border-[color:var(--color-border)] overflow-hidden shadow-sm hover:shadow-lg transition-all duration-300">
+            <div className="relative h-36 overflow-hidden">
+                <Image
+                    src={item.image}
+                    alt={item.name}
+                    fill
+                    className="object-cover group-hover:scale-105 transition-transform duration-500"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/5 to-transparent" />
+                <span className="absolute top-3 right-3 bg-[color:var(--color-forest)] text-white text-xs font-bold px-3 py-1 rounded-full shadow-md">
+                    {formatPrice(item.price)}
+                </span>
+                <div className="absolute bottom-3 left-4 right-4">
+                    <h3
+                        className="text-lg font-bold text-white drop-shadow-md"
+                        style={{ fontFamily: "var(--font-serif)" }}
+                    >
+                        {item.name}
+                    </h3>
+                    <p className="text-white/80 text-xs mt-0.5">{item.size}</p>
+                </div>
+            </div>
+        </article>
+    );
+}
+
 /* ───────────────────────── main component ─────────────────────── */
 
 export default function MenuClient({
@@ -601,7 +639,7 @@ export default function MenuClient({
                             className="text-3xl md:text-4xl font-bold text-[color:var(--color-forest)]"
                             style={{ fontFamily: "var(--font-serif)" }}
                         >
-                            {individualItems.title}
+                            Individual Items &amp; Signature Dishes
                         </h2>
                     </div>
 
@@ -687,25 +725,16 @@ export default function MenuClient({
                         >
                             Appetizers
                         </h3>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                            {individualItems.categories
-                                .find((c) => c.name === "Appetizers")
-                                ?.items.map((item: MenuItem, idx: number) => (
-                                    <div key={idx} className="group">
-                                        <h4 className="text-lg font-bold text-[color:var(--color-forest)] group-hover:text-[color:var(--color-sage)] transition-colors mb-1">
-                                            {item.name}
-                                        </h4>
-                                        <p className="text-[color:var(--color-muted)] text-sm leading-relaxed">
-                                            {item.description}
-                                        </p>
-                                    </div>
-                                ))}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            {appetizers.map((item) => (
+                                <AppetizerCard key={item.name} item={item} />
+                            ))}
                         </div>
                     </div>
                 </section>
 
                 {/* Section 2: Catering Style Menus */}
-                <section>
+                <section className="mb-20">
                     <div className="border-b border-[color:var(--color-border)] pb-4 mb-10 text-center md:text-left animate-fade-up">
                         <h2
                             className="text-3xl md:text-4xl font-bold text-[color:var(--color-forest)]"
@@ -779,6 +808,27 @@ export default function MenuClient({
                                     </span>
                                 </div>
                             </button>
+                        ))}
+                    </div>
+                </section>
+
+                {/* Section 3: Trays */}
+                <section>
+                    <div className="border-b border-[color:var(--color-border)] pb-4 mb-8 text-center md:text-left animate-fade-up">
+                        <h2
+                            className="text-3xl md:text-4xl font-bold text-[color:var(--color-forest)]"
+                            style={{ fontFamily: "var(--font-serif)" }}
+                        >
+                            Trays
+                        </h2>
+                        <p className="text-[color:var(--color-muted)] mt-2 text-sm">
+                            Half trays prepared for sharing
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                        {trays.map((item) => (
+                            <TrayCard key={item.name} item={item} />
                         ))}
                     </div>
                 </section>

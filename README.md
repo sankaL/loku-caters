@@ -161,11 +161,12 @@ Start the entire stack (local PostgreSQL container, backend service, and fronten
 make dev
 ```
 This command automatically runs:
-1. Local PostgreSQL container on port `5433` (to avoid conflicts with system installations)
-2. Database migrations using Alembic
-3. Database seeding with comprehensive test data when the database is empty
-4. FastAPI backend on `http://localhost:8000` (logs are piped to `/tmp/loku-backend.log`)
-5. Next.js dev server on `http://localhost:3000`
+1. Docker Desktop on macOS when it is not already running
+2. Local PostgreSQL container on port `5433` (to avoid conflicts with system installations)
+3. Database migrations using Alembic
+4. Database seeding with comprehensive test data when the database is empty
+5. FastAPI backend on `http://127.0.0.1:8001` (logs are piped to `/tmp/loku-backend.log`)
+6. Next.js dev server on `http://localhost:3000`
 
 Local development runs with `DEV_MODE=true`, so admin authentication is disabled. Production continues to use Supabase authentication. Use `make dev-local` when you want to replace existing local data with a fresh comprehensive seed before starting the stack.
 
