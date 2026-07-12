@@ -9,20 +9,8 @@ export async function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
-  // Dev mode: bypass Supabase auth, check for dev token cookie instead
+  // Local dev mode has no authentication. Production never sets this flag.
   if (process.env.NEXT_PUBLIC_DEV_MODE === "true") {
-    const devToken = request.cookies.get("dev-admin-token")?.value;
-    if (!devToken) {
-      return NextResponse.redirect(new URL("/admin/login", request.url));
-    }
-    // Lightweight expiry check on the dev JWT
-    try {
-      const [, payload] = devToken.split(".");
-      const decoded = JSON.parse(Buffer.from(payload, "base64url").toString("utf-8"));
-      if (!decoded.exp || decoded.exp * 1000 < Date.now()) throw new Error("expired");
-    } catch {
-      return NextResponse.redirect(new URL("/admin/login", request.url));
-    }
     return NextResponse.next();
   }
 

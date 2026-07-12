@@ -4,8 +4,8 @@
 
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
-        db-up db-down db-migrate db-seed db-seed-if-empty db-reset \
-        stop stop-backend-port logs-backend help
+        docker-ready db-up db-down db-migrate db-seed db-seed-if-empty db-reset \
+        stop stop-backend-port stop-frontend-port logs-backend help
 
 # ----------------------------------------------------------------------------
 # Local dev database (Docker, port 5433 to avoid conflicts with system Postgres)
@@ -15,9 +15,8 @@ LOCAL_DB_NAME  = lokucaters_dev
 LOCAL_DB_USER  = postgres
 LOCAL_DB_PASS  = postgres
 LOCAL_DB_URL   = postgresql://$(LOCAL_DB_USER):$(LOCAL_DB_PASS)@localhost:$(LOCAL_DB_PORT)/$(LOCAL_DB_NAME)
-
-# A stable secret used only for local dev JWT signing (not a real Supabase secret)
-LOCAL_JWT_SECRET = dev-secret-loku-caters-local-2026
+LOCAL_BACKEND_PORT = 8001
+LOCAL_FRONTEND_PORT = 3000
 
 # Pull real Resend credentials from the root .env so emails still go through
 # Resend's actual service (read-only, nothing is written back)
@@ -31,12 +30,16 @@ REPLY_TO_EMAIL  ?= $(shell grep -m1 '^REPLY_TO_EMAIL=' .env 2>/dev/null | cut -d
 BACKEND_DEV_ENV = \
     DATABASE_URL="$(LOCAL_DB_URL)" \
     DEV_MODE=true \
-    SUPABASE_JWT_SECRET="$(LOCAL_JWT_SECRET)" \
     RESEND_API_KEY="$(RESEND_API_KEY)" \
     FROM_EMAIL="$(FROM_EMAIL)" \
     REPLY_TO_EMAIL="$(REPLY_TO_EMAIL)" \
-    FRONTEND_URL="http://localhost:3000" \
+    FRONTEND_URL="http://localhost:$(LOCAL_FRONTEND_PORT)" \
     EMAIL_ENABLED=true
+
+FRONTEND_DEV_ENV = \
+    NEXT_PUBLIC_API_URL="http://127.0.0.1:$(LOCAL_BACKEND_PORT)" \
+    NEXT_PUBLIC_SITE_URL="http://localhost:$(LOCAL_FRONTEND_PORT)" \
+    NEXT_PUBLIC_DEV_MODE=true
 
 # ============================================================================
 # Config sync (shared)
@@ -70,14 +73,20 @@ dev: sync-config db-up db-migrate db-seed-if-empty
 	@$(MAKE) stop-backend-port
 	@echo "  Starting backend (local DB, DEV_MODE=true)..."
 	@echo "  Backend logs: /tmp/loku-backend.log"
-	@echo "  Admin dev login: POST http://localhost:8000/api/admin/dev-login"
+	@echo "  Admin auth: disabled for local development"
 	@echo ""
-	@(cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
-	    --reload --port 8000 > /tmp/loku-backend.log 2>&1 \
+	@(cd backend; $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
+	    --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT) > /tmp/loku-backend.log 2>&1 \
 	    & echo $$! > /tmp/loku-backend.pid)
-	@sleep 1
-	@echo "  Starting frontend on http://localhost:3000 ..."
-	cd frontend && npm run dev
+	@attempts=0; until curl -fsS http://127.0.0.1:$(LOCAL_BACKEND_PORT)/api/health >/dev/null 2>&1; do \
+		attempts=$$((attempts + 1)); \
+		if [ $$attempts -ge 20 ]; then echo "Backend failed to start. See /tmp/loku-backend.log"; exit 1; fi; \
+		sleep 1; \
+	done
+	@$(MAKE) stop-frontend-port
+	@echo "  Backend ready on http://127.0.0.1:$(LOCAL_BACKEND_PORT)"
+	@echo "  Starting frontend on http://localhost:$(LOCAL_FRONTEND_PORT) ..."
+	cd frontend && $(FRONTEND_DEV_ENV) npm run dev -- --port $(LOCAL_FRONTEND_PORT)
 
 # ============================================================================
 # Local dev (local Postgres container, DEV_MODE=true, real Resend)
@@ -91,29 +100,56 @@ dev-local: sync-config db-up db-migrate db-seed
 	@$(MAKE) stop-backend-port
 	@echo "  Starting backend (local DB, DEV_MODE=true)..."
 	@echo "  Backend logs: /tmp/loku-backend.log"
-	@echo "  Admin dev login: POST http://localhost:8000/api/admin/dev-login"
+	@echo "  Admin auth: disabled for local development"
 	@echo ""
-	@(cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
-	    --reload --port 8000 > /tmp/loku-backend.log 2>&1 \
+	@(cd backend; $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
+	    --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT) > /tmp/loku-backend.log 2>&1 \
 	    & echo $$! > /tmp/loku-backend.pid)
-	@sleep 1
-	@echo "  Starting frontend on http://localhost:3000 ..."
-	cd frontend && npm run dev
+	@attempts=0; until curl -fsS http://127.0.0.1:$(LOCAL_BACKEND_PORT)/api/health >/dev/null 2>&1; do \
+		attempts=$$((attempts + 1)); \
+		if [ $$attempts -ge 20 ]; then echo "Backend failed to start. See /tmp/loku-backend.log"; exit 1; fi; \
+		sleep 1; \
+	done
+	@$(MAKE) stop-frontend-port
+	@echo "  Backend ready on http://127.0.0.1:$(LOCAL_BACKEND_PORT)"
+	@echo "  Starting frontend on http://localhost:$(LOCAL_FRONTEND_PORT) ..."
+	cd frontend && $(FRONTEND_DEV_ENV) npm run dev -- --port $(LOCAL_FRONTEND_PORT)
 
 ## Start just the backend with local DB settings (foreground, with reload)
 dev-backend: sync-config stop-backend-port
-	cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --port 8000
+	cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT)
 
 ## Start just the frontend
-dev-frontend:
-	cd frontend && npm run dev
+dev-frontend: stop-frontend-port
+	cd frontend && $(FRONTEND_DEV_ENV) npm run dev -- --port $(LOCAL_FRONTEND_PORT)
 
 # ============================================================================
 # Database (local Docker Postgres)
 # ============================================================================
 
 ## Start the local Postgres container (port 5433)
-db-up:
+docker-ready:
+	@if ! docker info >/dev/null 2>&1; then \
+		if [ "$$(uname -s)" = "Darwin" ]; then \
+			echo "Docker is not running. Starting Docker Desktop..."; \
+			open -a Docker; \
+			attempts=0; \
+			until docker info >/dev/null 2>&1; do \
+				attempts=$$((attempts + 1)); \
+				if [ $$attempts -ge 60 ]; then \
+					echo "Docker Desktop did not become ready within 60 seconds."; \
+					exit 1; \
+				fi; \
+				printf '.'; sleep 1; \
+			done; \
+			echo " ready."; \
+		else \
+			echo "Docker is required. Start the Docker daemon and run make dev again."; \
+			exit 1; \
+		fi; \
+	fi
+
+db-up: docker-ready
 	@echo "Starting local PostgreSQL on port $(LOCAL_DB_PORT)..."
 	docker compose -f docker-compose.dev.yml up -d db
 	@echo "Waiting for Postgres to be ready..."
@@ -156,6 +192,7 @@ db-reset: db-up
 ## Stop the background backend process started by dev-local
 stop:
 	@$(MAKE) stop-backend-port
+	@$(MAKE) stop-frontend-port
 	@echo "Done."
 
 stop-backend-port:
@@ -163,7 +200,10 @@ stop-backend-port:
 	    kill $$(cat /tmp/loku-backend.pid) 2>/dev/null && echo "Backend stopped." || true; \
 	    rm -f /tmp/loku-backend.pid; \
 	fi
-	@-lsof -ti :8000 | xargs kill -9 2>/dev/null || true
+	@-lsof -tiTCP:$(LOCAL_BACKEND_PORT) -sTCP:LISTEN | xargs kill -9 2>/dev/null || true
+
+stop-frontend-port:
+	@-lsof -tiTCP:$(LOCAL_FRONTEND_PORT) -sTCP:LISTEN | xargs kill 2>/dev/null || true
 
 ## Tail live backend logs (when started via dev-local)
 logs-backend:
@@ -178,10 +218,11 @@ help:
 	@echo "Loku Caters -- Makefile targets"
 	@echo ""
 	@echo "  LOCAL DEV (recommended for testing):"
-	@echo "    make dev-local       Start local Postgres + backend + frontend"
+	@echo "    make dev             Start seeded local Postgres + backend + frontend"
+	@echo "    make dev-local       Reset seed data, then start the same local stack"
 	@echo "    make dev-backend     Backend only (local DB, foreground)"
 	@echo "    make dev-frontend    Frontend only"
-	@echo "    make stop            Kill background backend process"
+	@echo "    make stop            Stop frontend and backend processes"
 	@echo "    make logs-backend    Tail backend log"
 	@echo ""
 	@echo "  DATABASE:"
@@ -195,10 +236,8 @@ help:
 	@echo "    make sync-config     Copy config/event-config.json to frontend and backend"
 	@echo ""
 	@echo "  PRODUCTION-STYLE DEV (uses backend/.env + your real Supabase DB):"
-	@echo "    make dev             Background backend + foreground frontend"
 	@echo "    make restart-backend Kill port 8000 and relaunch"
 	@echo "    make sync-and-restart  sync-config + restart-backend"
 	@echo ""
-	@echo "  Admin dev login (local only, DEV_MODE=true required):"
-	@echo "    curl -s -X POST http://localhost:8000/api/admin/dev-login | jq .access_token"
+	@echo "  Admin authentication is disabled only when DEV_MODE=true."
 	@echo ""
