@@ -158,14 +158,16 @@ Follow these steps to run the application locally.
 Start the entire stack (local PostgreSQL container, backend service, and frontend development server) with a single command:
 
 ```bash
-make dev-local
+make dev
 ```
 This command automatically runs:
 1. Local PostgreSQL container on port `5433` (to avoid conflicts with system installations)
 2. Database migrations using Alembic
-3. Database seeding with comprehensive test data
+3. Database seeding with comprehensive test data when the database is empty
 4. FastAPI backend on `http://localhost:8000` (logs are piped to `/tmp/loku-backend.log`)
 5. Next.js dev server on `http://localhost:3000`
+
+Local development runs with `DEV_MODE=true`, so admin authentication is disabled. Production continues to use Supabase authentication. Use `make dev-local` when you want to replace existing local data with a fresh comprehensive seed before starting the stack.
 
 ### Useful Development Commands
 

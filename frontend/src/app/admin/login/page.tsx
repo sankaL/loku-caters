@@ -3,7 +3,6 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { API_URL } from "@/config/event";
 
 const DEV_MODE = process.env.NEXT_PUBLIC_DEV_MODE === "true";
 
@@ -43,18 +42,7 @@ export default function AdminLoginPage() {
   async function handleDevLogin() {
     setError("");
     setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/admin/dev-login`, { method: "POST" });
-      if (!res.ok) throw new Error("Dev login endpoint not available");
-      const { access_token } = await res.json();
-      // Store in cookie so middleware can read it
-      document.cookie = `dev-admin-token=${encodeURIComponent(access_token)}; path=/; max-age=${7 * 24 * 3600}`;
-      router.push("/admin/dashboard");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Dev login failed");
-    } finally {
-      setLoading(false);
-    }
+    router.push("/admin/dashboard");
   }
 
   return (

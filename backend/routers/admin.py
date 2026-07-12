@@ -69,8 +69,12 @@ def _fetch_jwks(issuer: str) -> dict:
         return json.loads(response.read().decode("utf-8"))
 
 
-def verify_admin_token(authorization: str = Header(...)) -> dict:
+def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> dict:
     """Verify that the request carries a valid Supabase-issued JWT."""
+    if settings.dev_mode:
+        return {"sub": "dev-admin", "email": "admin@dev.local", "role": "authenticated"}
+    if authorization is None:
+        raise HTTPException(status_code=401, detail="Missing Bearer token")
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     token = authorization[len("Bearer "):]
@@ -116,7 +120,7 @@ def verify_admin_token(authorization: str = Header(...)) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Dev login (local testing only -- requires DEV_MODE=true in .env)
+# Dev login retained for compatibility with older local frontend sessions.
 # ---------------------------------------------------------------------------
 
 @router.post("/dev-login")

@@ -16,9 +16,6 @@ LOCAL_DB_USER  = postgres
 LOCAL_DB_PASS  = postgres
 LOCAL_DB_URL   = postgresql://$(LOCAL_DB_USER):$(LOCAL_DB_PASS)@localhost:$(LOCAL_DB_PORT)/$(LOCAL_DB_NAME)
 
-# A stable secret used only for local dev JWT signing (not a real Supabase secret)
-LOCAL_JWT_SECRET = dev-secret-loku-caters-local-2026
-
 # Pull real Resend credentials from the root .env so emails still go through
 # Resend's actual service (read-only, nothing is written back)
 RESEND_API_KEY  ?= $(shell grep -m1 '^RESEND_API_KEY=' .env 2>/dev/null | cut -d= -f2-)
@@ -31,12 +28,16 @@ REPLY_TO_EMAIL  ?= $(shell grep -m1 '^REPLY_TO_EMAIL=' .env 2>/dev/null | cut -d
 BACKEND_DEV_ENV = \
     DATABASE_URL="$(LOCAL_DB_URL)" \
     DEV_MODE=true \
-    SUPABASE_JWT_SECRET="$(LOCAL_JWT_SECRET)" \
     RESEND_API_KEY="$(RESEND_API_KEY)" \
     FROM_EMAIL="$(FROM_EMAIL)" \
     REPLY_TO_EMAIL="$(REPLY_TO_EMAIL)" \
     FRONTEND_URL="http://localhost:3000" \
     EMAIL_ENABLED=true
+
+FRONTEND_DEV_ENV = \
+    NEXT_PUBLIC_API_URL="http://localhost:8000" \
+    NEXT_PUBLIC_SITE_URL="http://localhost:3000" \
+    NEXT_PUBLIC_DEV_MODE=true
 
 # ============================================================================
 # Config sync (shared)
@@ -70,14 +71,14 @@ dev: sync-config db-up db-migrate db-seed-if-empty
 	@$(MAKE) stop-backend-port
 	@echo "  Starting backend (local DB, DEV_MODE=true)..."
 	@echo "  Backend logs: /tmp/loku-backend.log"
-	@echo "  Admin dev login: POST http://localhost:8000/api/admin/dev-login"
+	@echo "  Admin auth: disabled for local development"
 	@echo ""
 	@(cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
 	    --reload --port 8000 > /tmp/loku-backend.log 2>&1 \
 	    & echo $$! > /tmp/loku-backend.pid)
 	@sleep 1
 	@echo "  Starting frontend on http://localhost:3000 ..."
-	cd frontend && npm run dev
+	cd frontend && $(FRONTEND_DEV_ENV) npm run dev
 
 # ============================================================================
 # Local dev (local Postgres container, DEV_MODE=true, real Resend)
@@ -91,14 +92,14 @@ dev-local: sync-config db-up db-migrate db-seed
 	@$(MAKE) stop-backend-port
 	@echo "  Starting backend (local DB, DEV_MODE=true)..."
 	@echo "  Backend logs: /tmp/loku-backend.log"
-	@echo "  Admin dev login: POST http://localhost:8000/api/admin/dev-login"
+	@echo "  Admin auth: disabled for local development"
 	@echo ""
 	@(cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
 	    --reload --port 8000 > /tmp/loku-backend.log 2>&1 \
 	    & echo $$! > /tmp/loku-backend.pid)
 	@sleep 1
 	@echo "  Starting frontend on http://localhost:3000 ..."
-	cd frontend && npm run dev
+	cd frontend && $(FRONTEND_DEV_ENV) npm run dev
 
 ## Start just the backend with local DB settings (foreground, with reload)
 dev-backend: sync-config stop-backend-port
@@ -106,7 +107,7 @@ dev-backend: sync-config stop-backend-port
 
 ## Start just the frontend
 dev-frontend:
-	cd frontend && npm run dev
+	cd frontend && $(FRONTEND_DEV_ENV) npm run dev
 
 # ============================================================================
 # Database (local Docker Postgres)
@@ -178,7 +179,8 @@ help:
 	@echo "Loku Caters -- Makefile targets"
 	@echo ""
 	@echo "  LOCAL DEV (recommended for testing):"
-	@echo "    make dev-local       Start local Postgres + backend + frontend"
+	@echo "    make dev             Start seeded local Postgres + backend + frontend"
+	@echo "    make dev-local       Reset seed data, then start the same local stack"
 	@echo "    make dev-backend     Backend only (local DB, foreground)"
 	@echo "    make dev-frontend    Frontend only"
 	@echo "    make stop            Kill background backend process"
@@ -195,10 +197,8 @@ help:
 	@echo "    make sync-config     Copy config/event-config.json to frontend and backend"
 	@echo ""
 	@echo "  PRODUCTION-STYLE DEV (uses backend/.env + your real Supabase DB):"
-	@echo "    make dev             Background backend + foreground frontend"
 	@echo "    make restart-backend Kill port 8000 and relaunch"
 	@echo "    make sync-and-restart  sync-config + restart-backend"
 	@echo ""
-	@echo "  Admin dev login (local only, DEV_MODE=true required):"
-	@echo "    curl -s -X POST http://localhost:8000/api/admin/dev-login | jq .access_token"
+	@echo "  Admin authentication is disabled only when DEV_MODE=true."
 	@echo ""
