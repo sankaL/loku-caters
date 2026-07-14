@@ -7,11 +7,19 @@ from event_config import CURRENCY
 resend.api_key = settings.resend_api_key
 
 
+def _html_text(value) -> str:
+    return escape(str(value or ""))
+
+
+def _subject_text(value) -> str:
+    return " ".join(str(value or "").replace("\r", " ").replace("\n", " ").split())[:200]
+
+
 def _send_html_email(*, to_email: str, subject: str, html_body: str) -> None:
     message_payload = {
         "from": f"Loku Caters <{settings.from_email}>",
         "to": [to_email],
-        "subject": subject,
+        "subject": _subject_text(subject),
         "html": html_body,
     }
 
@@ -54,17 +62,17 @@ def _normalize_order_lines(order_data: dict) -> list[dict]:
 
 
 def _build_order_summary_html(order_data: dict) -> str:
-    currency = order_data.get("currency") or CURRENCY
+    currency = _html_text(order_data.get("currency") or CURRENCY)
     lines = _normalize_order_lines(order_data)
     subtotal = float(order_data.get("subtotal", sum(line["base_total"] for line in lines)) or 0)
     discount_total = float(order_data.get("discount_total", sum(line["discount_total"] for line in lines)) or 0)
     grand_total = float(order_data.get("total_price", sum(line["total_price"] for line in lines)) or 0)
     has_combo_discounts = bool(order_data.get("has_combo_discounts"))
     has_manual_pricing = bool(order_data.get("has_manual_pricing"))
-    event_date = order_data.get("event_date", "")
-    pickup_location = order_data.get("pickup_location", "")
-    pickup_time_slot = order_data.get("pickup_time_slot", "")
-    address = order_data.get("address", "")
+    event_date = _html_text(order_data.get("event_date", ""))
+    pickup_location = _html_text(order_data.get("pickup_location", ""))
+    pickup_time_slot = _html_text(order_data.get("pickup_time_slot", ""))
+    address = _html_text(order_data.get("address", ""))
 
     location_display = pickup_location
     if address:
@@ -73,7 +81,7 @@ def _build_order_summary_html(order_data: dict) -> str:
     item_rows_html = "".join(
         f"""
                       <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">{line['item_name']} x {line['quantity']}</td>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">{_html_text(line['item_name'])} x {line['quantity']}</td>
                         <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${line['total_price']:.2f}</td>
                       </tr>
 """
@@ -145,7 +153,7 @@ def _build_order_summary_html(order_data: dict) -> str:
 
 def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -> str:
     etransfer_enabled = bool(order_data.get("etransfer_enabled"))
-    etransfer_email = str(order_data.get("etransfer_email") or "").strip()
+    etransfer_email = _html_text(str(order_data.get("etransfer_email") or "").strip())
     pickup_completed = bool(order_data.get("pickup_completed"))
     if not etransfer_enabled or not etransfer_email:
         return ""
@@ -189,12 +197,12 @@ def send_confirmation(order_data: dict) -> None:
         print("[email] Email delivery disabled by EMAIL_ENABLED=false")
         return
 
-    name = order_data["name"]
+    name = _html_text(order_data["name"])
     email = order_data["email"]
     etransfer_section_html = _build_etransfer_section_html(order_data)
     summary_html = _build_order_summary_html(order_data)
     order_lines = _normalize_order_lines(order_data)
-    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Pre-Order"
+    subject_line_name = _subject_text(order_lines[0]["item_name"]) if len(order_lines) == 1 else "Loku Caters Pre-Order"
 
     html_body = f"""
 <!DOCTYPE html>
@@ -263,13 +271,13 @@ def send_reminder(order_data: dict) -> None:
         print("[email] Email delivery disabled by EMAIL_ENABLED=false")
         return
 
-    name = order_data["name"]
+    name = _html_text(order_data["name"])
     email = order_data["email"]
-    event_date = order_data.get("event_date", "")
+    event_date = _html_text(order_data.get("event_date", ""))
     etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
     summary_html = _build_order_summary_html(order_data)
-    pickup_location = order_data.get("pickup_location", "")
-    address = order_data.get("address", "")
+    pickup_location = _html_text(order_data.get("pickup_location", ""))
+    address = _html_text(order_data.get("address", ""))
     location_display = pickup_location
     if address:
         location_display = f"{pickup_location} - {address}"
@@ -286,7 +294,7 @@ def send_reminder(order_data: dict) -> None:
             "We look forward to seeing you soon!"
         )
     order_lines = _normalize_order_lines(order_data)
-    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
+    subject_line_name = _subject_text(order_lines[0]["item_name"]) if len(order_lines) == 1 else "Loku Caters Order"
 
     html_body = f"""
 <!DOCTYPE html>
@@ -354,14 +362,14 @@ def send_payment_reminder(order_data: dict) -> None:
         print("[email] Email delivery disabled by EMAIL_ENABLED=false")
         return
 
-    name = order_data["name"]
+    name = _html_text(order_data["name"])
     email = order_data["email"]
-    event_date = order_data.get("event_date", "")
+    event_date = _html_text(order_data.get("event_date", ""))
     pickup_completed = bool(order_data.get("pickup_completed"))
     etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
     summary_html = _build_order_summary_html(order_data)
     order_lines = _normalize_order_lines(order_data)
-    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
+    subject_line_name = _subject_text(order_lines[0]["item_name"]) if len(order_lines) == 1 else "Loku Caters Order"
     pickup_sentence_html = ""
     if event_date:
         pickup_sentence_html = (

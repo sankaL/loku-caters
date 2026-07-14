@@ -117,6 +117,22 @@ class PricingTests(unittest.TestCase):
         self.assertEqual(result["discount_total"], 6.0)
         self.assertEqual(result["applied_combos"][0]["application_count"], 2)
 
+    def test_maximum_public_quantity_handles_repeatable_unit_combo(self):
+        result = price_cart(
+            [PricingLineInput(line_id="roll", item_id="roll", quantity=250)],
+            [
+                {
+                    "id": "single-roll",
+                    "name": "Single Roll",
+                    "enabled": True,
+                    "sort_order": 0,
+                    "requirements": [{"item_id": "roll", "min_quantity": 1}],
+                    "discount": {"type": "fixed_amount", "amount": 0.01, "applies_to": "combo_total"},
+                }
+            ],
+        )
+        self.assertEqual(result["applied_combos"][0]["application_count"], 250)
+
     def test_percentage_combo_total_discount(self):
         result = price_cart(
             [

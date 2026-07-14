@@ -6,6 +6,7 @@ import { API_URL } from "@/config/event";
 import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
 import Modal from "@/components/ui/Modal";
 import { getAdminToken } from "@/lib/auth";
+import { runAdminBulkBatches } from "@/lib/adminBulk";
 import {
   CATERING_BUDGET_RANGES,
   CATERING_EVENT_TYPES,
@@ -793,54 +794,65 @@ export default function AdminCateringRequestsPage() {
   async function handleBulkDelete() {
     const ids = Array.from(selectedIds);
     const headers = await getAuthHeader();
+    let deleted = 0;
 
     try {
-      const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-delete`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
+      await runAdminBulkBatches(ids, async (batch) => {
+        const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-delete`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: batch }),
+        });
+        if (!res.ok) throw new Error("Failed");
+      }, (batch) => {
+        const batchSet = new Set(batch);
+        setData((prev) => {
+          if (!prev) return prev;
+          return rebuildData(prev, prev.items.filter((item) => !batchSet.has(item.id)));
+        });
+        setSelectedIds((prev) => {
+          const next = new Set(prev);
+          for (const id of batch) next.delete(id);
+          return next;
+        });
+        if (expandedId && batchSet.has(expandedId)) setExpandedId(null);
+        deleted += batch.length;
       });
-      if (!res.ok) throw new Error("Failed");
-
-      const idSet = new Set(ids);
-      setData((prev) => {
-        if (!prev) return prev;
-        const nextItems = prev.items.filter((item) => !idSet.has(item.id));
-        return rebuildData(prev, nextItems);
-      });
-      setSelectedIds(new Set());
-      if (expandedId && idSet.has(expandedId)) setExpandedId(null);
       setShowBulkDeleteModal(false);
       showToast(`${ids.length} request${ids.length === 1 ? "" : "s"} deleted`, "success");
     } catch {
-      showToast("Failed to delete requests", "error");
+      showToast(deleted > 0 ? `Deleted ${deleted}; ${ids.length - deleted} failed` : "Failed to delete requests", "error");
     }
   }
 
   async function handleBulkStatus() {
     const ids = Array.from(selectedIds);
     const headers = await getAuthHeader();
+    let updated = 0;
 
     try {
-      const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-status`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, status: bulkStatusTarget }),
-      });
-      if (!res.ok) throw new Error("Failed");
-
-      const idSet = new Set(ids);
-      setData((prev) => {
-        if (!prev) return prev;
-        const nextItems = prev.items.map((item) => (
-          idSet.has(item.id) ? { ...item, status: bulkStatusTarget } : item
-        ));
-        return rebuildData(prev, nextItems);
+      await runAdminBulkBatches(ids, async (batch) => {
+        const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-status`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/json" },
+          body: JSON.stringify({ ids: batch, status: bulkStatusTarget }),
+        });
+        if (!res.ok) throw new Error("Failed");
+      }, (batch) => {
+        const batchSet = new Set(batch);
+        setData((prev) => {
+          if (!prev) return prev;
+          const nextItems = prev.items.map((item) => (
+            batchSet.has(item.id) ? { ...item, status: bulkStatusTarget } : item
+          ));
+          return rebuildData(prev, nextItems);
+        });
+        updated += batch.length;
       });
       setShowBulkStatusModal(false);
       showToast(`${ids.length} request${ids.length === 1 ? "" : "s"} updated`, "success");
     } catch {
-      showToast("Failed to update requests", "error");
+      showToast(updated > 0 ? `Updated ${updated}; ${ids.length - updated} failed` : "Failed to update requests", "error");
     }
   }
 

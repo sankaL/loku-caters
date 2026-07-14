@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-export interface SearchableSelectOption {
+interface SearchableSelectOption {
   value: string;
   label: string;
 }

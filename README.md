@@ -189,7 +189,12 @@ make stop
 
 # Tail live backend logs
 make logs-backend
+
+# Run backend tests with the Makefile-managed local environment
+make test-backend
 ```
+
+Production admin authentication pins tokens to `SUPABASE_URL`. Set `ADMIN_EMAILS` to the comma-separated administrator account list, and set `RATE_LIMIT_TRUSTED_PROXY_HOPS=1` for the Railway proxy topology. The backend derives the Supabase project URL from the documented database URL when `SUPABASE_URL` is omitted, but the explicit value is preferred.
 
 ---
 

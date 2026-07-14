@@ -4,7 +4,7 @@
 
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
-        docker-ready db-up db-down db-migrate db-seed db-seed-if-empty db-reset \
+        docker-ready db-up db-down db-migrate db-seed db-seed-if-empty db-reset test-backend \
         stop stop-backend-port stop-frontend-port logs-backend help
 
 # ----------------------------------------------------------------------------
@@ -117,7 +117,7 @@ dev-local: sync-config db-up db-migrate db-seed
 
 ## Start just the backend with local DB settings (foreground, with reload)
 dev-backend: sync-config stop-backend-port
-	cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT)
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT)
 
 ## Start just the frontend
 dev-frontend: stop-frontend-port
@@ -165,15 +165,15 @@ db-down:
 
 ## Run Alembic migrations against the local DB
 db-migrate: sync-config
-	cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
 
 ## Seed the local DB with comprehensive test data (removes existing orders first)
 db-seed:
-	cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py
+	@cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py
 
 ## Seed the local DB with comprehensive test data only if it is empty
 db-seed-if-empty:
-	cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py --only-if-empty
+	@cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py --only-if-empty
 
 ## Drop all tables, re-run migrations, and seed fresh test data
 db-reset: db-up
@@ -184,6 +184,10 @@ db-reset: db-up
 	@$(MAKE) db-migrate
 	@$(MAKE) db-seed
 	@echo "Database reset and seeded."
+
+## Run backend tests against the migrated local database
+test-backend: sync-config db-up db-migrate
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m pytest -q
 
 # ============================================================================
 # Process management
@@ -231,6 +235,7 @@ help:
 	@echo "    make db-migrate      Run Alembic migrations on local DB"
 	@echo "    make db-seed         Insert comprehensive test data (clears existing first)"
 	@echo "    make db-reset        Drop schema + migrate + seed (full wipe)"
+	@echo "    make test-backend    Run backend tests against the local database"
 	@echo ""
 	@echo "  CONFIG:"
 	@echo "    make sync-config     Copy config/event-config.json to frontend and backend"

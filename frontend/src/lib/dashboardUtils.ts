@@ -172,57 +172,6 @@ export function filterOpenOrders(orders: Order[]): Order[] {
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 }
 
-export function computeOrdersOverTime(
-  orders: Order[],
-  range: "7d" | "30d" | "1y"
-): { date: string; label: string; count: number; revenue: number }[] {
-  const now = new Date();
-  now.setHours(23, 59, 59, 999);
-
-  if (range === "1y") {
-    // Monthly buckets for past 12 months
-    const buckets: { key: string; label: string; count: number; revenue: number }[] = [];
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-      buckets.push({ key, label: MONTH_NAMES[d.getMonth()], count: 0, revenue: 0 });
-    }
-    for (const o of orders) {
-      const key = o.created_at.substring(0, 7);
-      const bucket = buckets.find((b) => b.key === key);
-      if (bucket) {
-        bucket.count++;
-        bucket.revenue += o.total_price;
-      }
-    }
-    return buckets.map(({ key, label, count, revenue }) => ({ date: key, label, count, revenue }));
-  }
-
-  // Daily buckets
-  const days = range === "7d" ? 7 : 30;
-  const buckets: { date: string; label: string; count: number; revenue: number }[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    const dateStr = toLocalDateKey(d);
-    const label = `${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
-    buckets.push({ date: dateStr, label, count: 0, revenue: 0 });
-  }
-
-  for (const o of orders) {
-    const createdAt = new Date(o.created_at);
-    if (Number.isNaN(createdAt.getTime())) continue;
-    const dateStr = toLocalDateKey(createdAt);
-    const bucket = buckets.find((b) => b.date === dateStr);
-    if (bucket) {
-      bucket.count++;
-      bucket.revenue += o.total_price;
-    }
-  }
-
-  return buckets;
-}
-
 export interface RevenueTimePoint {
   date: string;
   label: string;

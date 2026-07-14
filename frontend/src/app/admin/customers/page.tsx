@@ -6,6 +6,7 @@ import Modal from "@/components/ui/Modal";
 import { API_URL, fetchEventConfig, type EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
+import { runAdminBulkBatches } from "@/lib/adminBulk";
 import type { Customer } from "@/lib/customers";
 
 const EVENT_REMINDER_SEND_INTERVAL_MS = 500;
@@ -298,6 +299,7 @@ export default function AdminCustomersPage() {
     if (ids.length === 0) return;
 
     setBulkDeleting(true);
+    let deleted = 0;
     try {
       const token = await getAdminToken();
       if (!token) {
@@ -305,30 +307,43 @@ export default function AdminCustomersPage() {
         return;
       }
 
-      const res = await fetch(`${API_URL}/api/admin/customers/bulk-delete`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
+      await runAdminBulkBatches(
+        ids,
+        async (batch) => {
+          const res = await fetch(`${API_URL}/api/admin/customers/bulk-delete`, {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ ids: batch }),
+          });
+
+          if (res.status === 401) {
+            router.push("/admin/login");
+            throw new Error("Administrator session expired");
+          }
+          if (!res.ok) {
+            throw new Error(await getApiErrorMessage(res, "Failed to delete customers"));
+          }
         },
-        body: JSON.stringify({ ids }),
-      });
+        (batch) => {
+          const batchSet = new Set(batch);
+          setCustomers((prev) => prev.filter((customer) => !batchSet.has(customer.id)));
+          setSelectedIds((prev) => {
+            const next = new Set(prev);
+            for (const id of batch) next.delete(id);
+            return next;
+          });
+          deleted += batch.length;
+        },
+      );
 
-      if (res.status === 401) {
-        router.push("/admin/login");
-        return;
-      }
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to delete customers"));
-      }
-
-      const idSet = new Set(ids);
-      setCustomers((prev) => prev.filter((customer) => !idSet.has(customer.id)));
-      setSelectedIds(new Set());
       setShowBulkDeleteModal(false);
       showToast(`${ids.length} customer${ids.length === 1 ? "" : "s"} deleted`, "success");
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to delete customers", "error");
+      const message = err instanceof Error ? err.message : "Failed to delete customers";
+      showToast(deleted > 0 ? `Deleted ${deleted}; ${ids.length - deleted} failed. ${message}` : message, "error");
     } finally {
       setBulkDeleting(false);
     }

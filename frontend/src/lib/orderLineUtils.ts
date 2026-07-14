@@ -31,20 +31,6 @@ export function linesFromQuantities<TItem extends { id: string }>(
     .filter((line) => line.qty > 0);
 }
 
-export function aggregateQuantitiesFromOrders<TOrder extends { item_id: string; quantity: number }>(
-  orders: TOrder[]
-): Record<string, number> {
-  const aggregated: Record<string, number> = {};
-  for (const order of orders) {
-    const itemId = String(order.item_id || "").trim();
-    if (!itemId) continue;
-    const qty = Number(order.quantity);
-    if (!Number.isFinite(qty) || qty <= 0) continue;
-    aggregated[itemId] = (aggregated[itemId] ?? 0) + qty;
-  }
-  return aggregated;
-}
-
 export interface LegacyOrderLineSource {
   item_id: string;
   item_name: string;

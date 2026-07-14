@@ -179,9 +179,12 @@ class ComboDealModel(BaseModel):
         return self
 
 
+MAX_CART_TOTAL_QUANTITY = 250
+
+
 class CartLine(BaseModel):
-    item_id: str
-    quantity: int
+    item_id: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(ge=1, le=MAX_CART_TOTAL_QUANTITY)
 
     @field_validator("item_id")
     @classmethod
@@ -210,16 +213,18 @@ def _validate_unique_cart_line_items(lines: list[CartLine]) -> list[CartLine]:
     if duplicate_item_ids:
         duplicates = ", ".join(sorted(duplicate_item_ids))
         raise ValueError(f"Duplicate cart lines are not allowed: {duplicates}")
+    if sum(line.quantity for line in lines) > MAX_CART_TOTAL_QUANTITY:
+        raise ValueError(f"Cart quantity cannot exceed {MAX_CART_TOTAL_QUANTITY}")
     return lines
 
 
 class OrderCreate(BaseModel):
-    name: str
-    item_id: str
-    quantity: int
-    pickup_location: str
-    pickup_time_slot: str
-    phone_number: Optional[str] = None
+    name: str = Field(min_length=1, max_length=200)
+    item_id: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(ge=1, le=MAX_CART_TOTAL_QUANTITY)
+    pickup_location: str = Field(min_length=1, max_length=200)
+    pickup_time_slot: str = Field(min_length=1, max_length=100)
+    phone_number: Optional[str] = Field(default=None, max_length=50)
     email: EmailStr
 
     @field_validator("quantity")
@@ -253,7 +258,7 @@ class OrderResponse(BaseModel):
 
 
 class OrderQuoteRequest(BaseModel):
-    lines: list[CartLine] = Field(default_factory=list)
+    lines: list[CartLine] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def validate_quote_lines(self) -> "OrderQuoteRequest":
@@ -262,12 +267,12 @@ class OrderQuoteRequest(BaseModel):
 
 
 class OrderCheckoutCreate(BaseModel):
-    name: str
-    pickup_location: str
-    pickup_time_slot: str
-    phone_number: Optional[str] = None
+    name: str = Field(min_length=1, max_length=200)
+    pickup_location: str = Field(min_length=1, max_length=200)
+    pickup_time_slot: str = Field(min_length=1, max_length=100)
+    phone_number: Optional[str] = Field(default=None, max_length=50)
     email: EmailStr
-    lines: list[CartLine] = Field(default_factory=list)
+    lines: list[CartLine] = Field(default_factory=list, max_length=50)
 
     @field_validator("name", "pickup_location", "pickup_time_slot")
     @classmethod
@@ -616,14 +621,14 @@ LEGACY_CONTACT_SUBJECT_TO_TYPE = {
 
 
 class FeedbackCreate(BaseModel):
-    origin: Optional[str] = None
-    feedback_type: Optional[str] = None
-    order_id: Optional[str] = None
-    name: Optional[str] = None
-    contact: Optional[str] = None
-    reason: Optional[str] = None
-    other_details: Optional[str] = None
-    message: Optional[str] = None
+    origin: Optional[str] = Field(default=None, max_length=50)
+    feedback_type: Optional[str] = Field(default=None, max_length=50)
+    order_id: Optional[str] = Field(default=None, max_length=100)
+    name: Optional[str] = Field(default=None, max_length=200)
+    contact: Optional[str] = Field(default=None, max_length=320)
+    reason: Optional[str] = Field(default=None, max_length=100)
+    other_details: Optional[str] = Field(default=None, max_length=2000)
+    message: Optional[str] = Field(default=None, max_length=5000)
     rating: Optional[int] = None
 
     @field_validator("origin", "feedback_type", mode="before")
@@ -703,8 +708,8 @@ class FeedbackReviewVisibilityUpdate(BaseModel):
 
 
 class CustomerEventReminderRequest(BaseModel):
-    location_ids: list[str]
-    item_ids: list[str]
+    location_ids: list[str] = Field(max_length=500)
+    item_ids: list[str] = Field(max_length=500)
 
     @field_validator("location_ids", "item_ids")
     @classmethod
@@ -828,15 +833,15 @@ def normalize_feedback_create(
 
 
 class CateringRequestCreate(BaseModel):
-    first_name: str
-    last_name: str
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
     email: EmailStr
-    phone_number: Optional[str] = None
-    event_date: str
-    guest_count: int
-    event_type: str
-    budget_range: Optional[str] = None
-    special_requests: Optional[str] = None
+    phone_number: Optional[str] = Field(default=None, max_length=50)
+    event_date: str = Field(min_length=1, max_length=50)
+    guest_count: int = Field(ge=1, le=100_000)
+    event_type: str = Field(min_length=1, max_length=100)
+    budget_range: Optional[str] = Field(default=None, max_length=100)
+    special_requests: Optional[str] = Field(default=None, max_length=5000)
 
     @field_validator("guest_count")
     @classmethod
@@ -873,7 +878,7 @@ class CateringRequestStatusUpdate(BaseModel):
 
 
 class CateringRequestCommentCreate(BaseModel):
-    comment: str
+    comment: str = Field(min_length=1, max_length=5000)
 
     @field_validator("comment")
     @classmethod

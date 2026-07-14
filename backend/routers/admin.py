@@ -1,14 +1,19 @@
 from datetime import date, datetime, timedelta, timezone
 import json
+import logging
+import socket
+from threading import Lock
+import time
 import uuid
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from typing import Any, Optional, Union, Literal
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
-from jose import JWTError, jwt
-from pydantic import BaseModel, EmailStr, field_validator, model_validator
+import jwt
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import func, or_, case
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -56,6 +61,13 @@ from services.event_planning import (
 from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart, serialize_combo_deals
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
+
+_JWKS_REFRESH_INTERVAL_SECONDS = 60
+_jwks_refresh_lock = Lock()
+_jwks_last_refresh: dict[str, float] = {}
+_jwks_failure_until: dict[str, float] = {}
+_jwks_last_good: dict[str, dict] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -65,8 +77,94 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 @lru_cache(maxsize=8)
 def _fetch_jwks(issuer: str) -> dict:
     url = issuer.rstrip("/") + "/.well-known/jwks.json"
-    with urlopen(url, timeout=5) as response:
+    # The issuer is canonical server configuration, never request-controlled input.
+    with urlopen(url, timeout=5) as response:  # nosec B310
         return json.loads(response.read().decode("utf-8"))
+
+
+def _load_jwks(issuer: str) -> dict:
+    try:
+        jwks = _fetch_jwks(issuer)
+    except (
+        HTTPError,
+        URLError,
+        TimeoutError,
+        socket.timeout,
+        json.JSONDecodeError,
+        UnicodeDecodeError,
+    ) as exc:
+        logger.warning("Supabase JWKS lookup failed: %s", type(exc).__name__)
+        raise HTTPException(
+            status_code=503,
+            detail="Admin authentication is temporarily unavailable",
+        ) from exc
+
+    if not isinstance(jwks, dict) or not isinstance(jwks.get("keys"), list):
+        logger.warning("Supabase JWKS response had an invalid shape")
+        raise HTTPException(
+            status_code=503,
+            detail="Admin authentication is temporarily unavailable",
+        )
+    return jwks
+
+
+def _find_jwk(issuer: str, kid: Optional[str]) -> Optional[dict]:
+    now = time.monotonic()
+    with _jwks_refresh_lock:
+        if _jwks_failure_until.get(issuer, 0.0) > now:
+            jwks = _jwks_last_good.get(issuer)
+            if jwks is None:
+                raise HTTPException(
+                    status_code=503,
+                    detail="Admin authentication is temporarily unavailable",
+                )
+        else:
+            try:
+                jwks = _load_jwks(issuer)
+            except HTTPException:
+                _jwks_failure_until[issuer] = now + _JWKS_REFRESH_INTERVAL_SECONDS
+                jwks = _jwks_last_good.get(issuer)
+                if jwks is None:
+                    raise
+            else:
+                _jwks_last_good[issuer] = jwks
+                _jwks_failure_until.pop(issuer, None)
+
+        key_data = next(
+            (key for key in jwks["keys"] if isinstance(key, dict) and key.get("kid") == kid),
+            None,
+        )
+        if key_data is not None:
+            return key_data
+
+        last_refresh = _jwks_last_refresh.get(issuer, 0.0)
+        if now - last_refresh < _JWKS_REFRESH_INTERVAL_SECONDS:
+            return None
+
+        _jwks_last_refresh[issuer] = now
+        _fetch_jwks.cache_clear()
+        try:
+            jwks = _load_jwks(issuer)
+        except HTTPException:
+            _jwks_failure_until[issuer] = now + _JWKS_REFRESH_INTERVAL_SECONDS
+            return None
+        _jwks_last_good[issuer] = jwks
+        _jwks_failure_until.pop(issuer, None)
+        return next(
+            (key for key in jwks["keys"] if isinstance(key, dict) and key.get("kid") == kid),
+            None,
+        )
+
+
+def _validate_admin_claims(claims: dict) -> dict:
+    if claims.get("role") != "authenticated":
+        raise HTTPException(status_code=403, detail="Administrator access required")
+
+    admin_emails = settings.get_admin_email_allowlist()
+    token_email = str(claims.get("email") or "").strip().lower()
+    if admin_emails and token_email not in admin_emails:
+        raise HTTPException(status_code=403, detail="Administrator access required")
+    return claims
 
 
 def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> dict:
@@ -78,7 +176,15 @@ def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> d
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     token = authorization[len("Bearer "):]
+    if not token or token != token.strip():
+        raise HTTPException(status_code=401, detail="Invalid Bearer token")
+
     try:
+        try:
+            expected_issuer = settings.get_supabase_issuer()
+        except ValueError as exc:
+            raise HTTPException(status_code=503, detail="Admin authentication is not configured") from exc
+
         header = jwt.get_unverified_header(token)
         alg = header.get("alg")
 
@@ -86,37 +192,39 @@ def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> d
         if alg == "HS256":
             if not settings.supabase_jwt_secret:
                 raise HTTPException(status_code=401, detail="Server missing JWT secret")
-            return jwt.decode(
-                token,
-                settings.supabase_jwt_secret,
-                algorithms=["HS256"],
-                options={"verify_aud": False},
+            if len(settings.supabase_jwt_secret.encode("utf-8")) < 32:
+                raise HTTPException(status_code=503, detail="Admin authentication is not configured")
+            return _validate_admin_claims(
+                jwt.decode(
+                    token,
+                    settings.supabase_jwt_secret,
+                    algorithms=["HS256"],
+                    issuer=expected_issuer,
+                    audience="authenticated",
+                )
             )
 
         # Modern Supabase projects (asymmetric JWT signing)
         if alg in {"RS256", "ES256"}:
-            unverified_claims = jwt.get_unverified_claims(token)
-            issuer = unverified_claims.get("iss")
-            if not issuer:
-                raise HTTPException(status_code=401, detail="Token missing issuer")
-
-            jwks = _fetch_jwks(issuer)
             kid = header.get("kid")
-            key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
-            if key is None:
-                raise HTTPException(status_code=401, detail="Signing key not found")
+            key_data = _find_jwk(expected_issuer, kid)
+            if key_data is None:
+                raise HTTPException(status_code=401, detail="Invalid token")
+            key = jwt.PyJWK.from_dict(key_data).key
 
-            return jwt.decode(
-                token,
-                key,
-                algorithms=[alg],
-                issuer=issuer,
-                options={"verify_aud": False},
+            return _validate_admin_claims(
+                jwt.decode(
+                    token,
+                    key,
+                    algorithms=[alg],
+                    issuer=expected_issuer,
+                    audience="authenticated",
+                )
             )
 
-        raise HTTPException(status_code=401, detail=f"Unsupported token algorithm: {alg}")
-    except JWTError as exc:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {exc}")
+        raise HTTPException(status_code=401, detail="Unsupported token algorithm")
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
 
 
 # ---------------------------------------------------------------------------
@@ -198,7 +306,7 @@ class PaymentUpdate(BaseModel):
         return self
 
 class BulkCustomerDeleteRequest(BaseModel):
-    ids: list[str]
+    ids: list[str] = Field(max_length=500)
 
     @field_validator("ids")
     @classmethod
@@ -391,24 +499,24 @@ class AdminOrderUpdate(BaseModel):
 
 
 class BulkRemindRequest(BaseModel):
-    order_ids: list[str]
+    order_ids: list[str] = Field(max_length=500)
 
 
 class FeedbackBulkDeleteRequest(BaseModel):
-    ids: list[str]
+    ids: list[str] = Field(max_length=500)
 
 
 class FeedbackBulkStatusRequest(BaseModel):
-    ids: list[str]
+    ids: list[str] = Field(max_length=500)
     status: str
 
 
 class CateringRequestBulkDeleteRequest(BaseModel):
-    ids: list[str]
+    ids: list[str] = Field(max_length=500)
 
 
 class CateringRequestBulkStatusRequest(BaseModel):
-    ids: list[str]
+    ids: list[str] = Field(max_length=500)
     status: str
 
 

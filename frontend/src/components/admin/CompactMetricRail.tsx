@@ -2,9 +2,9 @@
 
 import type { CSSProperties, ReactNode } from "react";
 
-export const COMPACT_METRIC_MIN_WIDTH = 120;
-export const COMPACT_METRIC_GAP = 14;
-export const COMPACT_METRIC_RADIUS = 20;
+const COMPACT_METRIC_MIN_WIDTH = 120;
+const COMPACT_METRIC_GAP = 14;
+const COMPACT_METRIC_RADIUS = 20;
 
 interface CompactMetricRailProps {
   children: ReactNode;
