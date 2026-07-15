@@ -1,12 +1,17 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
-import { CompactMetricCard, CompactMetricRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
-import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDeleteIconButton, AdminPagination, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
+import { CompactMetricCard, CompactMetricRail, CompactMetricSkeletonRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
+import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDateCell, AdminDeleteIconButton, AdminPagination, AdminRowCheckboxCell, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
 import Modal from "@/components/ui/Modal";
 import { usePendingStatusChange } from "@/hooks/usePendingStatusChange";
+import { useObjectState } from "@/hooks/useObjectState";
+import { usePageSelection } from "@/hooks/usePageSelection";
+import { useAdminToast } from "@/hooks/useAdminToast";
+import { loadAuthenticatedAdminResource } from "@/lib/adminCrud";
+import { filterAdminItemsBySearch } from "@/lib/adminSearch";
 import { getAdminToken } from "@/lib/auth";
 import {
   postAdminBulkDelete,
@@ -14,7 +19,6 @@ import {
   removeItemsByIds,
   removeSelectedIds,
   runAdminBulkAction,
-  toggleSelectedId,
   updateItemStatuses,
 } from "@/lib/adminBulk";
 import {
@@ -71,27 +75,13 @@ const STATUS_OPTIONS: Array<{ value: CateringRequestStatus; label: string }> = [
 const PAGE_SIZE = 15;
 const COL_COUNT = 11;
 type SetCateringData = Dispatch<SetStateAction<CateringRequestsResponse | null>>;
-type CateringToast = { message: string; type: "success" | "error" } | null;
-
-function useObjectState<TState>(initialState: TState) {
-  const [state, setState] = useState(initialState);
-  const setField = useCallback(function setField<TKey extends keyof TState>(key: TKey, value: SetStateAction<TState[TKey]>) {
-    setState((previous) => ({
-      ...previous,
-      [key]: typeof value === "function"
-        ? (value as (current: TState[TKey]) => TState[TKey])(previous[key])
-        : value,
-    }));
-  }, []);
-  return [state, setField] as const;
-}
 
 function useCateringResource() {
   const router = useRouter();
   const [resource, setResource] = useObjectState({ data: null as CateringRequestsResponse | null, loading: true, error: "" });
   const setData: SetCateringData = useCallback((value) => setResource("data", value), [setResource]);
   useEffect(() => {
-    void loadCateringRequests(setData, (value) => setResource("error", value), (value) => setResource("loading", value), () => router.push("/admin/login"));
+    void loadAuthenticatedAdminResource<CateringRequestsResponse>({ resourcePath: "/api/admin/catering-requests", failureMessage: "Could not load catering requests. Please refresh.", setLoading: (value) => setResource("loading", value), setError: (value) => setResource("error", value), onLoaded: setData, onUnauthorized: () => router.push("/admin/login") });
   }, [router, setData, setResource]);
   return { ...resource, setData };
 }
@@ -112,25 +102,14 @@ function useCateringFilters(data: CateringRequestsResponse | null) {
 }
 
 function useCateringSelection(paginated: CateringRequestItem[]) {
-  const [selection, setSelection] = useObjectState({ selectedIds: new Set<string>(), expandedId: null as string | null });
-  const headerCheckboxRef = useRef<HTMLInputElement>(null);
-  const allOnPageSelected = paginated.length > 0 && paginated.every((item) => selection.selectedIds.has(item.id));
-  const someOnPageSelected = paginated.some((item) => selection.selectedIds.has(item.id));
-  useEffect(() => {
-    if (headerCheckboxRef.current) headerCheckboxRef.current.indeterminate = someOnPageSelected && !allOnPageSelected;
-  }, [allOnPageSelected, someOnPageSelected]);
-  return { selection, setSelection, headerCheckboxRef, allOnPageSelected };
+  const selection = usePageSelection(paginated, null as string | null);
+  return { selectedIds: selection.selectedIds, setSelectedIds: selection.setSelectedIds, expandedId: selection.detail, setExpandedId: selection.setDetail, headerCheckboxRef: selection.headerCheckboxRef, allOnPageSelected: selection.allOnPageSelected, toggleSelectAll: selection.toggleAll, toggleSelect: selection.toggleOne };
 }
 
 function useCateringOverlays() {
-  const [overlays, setOverlay] = useObjectState({ deleteTarget: null as string | null, showBulkDeleteModal: false, showBulkStatusModal: false, bulkStatusTarget: "in_review" as CateringRequestStatus, toast: null as CateringToast });
-  useEffect(() => {
-    if (!overlays.toast) return;
-    const timeoutId = setTimeout(() => setOverlay("toast", null), 3500);
-    return () => clearTimeout(timeoutId);
-  }, [overlays.toast, setOverlay]);
-  const showToast = useCallback((message: string, type: "success" | "error") => setOverlay("toast", { message, type }), [setOverlay]);
-  return { overlays, setOverlay, showToast };
+  const [overlays, setOverlay] = useObjectState({ deleteTarget: null as string | null, showBulkDeleteModal: false, showBulkStatusModal: false, bulkStatusTarget: "in_review" as CateringRequestStatus });
+  const { toast, showToast } = useAdminToast();
+  return { overlays, setOverlay, toast, showToast };
 }
 
 function formatCreatedDate(iso: string | null): string {
@@ -177,9 +156,7 @@ function filterCateringRequests(data: CateringRequestsResponse | null, eventType
   if (eventType !== "all") items = items.filter((item) => item.event_type === eventType);
   if (budget !== "all") items = items.filter((item) => item.budget_range === budget);
   if (status !== "all") items = items.filter((item) => item.status === status);
-  const query = search.trim().toLowerCase();
-  if (!query) return items;
-  return items.filter((item) => {
+  return filterAdminItemsBySearch(items, search, (item) => {
     const searchableText = [
       item.full_name,
       item.email,
@@ -188,43 +165,14 @@ function filterCateringRequests(data: CateringRequestsResponse | null, eventType
       getCateringBudgetRangeLabel(item.budget_range),
       item.special_requests ?? "",
       ...item.comments.map((comment) => comment.body),
-    ].join(" ").toLowerCase();
-    return searchableText.includes(query);
+    ].join(" ");
+    return searchableText;
   });
-}
-
-function updatePageSelection(previous: Set<string>, pageItems: CateringRequestItem[], select: boolean): Set<string> {
-  const next = new Set(previous);
-  pageItems.forEach((item) => select ? next.add(item.id) : next.delete(item.id));
-  return next;
 }
 
 async function getAuthHeader(): Promise<Record<string, string>> {
   const token = await getAdminToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
-}
-
-async function loadCateringRequests(setData: SetCateringData, setError: Dispatch<SetStateAction<string>>, setLoading: Dispatch<SetStateAction<boolean>>, onUnauthorized: () => void) {
-  setLoading(true);
-  setError("");
-  const token = await getAdminToken();
-  if (!token) {
-    onUnauthorized();
-    return;
-  }
-  try {
-    const response = await fetch(`${API_URL}/api/admin/catering-requests`, { headers: { Authorization: `Bearer ${token}` } });
-    if (response.status === 401) {
-      onUnauthorized();
-      return;
-    }
-    if (!response.ok) throw new Error("Failed to load catering requests");
-    setData(await response.json() as CateringRequestsResponse);
-  } catch {
-    setError("Could not load catering requests. Please refresh.");
-  } finally {
-    setLoading(false);
-  }
 }
 
 type CateringNotify = (message: string, type: "success" | "error") => void;
@@ -263,11 +211,7 @@ async function deleteCateringRequest(id: string, setData: SetCateringData, setSe
     const response = await fetch(`${API_URL}/api/admin/catering-requests/${id}`, { method: "DELETE", headers: await getAuthHeader() });
     if (!response.ok) throw new Error("Failed to delete request");
     setData((previous) => previous ? rebuildCateringData(previous, previous.items.filter((item) => item.id !== id)) : previous);
-    setSelectedIds((previous) => {
-      const next = new Set(previous);
-      next.delete(id);
-      return next;
-    });
+    setSelectedIds((previous) => removeSelectedIds(previous, [id]));
     if (expandedId === id) setExpandedId(null);
     setDeleteTarget(null);
     notify("Request deleted", "success");
@@ -366,20 +310,6 @@ function EventTypeBadge({ eventType }: { eventType: string }) {
     >
       {getCateringEventTypeLabel(eventType)}
     </span>
-  );
-}
-
-function Skeleton({ w = "100%", h = 16 }: { w?: string | number; h?: number }) {
-  return (
-    <div
-      style={{
-        width: w,
-        height: h,
-        borderRadius: 8,
-        background: "var(--color-cream)",
-        animation: "pulse 1.5s ease-in-out infinite",
-      }}
-    />
   );
 }
 
@@ -605,13 +535,8 @@ function CateringRequestRow({ item, selected, expanded, last, onToggleSelected, 
   return (
     <Fragment>
       <tr onClick={onToggleExpanded} style={{ borderBottom: !expanded && !last ? "1px solid var(--color-border)" : "none", background: expanded ? "var(--color-cream)" : "white", cursor: "pointer", transition: "background 0.1s" }}>
-        <td style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }} onClick={(event) => event.stopPropagation()}>
-          <input type="checkbox" checked={selected} onChange={onToggleSelected} style={{ cursor: "pointer" }} />
-        </td>
-        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-          <div style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatCreatedDate(item.created_at)}</div>
-          <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 2 }}>{formatCreatedTime(item.created_at)}</div>
-        </td>
+        <AdminRowCheckboxCell checked={selected} onChange={onToggleSelected} />
+        <AdminDateCell date={formatCreatedDate(item.created_at)} time={formatCreatedTime(item.created_at)} />
         <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><span style={{ fontWeight: 500, color: "var(--color-text)" }}>{item.full_name}</span></td>
         <td style={{ padding: "13px 16px", verticalAlign: "top", minWidth: 220 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -647,16 +572,7 @@ function CateringMetrics({ loading, data, averageGuests, statusFilter, onStatusF
   onStatusFilterChange: (status: string) => void;
 }) {
   if (loading) {
-    return (
-      <CompactMetricRail>
-        {[...Array(7)].map((_, index) => (
-          <CompactMetricCard key={index} variant={index === 0 ? "dark" : "light"}>
-            <Skeleton w="60%" h={10} />
-            <div style={{ marginTop: 12 }}><Skeleton w="40%" h={24} /></div>
-          </CompactMetricCard>
-        ))}
-      </CompactMetricRail>
-    );
+    return <CompactMetricSkeletonRail count={7} />;
   }
   if (!data) return null;
   return (
@@ -730,31 +646,20 @@ function CateringEmptyState({ hasFilters }: { hasFilters: boolean }) {
 export default function AdminCateringRequestsPage() {
   const { data, loading, error, setData } = useCateringResource();
   const { filters, setFilter, filtered, paginated, totalPages, averageGuests, hasFilters } = useCateringFilters(data);
-  const { selection, setSelection, headerCheckboxRef, allOnPageSelected } = useCateringSelection(paginated);
-  const { overlays, setOverlay, showToast } = useCateringOverlays();
+  const { selectedIds, setSelectedIds, expandedId, setExpandedId, headerCheckboxRef, allOnPageSelected, toggleSelectAll, toggleSelect } = useCateringSelection(paginated);
+  const { overlays, setOverlay, toast, showToast } = useCateringOverlays();
 
   const { searchQuery, eventTypeFilter, budgetFilter, statusFilter, page } = filters;
-  const { selectedIds, expandedId } = selection;
-  const { deleteTarget, showBulkDeleteModal, showBulkStatusModal, bulkStatusTarget, toast } = overlays;
+  const { deleteTarget, showBulkDeleteModal, showBulkStatusModal, bulkStatusTarget } = overlays;
   const setSearchQuery = (value: string) => setFilter("searchQuery", value);
   const setEventTypeFilter = (value: string) => setFilter("eventTypeFilter", value);
   const setBudgetFilter = (value: string) => setFilter("budgetFilter", value);
   const setStatusFilter = (value: string) => setFilter("statusFilter", value);
   const setPage = (value: number) => setFilter("page", value);
-  const setSelectedIds: Dispatch<SetStateAction<Set<string>>> = (value) => setSelection("selectedIds", value);
-  const setExpandedId: Dispatch<SetStateAction<string | null>> = (value) => setSelection("expandedId", value);
   const setDeleteTarget: Dispatch<SetStateAction<string | null>> = (value) => setOverlay("deleteTarget", value);
   const setShowBulkDeleteModal = (value: boolean) => setOverlay("showBulkDeleteModal", value);
   const setShowBulkStatusModal = (value: boolean) => setOverlay("showBulkStatusModal", value);
   const setBulkStatusTarget = (value: CateringRequestStatus) => setOverlay("bulkStatusTarget", value);
-
-  function toggleSelectAll() {
-    setSelectedIds((previous) => updatePageSelection(previous, paginated, !allOnPageSelected));
-  }
-
-  function toggleSelect(id: string) {
-    setSelectedIds((previous) => toggleSelectedId(previous, id));
-  }
 
   function handleStatusChange(id: string, status: CateringRequestStatus) {
     return updateCateringStatus(id, status, data, setData, showToast);

@@ -105,6 +105,14 @@ export function AdminDeleteIconButton({ onClick }: { onClick: () => void }) {
   );
 }
 
+export function AdminRowCheckboxCell({ checked, onChange }: { checked: boolean; onChange: () => void }) {
+  return <td className="py-[13px] pl-4 pr-3 align-top" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={checked} onChange={onChange} className="cursor-pointer" /></td>;
+}
+
+export function AdminDateCell({ date, time }: { date: string; time: string }) {
+  return <td className="whitespace-nowrap px-4 py-[13px] align-top"><div className="font-medium" style={{ color: "var(--color-text)" }}>{date}</div><div className="mt-0.5 text-[11px]" style={{ color: "var(--color-muted)" }}>{time}</div></td>;
+}
+
 export function AdminSearchInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
   return (
     <div className="relative min-w-0 flex-[1_1_240px]">

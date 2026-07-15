@@ -137,3 +137,16 @@ export function CompactMetricTotalCard({ label, value }: { label: string; value:
     </CompactMetricCard>
   );
 }
+
+export function CompactMetricSkeletonRail({ count }: { count: number }) {
+  return (
+    <CompactMetricRail>
+      {Array.from({ length: count }, (_, index) => (
+        <CompactMetricCard key={index} variant={index === 0 ? "dark" : "light"}>
+          <div className="h-2.5 w-3/5 animate-pulse rounded-full" style={{ background: "var(--color-border)" }} />
+          <div className="mt-3 h-6 w-2/5 animate-pulse rounded-full" style={{ background: "var(--color-border)" }} />
+        </CompactMetricCard>
+      ))}
+    </CompactMetricRail>
+  );
+}

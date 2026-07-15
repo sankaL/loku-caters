@@ -45,6 +45,36 @@ export async function loadAdminResource<T>(
   onLoaded((await response.json()) as T);
 }
 
+export async function loadAuthenticatedAdminResource<T>(options: {
+  resourcePath: string;
+  failureMessage: string;
+  setLoading: (loading: boolean) => void;
+  setError: (message: string) => void;
+  onLoaded: (resource: T) => void;
+  onUnauthorized: () => void;
+}): Promise<void> {
+  options.setLoading(true);
+  options.setError("");
+  const token = await getAdminToken();
+  if (!token) {
+    options.onUnauthorized();
+    return;
+  }
+  try {
+    const response = await fetch(`${API_URL}${options.resourcePath}`, { headers: { Authorization: `Bearer ${token}` } });
+    if (response.status === 401) {
+      options.onUnauthorized();
+      return;
+    }
+    if (!response.ok) throw new Error(await getApiErrorMessage(response, options.failureMessage));
+    options.onLoaded(await response.json() as T);
+  } catch {
+    options.setError(options.failureMessage);
+  } finally {
+    options.setLoading(false);
+  }
+}
+
 export async function runAdminSaveAction(options: {
   resourcePath: string;
   id: string | null;

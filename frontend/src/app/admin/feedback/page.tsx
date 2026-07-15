@@ -1,11 +1,17 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef, Fragment } from "react";
+import { useState, useEffect, useMemo, Fragment, type Dispatch, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
-import { CompactMetricCard, CompactMetricRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
-import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDeleteIconButton, AdminPagination, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
+import { CompactMetricCard, CompactMetricRail, CompactMetricSkeletonRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
+import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDateCell, AdminDeleteIconButton, AdminPagination, AdminRowCheckboxCell, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
+import AdminToast from "@/components/admin/AdminToast";
 import { usePendingStatusChange } from "@/hooks/usePendingStatusChange";
+import { useObjectState } from "@/hooks/useObjectState";
+import { usePageSelection } from "@/hooks/usePageSelection";
+import { useAdminToast } from "@/hooks/useAdminToast";
+import { loadAuthenticatedAdminResource } from "@/lib/adminCrud";
+import { filterAdminItemsBySearch } from "@/lib/adminSearch";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
@@ -15,7 +21,6 @@ import {
   removeItemsByIds,
   removeSelectedIds,
   runAdminBulkAction,
-  toggleSelectedId,
   updateItemStatuses,
 } from "@/lib/adminBulk";
 import {
@@ -388,24 +393,6 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Skeleton
-// ---------------------------------------------------------------------------
-
-function Skeleton({ w = "100%", h = 16 }: { w?: string | number; h?: number }) {
-  return (
-    <div
-      style={{
-        width: w,
-        height: h,
-        borderRadius: 8,
-        background: "var(--color-cream)",
-        animation: "pulse 1.5s ease-in-out infinite",
-      }}
-    />
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Detail modal
 // ---------------------------------------------------------------------------
 
@@ -507,6 +494,107 @@ function FeedbackEmptyState({ hasFilters, onCreate, buttonStyle }: { hasFilters:
       action={!hasFilters ? <button onClick={onCreate} style={buttonStyle}>Submit feedback</button> : undefined}
     />
   );
+}
+
+function FeedbackRatingStars({ rating }: { rating: number | null }) {
+  if (rating == null) return null;
+  return <div style={{ display: "flex", gap: 1 }}>{[1, 2, 3, 4, 5].map((star) => <svg key={star} width="11" height="11" viewBox="0 0 24 24" fill={star <= rating ? "var(--color-accent)" : "none"} stroke={star <= rating ? "var(--color-accent)" : "var(--color-border)"} strokeWidth="1.5"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg>)}</div>;
+}
+
+function FeedbackPreview({ item }: { item: FeedbackItem }) {
+  const value = item.message || item.other_details;
+  const color = item.message ? "var(--color-text)" : value ? "var(--color-muted)" : "var(--color-border)";
+  return <span style={{ color, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{value || "-"}</span>;
+}
+
+function FeedbackReviewToggle({ visible, onClick }: { visible: boolean; onClick: () => void }) {
+  return <button onClick={onClick} title={visible ? "Hide from reviews" : "Show in reviews"} style={{ padding: "5px 8px", borderRadius: 8, border: visible ? "1px solid var(--color-warning-border)" : "1px solid var(--color-border)", background: visible ? "var(--color-warning-bg)" : "white", cursor: "pointer", color: visible ? "var(--color-warning-text)" : "var(--color-muted)", display: "inline-flex", alignItems: "center", transition: "all 0.15s" }}><svg width="13" height="13" viewBox="0 0 24 24" fill={visible ? "var(--color-accent)" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" /></svg></button>;
+}
+
+function FeedbackTableRow({ item, selected, last, onOpen, onToggleSelected, onToggleReview, onDelete }: {
+  item: FeedbackItem;
+  selected: boolean;
+  last: boolean;
+  onOpen: () => void;
+  onToggleSelected: () => void;
+  onToggleReview: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <tr onClick={onOpen} style={{ borderBottom: last ? "none" : "1px solid var(--color-border)", background: "white", cursor: "pointer", transition: "background 0.1s" }}>
+      <AdminRowCheckboxCell checked={selected} onChange={onToggleSelected} />
+      <AdminDateCell date={formatDate(item.created_at)} time={formatTime(item.created_at)} />
+      <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><OriginBadge origin={item.origin} label={item.origin_label} /></td>
+      <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><TypeBadge type={item.feedback_type} label={item.feedback_type_label} /></td>
+      <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><span style={{ fontWeight: item.name ? 500 : 400, color: item.name ? "var(--color-text)" : "var(--color-muted)", fontStyle: item.name ? "normal" : "italic" }}>{item.name || "Anonymous"}</span></td>
+      <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><span style={{ color: item.contact ? "var(--color-text)" : "var(--color-border)" }}>{item.contact || "-"}</span></td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top" }}>{item.reason && item.reason_label ? <ReasonBadge reason={item.reason} label={item.reason_label} /> : <span style={{ color: "var(--color-border)" }}>-</span>}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <StatusBadge status={item.status} />
+          <FeedbackRatingStars rating={item.rating} />
+        </div>
+      </td>
+      <td style={{ padding: "13px 16px", color: "var(--color-text)", maxWidth: 280, verticalAlign: "top" }}><FeedbackPreview item={item} /></td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }} onClick={(event) => event.stopPropagation()}>
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <FeedbackReviewToggle visible={item.show_in_reviews} onClick={onToggleReview} />
+          <AdminDeleteIconButton onClick={onDelete} />
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function FeedbackMetrics({ loading, data, sortedMetrics, originFilter, reasonFilter, onOriginFilter, onReasonFilter }: {
+  loading: boolean;
+  data: FeedbackResponse | null;
+  sortedMetrics: FeedbackMetric[];
+  originFilter: string;
+  reasonFilter: string;
+  onOriginFilter: (origin: string) => void;
+  onReasonFilter: (reason: string) => void;
+}) {
+  if (loading) {
+    return <CompactMetricSkeletonRail count={5} />;
+  }
+  if (!data) return null;
+  const topReason = sortedMetrics[0];
+  const reasonColors = topReason ? REASON_COLORS[topReason.reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" } : null;
+  const toggleOrigin = (origin: string) => onOriginFilter(originFilter === origin ? "all" : origin);
+  return (
+    <CompactMetricRail>
+      <CompactMetricTotalCard label="Total Responses" value={data.total} />
+      <OriginMetricCard label="Contact Us" count={data.origin_counts.contact_us} description="Messages and inquiries" selected={originFilter === "contact_us"} onClick={() => toggleOrigin("contact_us")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-info-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
+      <OriginMetricCard label="Events Page" count={data.origin_counts.events_page_non_customer} description="Pre-order feedback" selected={originFilter === "events_page_non_customer"} onClick={() => toggleOrigin("events_page_non_customer")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>} />
+      <OriginMetricCard label="Customers" count={data.origin_counts.events_page_customer} description="Post-order feedback" selected={originFilter === "events_page_customer"} onClick={() => toggleOrigin("events_page_customer")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-success-text)" strokeWidth="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>} />
+      <OriginMetricCard label="Reminder Email" count={data.origin_counts.event_reminder_email} description="Event reminder responses" selected={originFilter === "event_reminder_email"} onClick={() => toggleOrigin("event_reminder_email")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-info-text)" strokeWidth="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>} />
+      <OriginMetricCard label="Admin Submitted" count={data.origin_counts.admin_submission} description="Captured outside the platform" selected={originFilter === "admin_submission"} onClick={() => toggleOrigin("admin_submission")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-success-text)" strokeWidth="2"><path d="M9 12h6" /><path d="M12 9v6" /><path d="M9 3h6l1 2h4v16H4V5h4l1-2z" /></svg>} />
+      {topReason && reasonColors && <CompactMetricCard onClick={() => onReasonFilter(reasonFilter === topReason.reason ? "all" : topReason.reason)} selected={reasonFilter === topReason.reason}><div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}><p style={{ fontSize: 10, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>Top Reason</p><span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: "999px", background: reasonColors.bg, color: reasonColors.text }}>{topReason.pct}%</span></div><p style={{ fontSize: 13, fontWeight: 700, color: "var(--color-forest)", lineHeight: 1.3, marginBottom: 6 }}>{topReason.label}</p><p style={{ fontSize: "clamp(22px, 1.8vw, 24px)", fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>{topReason.count}</p></CompactMetricCard>}
+    </CompactMetricRail>
+  );
+}
+
+function FeedbackReasonBreakdown({ visible, metrics, activeReason, onReasonChange }: { visible: boolean; metrics: FeedbackMetric[]; activeReason: string; onReasonChange: (reason: string) => void }) {
+  if (!visible) return null;
+  return (
+    <div style={{ background: "white", border: "1px solid var(--color-border)", borderRadius: 20, padding: 20, marginBottom: 24 }}>
+      <p style={{ fontSize: 12, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16 }}>Batch Feedback Reason Breakdown</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {metrics.map((metric) => {
+          const colors = REASON_COLORS[metric.reason] ?? { text: "var(--color-muted)" };
+          const active = activeReason === metric.reason;
+          return <div key={metric.reason} style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }} onClick={() => onReasonChange(active ? "all" : metric.reason)}><div style={{ width: 140, flexShrink: 0, fontSize: 13, color: active ? "var(--color-forest)" : "var(--color-text)", fontWeight: active ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{metric.label}</div><div style={{ flex: 1, height: 8, borderRadius: 4, background: "var(--color-cream)", overflow: "hidden" }}><div style={{ height: 8, borderRadius: 4, width: `${metric.pct}%`, background: active ? "var(--color-forest)" : colors.text, opacity: active ? 1 : 0.6, transition: "width 0.4s ease, background 0.15s" }} /></div><div style={{ width: 36, flexShrink: 0, textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--color-forest)" }}>{metric.count}</div><div style={{ width: 36, flexShrink: 0, textAlign: "right", fontSize: 12, color: "var(--color-muted)" }}>{metric.pct}%</div></div>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FeedbackFilters({ filters, loading, resultCount, onChange, onClear }: { filters: { originFilter: string; typeFilter: string; preOrderReasonFilter: string; statusFilter: string; searchQuery: string }; loading: boolean; resultCount: number; onChange: (field: "originFilter" | "typeFilter" | "preOrderReasonFilter" | "statusFilter" | "searchQuery", value: string) => void; onClear: () => void }) {
+  const hasFilters = filters.originFilter !== "all" || filters.typeFilter !== "all" || filters.preOrderReasonFilter !== "all" || filters.statusFilter !== "all" || Boolean(filters.searchQuery);
+  const selectStyle = { padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" };
+  return <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}><AdminSearchInput value={filters.searchQuery} onChange={(value) => onChange("searchQuery", value)} placeholder="Search origin, type, name, contact, message..." /><select value={filters.originFilter} onChange={(event) => onChange("originFilter", event.target.value)} style={selectStyle}><option value="all">All origins</option><option value="contact_us">Contact Us</option><option value="events_page_non_customer">Events Page (Non-customer)</option><option value="events_page_customer">Events Page (Customer)</option><option value="event_reminder_email">Event Reminder Email</option><option value="reviews_page">Reviews Page</option><option value="admin_submission">Admin Submission</option></select><select value={filters.typeFilter} onChange={(event) => onChange("typeFilter", event.target.value)} style={selectStyle}><option value="all">All types</option><option value="general_question">General Question</option><option value="feedback">Feedback</option><option value="collaboration">Collaboration</option><option value="other">Other</option></select><select value={filters.preOrderReasonFilter} onChange={(event) => onChange("preOrderReasonFilter", event.target.value)} style={selectStyle}><option value="all">All pre-order reasons</option>{PRE_ORDER_REASON_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><select value={filters.statusFilter} onChange={(event) => onChange("statusFilter", event.target.value)} style={selectStyle}><option value="all">All statuses</option><option value="new">New</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option></select>{hasFilters && <AdminClearFiltersButton onClick={onClear} />}{!loading && <span style={{ fontSize: 13, color: "var(--color-muted)", marginLeft: "auto" }}>{resultCount} result{resultCount === 1 ? "" : "s"}</span>}</div>;
 }
 
 function FeedbackDetailsModal({
@@ -711,213 +799,341 @@ async function submitAdminFeedback(headers: Record<string, string>, payload: Ret
   return response.json() as Promise<FeedbackItem>;
 }
 
+type SetFeedbackData = Dispatch<SetStateAction<FeedbackResponse | null>>;
+
+async function getFeedbackAuthHeader(): Promise<Record<string, string>> {
+  const token = await getAdminToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function filterFeedbackItems(data: FeedbackResponse | null, origin: string, type: string, reason: string, status: string, search: string): FeedbackItem[] {
+  if (!data) return [];
+  let items = data.items;
+  if (origin !== "all") items = items.filter((item) => item.origin === origin);
+  if (type !== "all") items = items.filter((item) => item.feedback_type === type);
+  if (reason !== "all") items = items.filter((item) => item.reason === reason);
+  if (status !== "all") items = items.filter((item) => item.status === status);
+  return filterAdminItemsBySearch(items, search, (item) => [item.origin_label, item.feedback_type_label, item.name, item.contact, item.reason_label, item.other_details, item.message].filter(Boolean).join(" "));
+}
+
+function recomputeReasonMetrics(items: FeedbackItem[], template: FeedbackMetric[]): FeedbackMetric[] {
+  const batchItems = items.filter((item) => item.origin === "events_page_non_customer" || item.origin === "event_reminder_email");
+  return template.map((metric) => {
+    const count = batchItems.filter((item) => item.reason === metric.reason).length;
+    return { ...metric, count, pct: batchItems.length > 0 ? Math.round((count / batchItems.length) * 100) : 0 };
+  });
+}
+
+function rebuildFeedbackData(previous: FeedbackResponse, items: FeedbackItem[]): FeedbackResponse {
+  return { ...previous, items, total: items.length, origin_counts: buildOriginCounts(items), type_counts: buildTypeCounts(items), reason_metrics: recomputeReasonMetrics(items, previous.reason_metrics) };
+}
+
+type FeedbackNotify = (message: string, type: "success" | "error") => void;
+
+function patchFeedbackItem(setData: SetFeedbackData, id: string, patch: Partial<FeedbackItem>) {
+  setData((previous) => previous ? { ...previous, items: previous.items.map((item) => item.id === id ? { ...item, ...patch } : item) } : previous);
+}
+
+async function updateFeedbackStatus(id: string, status: string, data: FeedbackResponse | null, setData: SetFeedbackData, notify: FeedbackNotify) {
+  const previousStatus = data?.items.find((item) => item.id === id)?.status;
+  patchFeedbackItem(setData, id, { status });
+  try {
+    const response = await fetch(`${API_URL}/api/admin/feedback/${id}/status`, { method: "PATCH", headers: { ...await getFeedbackAuthHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    if (!response.ok) throw new Error("Failed to update status");
+    notify("Status updated", "success");
+  } catch {
+    if (previousStatus) patchFeedbackItem(setData, id, { status: previousStatus });
+    notify("Failed to update status", "error");
+  }
+}
+
+async function saveFeedbackComment(id: string, adminComment: string | null, setData: SetFeedbackData, notify: FeedbackNotify) {
+  try {
+    const response = await fetch(`${API_URL}/api/admin/feedback/${id}/comment`, { method: "PATCH", headers: { ...await getFeedbackAuthHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ admin_comment: adminComment }) });
+    if (!response.ok) throw new Error("Failed to save note");
+    patchFeedbackItem(setData, id, { admin_comment: adminComment });
+    notify("Note saved", "success");
+  } catch {
+    notify("Failed to save note", "error");
+  }
+}
+
+async function toggleFeedbackReviewVisibility(id: string, visible: boolean, data: FeedbackResponse | null, setData: SetFeedbackData, notify: FeedbackNotify) {
+  const previousValue = data?.items.find((item) => item.id === id)?.show_in_reviews;
+  patchFeedbackItem(setData, id, { show_in_reviews: visible });
+  try {
+    const response = await fetch(`${API_URL}/api/admin/feedback/${id}/show-in-reviews`, { method: "PATCH", headers: { ...await getFeedbackAuthHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ show_in_reviews: visible }) });
+    if (!response.ok) throw new Error("Failed to update review visibility");
+    const result = await response.json() as { show_in_reviews: boolean };
+    notify(result.show_in_reviews ? "Shown in reviews" : "Hidden from reviews", "success");
+  } catch {
+    if (previousValue !== undefined) patchFeedbackItem(setData, id, { show_in_reviews: previousValue });
+    notify("Failed to update review visibility", "error");
+  }
+}
+
+async function deleteFeedbackEntry(id: string, setData: SetFeedbackData, setSelectedIds: Dispatch<SetStateAction<Set<string>>>, selectedFeedbackId: string | null, setSelectedFeedbackId: Dispatch<SetStateAction<string | null>>, closeModal: () => void, notify: FeedbackNotify) {
+  try {
+    const response = await fetch(`${API_URL}/api/admin/feedback/${id}`, { method: "DELETE", headers: await getFeedbackAuthHeader() });
+    if (!response.ok) throw new Error("Failed to delete entry");
+    setData((previous) => previous ? rebuildFeedbackData(previous, previous.items.filter((item) => item.id !== id)) : previous);
+    setSelectedIds((previous) => removeSelectedIds(previous, [id]));
+    if (selectedFeedbackId === id) setSelectedFeedbackId(null);
+    closeModal();
+    notify("Entry deleted", "success");
+  } catch {
+    notify("Failed to delete entry", "error");
+  }
+}
+
+async function deleteFeedbackEntries(ids: string[], setData: SetFeedbackData, setSelectedIds: Dispatch<SetStateAction<Set<string>>>, selectedFeedbackId: string | null, setSelectedFeedbackId: Dispatch<SetStateAction<string | null>>, closeModal: () => void, notify: FeedbackNotify) {
+  await runAdminBulkAction({
+    ids,
+    request: async () => postAdminBulkDelete(`${API_URL}/api/admin/feedback/bulk-delete`, ids, await getFeedbackAuthHeader()),
+    applyCompleted: (completedIds) => {
+      setData((previous) => previous ? rebuildFeedbackData(previous, removeItemsByIds(previous.items, completedIds)) : previous);
+      setSelectedIds((previous) => removeSelectedIds(previous, completedIds));
+      if (selectedFeedbackId && completedIds.includes(selectedFeedbackId)) setSelectedFeedbackId(null);
+    },
+    closeModal,
+    notify,
+    successMessage: `${ids.length} entr${ids.length === 1 ? "y" : "ies"} deleted`,
+    failureAction: "Deleted",
+    failureMessage: "Failed to delete entries",
+  });
+}
+
+async function updateFeedbackStatuses(ids: string[], status: string, setData: SetFeedbackData, closeModal: () => void, notify: FeedbackNotify) {
+  await runAdminBulkAction({
+    ids,
+    request: async () => postAdminBulkStatus(`${API_URL}/api/admin/feedback/bulk-status`, ids, await getFeedbackAuthHeader(), status),
+    applyCompleted: (completedIds) => setData((previous) => previous ? { ...previous, items: updateItemStatuses(previous.items, completedIds, status) } : previous),
+    closeModal,
+    notify,
+    successMessage: `${ids.length} entr${ids.length === 1 ? "y" : "ies"} updated`,
+    failureAction: "Updated",
+    failureMessage: "Failed to update status",
+  });
+}
+
+function useFeedbackResource() {
+  const router = useRouter();
+  const [resource, setResource] = useObjectState({ data: null as FeedbackResponse | null, loading: true, error: "" });
+  useEffect(() => {
+    void loadAuthenticatedAdminResource<FeedbackResponse>({ resourcePath: "/api/admin/feedback", failureMessage: "Could not load feedback. Please refresh.", setLoading: (value) => setResource("loading", value), setError: (value) => setResource("error", value), onLoaded: (value) => setResource("data", value), onUnauthorized: () => router.push("/admin/login") });
+  }, [router, setResource]);
+  const setData: SetFeedbackData = (value) => setResource("data", value);
+  return { ...resource, setData };
+}
+
+function useFeedbackFilters(data: FeedbackResponse | null) {
+  const [filters, setFilter] = useObjectState({ originFilter: "all", typeFilter: "all", preOrderReasonFilter: "all", statusFilter: "all", searchQuery: "", page: 1 });
+  const filtered = useMemo(() => filterFeedbackItems(data, filters.originFilter, filters.typeFilter, filters.preOrderReasonFilter, filters.statusFilter, filters.searchQuery), [data, filters.originFilter, filters.preOrderReasonFilter, filters.searchQuery, filters.statusFilter, filters.typeFilter]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / 15));
+  const paginated = filtered.slice((filters.page - 1) * 15, filters.page * 15);
+  const sortedMetrics = useMemo(() => data ? [...data.reason_metrics].sort((left, right) => right.count - left.count).filter((metric) => metric.count > 0) : [], [data]);
+  useEffect(() => setFilter("page", 1), [filters.originFilter, filters.typeFilter, filters.preOrderReasonFilter, filters.statusFilter, filters.searchQuery, setFilter]);
+  useEffect(() => setFilter("page", (previous) => Math.min(previous, totalPages)), [setFilter, totalPages]);
+  const hasFilters = filters.originFilter !== "all" || filters.typeFilter !== "all" || filters.preOrderReasonFilter !== "all" || filters.statusFilter !== "all" || Boolean(filters.searchQuery);
+  return { filters, setFilter, filtered, paginated, totalPages, sortedMetrics, hasFilters };
+}
+
+function useFeedbackSelection(data: FeedbackResponse | null, paginated: FeedbackItem[]) {
+  const selection = usePageSelection(paginated, null as string | null);
+  const selectedFeedback = useMemo(() => selection.detail ? data?.items.find((item) => item.id === selection.detail) ?? null : null, [data, selection.detail]);
+  return { selectedIds: selection.selectedIds, setSelectedIds: selection.setSelectedIds, selectedFeedbackId: selection.detail, setSelectedFeedbackId: selection.setDetail, selectedFeedback, headerCheckboxRef: selection.headerCheckboxRef, allOnPageSelected: selection.allOnPageSelected, toggleSelectAll: selection.toggleAll, toggleSelect: selection.toggleOne };
+}
+
+function useFeedbackOverlays() {
+  const [overlays, setOverlay] = useObjectState({ deleteTarget: null as string | null, showBulkDeleteModal: false, showBulkStatusModal: false, bulkStatusTarget: "resolved", pendingReviewToggle: null as { id: string; show: boolean } | null, showCreateModal: false });
+  const { toast, showToast } = useAdminToast();
+  return { overlays, setOverlay, toast, showToast };
+}
+
+function useFeedbackCreateState() {
+  return useObjectState({ createForm: INITIAL_ADMIN_FEEDBACK_FORM, createErrors: {} as AdminFeedbackFieldErrors, createError: "", creating: false });
+}
+
+const FEEDBACK_CREATE_INPUT_STYLE: React.CSSProperties = { width: "100%", padding: "10px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", outline: "none", boxSizing: "border-box" };
+
+function FeedbackFormSectionIntro({ title, description }: { title: string; description: string }) {
+  return <div><p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0, marginBottom: 6 }}>{title}</p><p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>{description}</p></div>;
+}
+
+function FeedbackOptionalContext({ form, typeConfig, onChange }: { form: AdminFeedbackFormState; typeConfig: AdminFeedbackTypeConfig; onChange: <K extends keyof AdminFeedbackFormState>(field: K, value: AdminFeedbackFormState[K]) => void }) {
+  return (
+    <>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
+        <div style={{ display: "grid", gap: 6 }}><label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Name</label><input type="text" value={form.name} onChange={(event) => onChange("name", event.target.value)} placeholder="Who shared this feedback?" style={FEEDBACK_CREATE_INPUT_STYLE} /></div>
+        {typeConfig.showContact && !typeConfig.contactRequired && <div style={{ display: "grid", gap: 6 }}><label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{typeConfig.contactLabel}</label><input type="text" value={form.contact} onChange={(event) => onChange("contact", event.target.value)} placeholder={typeConfig.contactPlaceholder} style={FEEDBACK_CREATE_INPUT_STYLE} /></div>}
+        {typeConfig.showOrderId && <div style={{ display: "grid", gap: 6 }}><label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Related order ID</label><input type="text" value={form.order_id} onChange={(event) => onChange("order_id", event.target.value)} placeholder="Add an order ID only if this feedback links to one" style={FEEDBACK_CREATE_INPUT_STYLE} /></div>}
+      </div>
+      {typeConfig.showOtherDetails && <div style={{ display: "grid", gap: 6 }}><label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{typeConfig.otherDetailsLabel}</label><textarea value={form.other_details} onChange={(event) => onChange("other_details", event.target.value)} placeholder={typeConfig.otherDetailsPlaceholder} rows={3} style={{ ...FEEDBACK_CREATE_INPUT_STYLE, resize: "vertical", fontFamily: "inherit" }} /></div>}
+    </>
+  );
+}
+
+function FeedbackReviewOptions({ enabled, form, buttonStyle, onRatingChange, onFormChange }: { enabled: boolean; form: AdminFeedbackFormState; buttonStyle: React.CSSProperties; onRatingChange: (rating: number) => void; onFormChange: <K extends keyof AdminFeedbackFormState>(field: K, value: AdminFeedbackFormState[K]) => void }) {
+  if (!enabled) return null;
+  const hasRating = form.rating > 0;
+  return (
+    <div style={{ padding: 16, borderRadius: 16, border: "1px solid var(--color-warning-border)", background: "var(--color-warning-bg)", display: "grid", gap: 12 }}>
+      <div style={{ display: "grid", gap: 4 }}><label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Star rating</label><p style={{ margin: 0, fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>Add an optional rating if this entry should appear as a starred review.</p></div>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}><StarRating value={form.rating} onChange={onRatingChange} size={28} mode="input" /><span style={{ fontSize: 13, color: "var(--color-muted)" }}>{hasRating ? `${form.rating} out of 5` : "No rating selected"}</span>{hasRating && <button onClick={() => onRatingChange(0)} style={buttonStyle}>Clear rating</button>}</div>
+      <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: hasRating ? "pointer" : "not-allowed", opacity: hasRating ? 1 : 0.6 }}><input type="checkbox" checked={form.show_in_reviews} disabled={!hasRating} onChange={(event) => onFormChange("show_in_reviews", event.target.checked)} style={{ marginTop: 2, cursor: hasRating ? "pointer" : "not-allowed" }} /><span style={{ display: "grid", gap: 4 }}><span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Show on public reviews page</span><span style={{ fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>This is available after you add a star rating. The entry can still stay internal if this remains unchecked.</span></span></label>
+    </div>
+  );
+}
+
+function FeedbackTypePicker({ selectedType, onChange }: { selectedType: FeedbackType; onChange: (type: FeedbackType) => void }) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>Feedback type</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        {(Object.keys(ADMIN_FEEDBACK_TYPE_CONFIG) as FeedbackType[]).map((type) => {
+          const config = ADMIN_FEEDBACK_TYPE_CONFIG[type];
+          const selected = selectedType === type;
+          return <button key={type} onClick={() => onChange(type)} style={{ textAlign: "left", padding: 14, borderRadius: 14, border: selected ? "1px solid var(--color-forest)" : "1px solid var(--color-border)", background: selected ? "var(--color-success-bg)" : "white", cursor: "pointer", display: "grid", gap: 6 }}><span style={{ fontSize: 14, fontWeight: 600, color: selected ? "var(--color-forest)" : "var(--color-text)" }}>{config.title}</span><span style={{ fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>{config.description}</span></button>;
+        })}
+      </div>
+    </div>
+  );
+}
+
+function FeedbackRequiredFields({ form, errors, typeConfig, onChange }: { form: AdminFeedbackFormState; errors: AdminFeedbackFieldErrors; typeConfig: AdminFeedbackTypeConfig; onChange: <K extends keyof AdminFeedbackFormState>(field: K, value: AdminFeedbackFormState[K]) => void }) {
+  return (
+    <div style={{ display: "grid", gap: 14 }}>
+      <FeedbackFormSectionIntro title="Required details" description={typeConfig.description} />
+      {typeConfig.showContact && typeConfig.contactRequired && <div style={{ display: "grid", gap: 6 }}><label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{typeConfig.contactLabel} <span style={{ color: "var(--color-error-text)" }}>*</span></label><input type="text" value={form.contact} onChange={(event) => onChange("contact", event.target.value)} placeholder={typeConfig.contactPlaceholder} style={{ ...FEEDBACK_CREATE_INPUT_STYLE, border: errors.contact ? "1px solid var(--color-error-text)" : "1px solid var(--color-border)" }} />{errors.contact && <p style={{ margin: 0, fontSize: 12, color: "var(--color-error-text)" }}>{errors.contact}</p>}</div>}
+      <div style={{ display: "grid", gap: 6 }}><label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{typeConfig.messageLabel} <span style={{ color: "var(--color-error-text)" }}>*</span></label><textarea value={form.message} onChange={(event) => onChange("message", event.target.value)} placeholder={typeConfig.messagePlaceholder} rows={5} style={{ ...FEEDBACK_CREATE_INPUT_STYLE, border: errors.message ? "1px solid var(--color-error-text)" : "1px solid var(--color-border)", resize: "vertical", fontFamily: "inherit" }} />{errors.message && <p style={{ margin: 0, fontSize: 12, color: "var(--color-error-text)" }}>{errors.message}</p>}</div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
+function FeedbackCreateModal({ showCreateModal, closeCreateModal, handleCreateFeedback, creating, btnBase, btnPrimary, createForm, createErrors, createError, activeCreateType, createFormSupportsReviews, updateCreateForm, updateCreateRating }: {
+  showCreateModal: boolean;
+  closeCreateModal: () => void;
+  handleCreateFeedback: () => void;
+  creating: boolean;
+  btnBase: React.CSSProperties;
+  btnPrimary: React.CSSProperties;
+  createForm: AdminFeedbackFormState;
+  createErrors: AdminFeedbackFieldErrors;
+  createError: string;
+  activeCreateType: AdminFeedbackTypeConfig;
+  createFormSupportsReviews: boolean;
+  updateCreateForm: <K extends keyof AdminFeedbackFormState>(field: K, value: AdminFeedbackFormState[K]) => void;
+  updateCreateRating: (rating: number) => void;
+}) {
+  return (
+    <Modal
+      isOpen={showCreateModal}
+      onClose={closeCreateModal}
+      title="Submit admin feedback"
+      size="xl"
+      actions={
+        <>
+          <button onClick={closeCreateModal} disabled={creating} style={btnBase}>Cancel</button>
+          <button onClick={handleCreateFeedback} disabled={creating} style={{ ...btnPrimary, opacity: creating ? 0.7 : 1, cursor: creating ? "not-allowed" : "pointer" }}>
+            {creating ? "Submitting..." : "Submit feedback"}
+          </button>
+        </>
+      }
+    >
+      <div style={{ display: "grid", gap: 20 }}>
+        <div
+          style={{
+            padding: 16,
+            borderRadius: 16,
+            border: "1px solid var(--color-success-border)",
+            background: "var(--color-success-bg)",
+            display: "grid",
+            gap: 6,
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--color-forest)" }}>
+            Capture feedback shared outside the platform.
+          </p>
+          <p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>
+            Start by choosing the type. The form keeps only the required fields up front, then moves optional context to the end.
+          </p>
+        </div>
+
+        <FeedbackTypePicker selectedType={createForm.feedback_type} onChange={(type) => updateCreateForm("feedback_type", type)} />
+        <FeedbackRequiredFields form={createForm} errors={createErrors} typeConfig={activeCreateType} onChange={updateCreateForm} />
+
+        <div style={{ display: "grid", gap: 14 }}>
+          <FeedbackFormSectionIntro title="Optional context" description="Add supporting details only if they help the team understand or follow up on the entry." />
+
+          <FeedbackOptionalContext form={createForm} typeConfig={activeCreateType} onChange={updateCreateForm} />
+          <FeedbackReviewOptions enabled={createFormSupportsReviews} form={createForm} buttonStyle={btnBase} onRatingChange={updateCreateRating} onFormChange={updateCreateForm} />
+        </div>
+
+        {createError && (
+          <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid var(--color-error-border)", background: "var(--color-error-bg)", color: "var(--color-error-text)", fontSize: 13 }}>
+            {createError}
+          </div>
+        )}
+      </div>
+    </Modal>
+
+  );
+}
+
+function FeedbackReviewModal({ pendingReviewToggle, cancelStyle, confirmStyle, onClose, onConfirm }: { pendingReviewToggle: { id: string; show: boolean } | null; cancelStyle: React.CSSProperties; confirmStyle: React.CSSProperties; onClose: () => void; onConfirm: (id: string, show: boolean) => void }) {
+  const action = pendingReviewToggle?.show ? "Show" : "Hide";
+  return <Modal isOpen={Boolean(pendingReviewToggle)} onClose={onClose} title={`${action} from Reviews`} actions={<><button onClick={onClose} style={cancelStyle}>Cancel</button><button onClick={() => pendingReviewToggle && onConfirm(pendingReviewToggle.id, pendingReviewToggle.show)} style={confirmStyle}>{action}</button></>}><p style={{ color: "var(--color-muted)", fontSize: 14 }}>{pendingReviewToggle?.show ? "This feedback will be visible on the reviews page. Continue?" : "This feedback will be hidden from the reviews page. Continue?"}</p></Modal>;
+}
+
+function FeedbackDeleteModals({ deleteTarget, selectedCount, showBulkDeleteModal, cancelStyle, deleteStyle, onCloseDelete, onDelete, onCloseBulkDelete, onBulkDelete }: {
+  deleteTarget: string | null;
+  selectedCount: number;
+  showBulkDeleteModal: boolean;
+  cancelStyle: React.CSSProperties;
+  deleteStyle: React.CSSProperties;
+  onCloseDelete: () => void;
+  onDelete: (id: string) => void;
+  onCloseBulkDelete: () => void;
+  onBulkDelete: () => void;
+}) {
+  const entryWord = selectedCount === 1 ? "entry" : "entries";
+  return <><Modal isOpen={Boolean(deleteTarget)} onClose={onCloseDelete} title="Delete feedback entry" variant="danger" actions={<><button onClick={onCloseDelete} style={cancelStyle}>Cancel</button><button onClick={() => deleteTarget && onDelete(deleteTarget)} style={deleteStyle}>Delete</button></>}>This feedback entry will be permanently deleted. This action cannot be undone.</Modal><Modal isOpen={showBulkDeleteModal} onClose={onCloseBulkDelete} title={`Delete ${selectedCount} ${entryWord}`} variant="danger" actions={<><button onClick={onCloseBulkDelete} style={cancelStyle}>Cancel</button><button onClick={onBulkDelete} style={deleteStyle}>Delete all</button></>}>{selectedCount} feedback {entryWord} will be permanently deleted. This action cannot be undone.</Modal></>;
+}
+
+function FeedbackBulkStatusModal({ open, selectedCount, status, cancelStyle, confirmStyle, onClose, onConfirm }: { open: boolean; selectedCount: number; status: string; cancelStyle: React.CSSProperties; confirmStyle: React.CSSProperties; onClose: () => void; onConfirm: () => void }) {
+  const entryWord = selectedCount === 1 ? "entry" : "entries";
+  const statusLabel = status === "in_progress" ? "In Progress" : status === "resolved" ? "Resolved" : "New";
+  return <Modal isOpen={open} onClose={onClose} title={`Update ${selectedCount} ${entryWord}`} actions={<><button onClick={onClose} style={cancelStyle}>Cancel</button><button onClick={onConfirm} style={confirmStyle}>Apply</button></>}>Mark {selectedCount} selected {entryWord} as <strong>{statusLabel}</strong>?</Modal>;
+}
+
 export default function AdminFeedbackPage() {
   const router = useRouter();
+  const { data, loading, error, setData } = useFeedbackResource();
+  const { filters, setFilter, filtered, paginated, totalPages, sortedMetrics, hasFilters } = useFeedbackFilters(data);
+  const { selectedIds, setSelectedIds, selectedFeedbackId, setSelectedFeedbackId, selectedFeedback, headerCheckboxRef, allOnPageSelected, toggleSelectAll, toggleSelect } = useFeedbackSelection(data, paginated);
+  const { overlays, setOverlay, toast, showToast } = useFeedbackOverlays();
+  const [createState, setCreateState] = useFeedbackCreateState();
 
-  const [data, setData] = useState<FeedbackResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  // Filters
-  const [originFilter, setOriginFilter] = useState("all");
-  const [typeFilter, setTypeFilter] = useState("all");
-  const [preOrderReasonFilter, setPreOrderReasonFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [searchQuery, setSearchQuery] = useState("");
-
-  // Pagination
-  const [page, setPage] = useState(1);
-  const PAGE_SIZE = 15;
-
-  // Selection / details
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [selectedFeedbackId, setSelectedFeedbackId] = useState<string | null>(null);
-
-  // Modals
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
-  const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
-  const [bulkStatusTarget, setBulkStatusTarget] = useState("resolved");
-  const [pendingReviewToggle, setPendingReviewToggle] = useState<{ id: string; show: boolean } | null>(null);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createForm, setCreateForm] = useState<AdminFeedbackFormState>(INITIAL_ADMIN_FEEDBACK_FORM);
-  const [createErrors, setCreateErrors] = useState<AdminFeedbackFieldErrors>({});
-  const [createError, setCreateError] = useState("");
-  const [creating, setCreating] = useState(false);
-
-  // Toast
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-
-  // Header checkbox ref for indeterminate state
-  const headerCheckboxRef = useRef<HTMLInputElement>(null);
-
-  // ---------------------------------------------------------------------------
-  // Load data
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError("");
-      const token = await getAdminToken();
-      if (!token) {
-        router.push("/admin/login");
-        return;
-      }
-      try {
-        const res = await fetch(`${API_URL}/api/admin/feedback`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 401) {
-          router.push("/admin/login");
-          return;
-        }
-        if (!res.ok) throw new Error("Failed to load feedback");
-        const json: FeedbackResponse = await res.json();
-        setData(json);
-      } catch {
-        setError("Could not load feedback. Please refresh.");
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, [router]);
-
-  // ---------------------------------------------------------------------------
-  // Toast
-  // ---------------------------------------------------------------------------
-
-  function showToast(message: string, type: "success" | "error") {
-    setToast({ message, type });
-  }
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(t);
-  }, [toast]);
-
-  // ---------------------------------------------------------------------------
-  // Filtering / pagination
-  // ---------------------------------------------------------------------------
-
-  const filtered = useMemo(() => {
-    if (!data) return [];
-    let items = data.items;
-    if (originFilter !== "all") items = items.filter((i) => i.origin === originFilter);
-    if (typeFilter !== "all") items = items.filter((i) => i.feedback_type === typeFilter);
-    if (preOrderReasonFilter !== "all") items = items.filter((i) => i.reason === preOrderReasonFilter);
-    if (statusFilter !== "all") items = items.filter((i) => i.status === statusFilter);
-    if (searchQuery.trim()) {
-      const q = searchQuery.trim().toLowerCase();
-      items = items.filter(
-        (i) =>
-          i.origin_label.toLowerCase().includes(q) ||
-          i.feedback_type_label.toLowerCase().includes(q) ||
-          (i.name ?? "").toLowerCase().includes(q) ||
-          (i.contact ?? "").toLowerCase().includes(q) ||
-          (i.reason_label ?? "").toLowerCase().includes(q) ||
-          (i.other_details ?? "").toLowerCase().includes(q) ||
-          (i.message ?? "").toLowerCase().includes(q)
-      );
-    }
-    return items;
-  }, [data, originFilter, typeFilter, preOrderReasonFilter, statusFilter, searchQuery]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-  const selectedFeedback = useMemo(
-    () => (selectedFeedbackId ? data?.items.find((item) => item.id === selectedFeedbackId) ?? null : null),
-    [data, selectedFeedbackId]
-  );
-
-  useEffect(() => { setPage(1); }, [originFilter, typeFilter, preOrderReasonFilter, statusFilter, searchQuery]);
-  useEffect(() => { setPage((prev) => Math.min(prev, totalPages)); }, [totalPages]);
-
-  const sortedMetrics = useMemo(
-    () => (data ? [...data.reason_metrics].sort((a, b) => b.count - a.count).filter((m) => m.count > 0) : []),
-    [data]
-  );
-
-  const hasFilters = originFilter !== "all"
-    || typeFilter !== "all"
-    || preOrderReasonFilter !== "all"
-    || statusFilter !== "all"
-    || !!searchQuery;
-
-  function recomputeReasonMetrics(items: FeedbackItem[], template: FeedbackMetric[]): FeedbackMetric[] {
-    const batchFeedbackCount = items.filter(
-      (i) => i.origin === "events_page_non_customer" || i.origin === "event_reminder_email"
-    ).length;
-    return template.map((metric) => {
-      const count = items.filter(
-        (i) => (i.origin === "events_page_non_customer" || i.origin === "event_reminder_email") && i.reason === metric.reason
-      ).length;
-      return {
-        ...metric,
-        count,
-        pct: batchFeedbackCount > 0 ? Math.round((count / batchFeedbackCount) * 100) : 0,
-      };
-    });
-  }
-
-  function rebuildFeedbackData(previous: FeedbackResponse, items: FeedbackItem[]): FeedbackResponse {
-    return {
-      ...previous,
-      items,
-      total: items.length,
-      origin_counts: buildOriginCounts(items),
-      type_counts: buildTypeCounts(items),
-      reason_metrics: recomputeReasonMetrics(items, previous.reason_metrics),
-    };
-  }
-
-  // ---------------------------------------------------------------------------
-  // Header checkbox indeterminate state
-  // ---------------------------------------------------------------------------
-
-  const allOnPageSelected = paginated.length > 0 && paginated.every((i) => selectedIds.has(i.id));
-  const someOnPageSelected = paginated.some((i) => selectedIds.has(i.id));
-
-  useEffect(() => {
-    if (headerCheckboxRef.current) {
-      headerCheckboxRef.current.indeterminate = someOnPageSelected && !allOnPageSelected;
-    }
-  }, [someOnPageSelected, allOnPageSelected]);
-
-  function toggleSelectAll() {
-    if (allOnPageSelected) {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        paginated.forEach((i) => next.delete(i.id));
-        return next;
-      });
-    } else {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        paginated.forEach((i) => next.add(i.id));
-        return next;
-      });
-    }
-  }
-
-  function toggleSelect(id: string) {
-    setSelectedIds((prev) => toggleSelectedId(prev, id));
-  }
-
-  // ---------------------------------------------------------------------------
-  // API mutation helpers
-  // ---------------------------------------------------------------------------
-
-  async function getAuthHeader(): Promise<Record<string, string>> {
-    const token = await getAdminToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
-  }
+  const { originFilter, typeFilter, preOrderReasonFilter, statusFilter, searchQuery, page } = filters;
+  const { deleteTarget, showBulkDeleteModal, showBulkStatusModal, bulkStatusTarget, pendingReviewToggle, showCreateModal } = overlays;
+  const { createForm, createErrors, createError, creating } = createState;
+  const setOriginFilter = (value: string) => setFilter("originFilter", value);
+  const setPreOrderReasonFilter = (value: string) => setFilter("preOrderReasonFilter", value);
+  const setPage = (value: number) => setFilter("page", value);
+  const setDeleteTarget = (value: string | null) => setOverlay("deleteTarget", value);
+  const setShowBulkDeleteModal = (value: boolean) => setOverlay("showBulkDeleteModal", value);
+  const setShowBulkStatusModal = (value: boolean) => setOverlay("showBulkStatusModal", value);
+  const setBulkStatusTarget = (value: string) => setOverlay("bulkStatusTarget", value);
+  const setPendingReviewToggle = (value: { id: string; show: boolean } | null) => setOverlay("pendingReviewToggle", value);
+  const setShowCreateModal = (value: boolean) => setOverlay("showCreateModal", value);
+  const setCreateForm: Dispatch<SetStateAction<AdminFeedbackFormState>> = (value) => setCreateState("createForm", value);
+  const setCreateErrors: Dispatch<SetStateAction<AdminFeedbackFieldErrors>> = (value) => setCreateState("createErrors", value);
+  const setCreateError = (value: string) => setCreateState("createError", value);
+  const setCreating = (value: boolean) => setCreateState("creating", value);
 
   const activeCreateType = ADMIN_FEEDBACK_TYPE_CONFIG[createForm.feedback_type];
   const createFormSupportsReviews = createForm.feedback_type === "feedback";
@@ -976,7 +1192,7 @@ export default function AdminFeedbackPage() {
     setCreateError("");
 
     try {
-      const headers = await getAuthHeader();
+      const headers = await getFeedbackAuthHeader();
       const payload = buildAdminFeedbackPayload(createForm, activeCreateType, createFormSupportsReviews);
       const created = await submitAdminFeedback(headers, payload);
       if (!created) {
@@ -997,176 +1213,28 @@ export default function AdminFeedbackPage() {
     }
   }
 
-  async function handleStatusChange(id: string, status: string): Promise<void> {
-    const headers = await getAuthHeader();
-    const previousStatus = data?.items.find((i) => i.id === id)?.status;
-    // Optimistic update
-    setData((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        items: prev.items.map((item) => (item.id === id ? { ...item, status } : item)),
-      };
-    });
-    try {
-      const res = await fetch(`${API_URL}/api/admin/feedback/${id}/status`, {
-        method: "PATCH",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      showToast("Status updated", "success");
-    } catch {
-      if (previousStatus) {
-        setData((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            items: prev.items.map((item) => (item.id === id ? { ...item, status: previousStatus } : item)),
-          };
-        });
-      }
-      showToast("Failed to update status", "error");
-    }
+  function handleStatusChange(id: string, status: string) {
+    return updateFeedbackStatus(id, status, data, setData, showToast);
   }
 
-  async function handleCommentSave(id: string, admin_comment: string | null): Promise<void> {
-    const headers = await getAuthHeader();
-    try {
-      const res = await fetch(`${API_URL}/api/admin/feedback/${id}/comment`, {
-        method: "PATCH",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ admin_comment }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      setData((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          items: prev.items.map((item) => (item.id === id ? { ...item, admin_comment } : item)),
-        };
-      });
-      showToast("Note saved", "success");
-    } catch {
-      showToast("Failed to save note", "error");
-    }
+  function handleCommentSave(id: string, adminComment: string | null) {
+    return saveFeedbackComment(id, adminComment, setData, showToast);
   }
 
-  async function handleToggleShowInReviews(id: string, nextShowInReviews: boolean) {
-    const headers = await getAuthHeader();
-    const previousValue = data?.items.find((i) => i.id === id)?.show_in_reviews;
-    // Optimistic update
-    setData((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        items: prev.items.map((item) =>
-          item.id === id ? { ...item, show_in_reviews: nextShowInReviews } : item
-        ),
-      };
-    });
-    try {
-      const res = await fetch(`${API_URL}/api/admin/feedback/${id}/show-in-reviews`, {
-        method: "PATCH",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ show_in_reviews: nextShowInReviews }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      const result = await res.json();
-      showToast(result.show_in_reviews ? "Shown in reviews" : "Hidden from reviews", "success");
-    } catch {
-      // Rollback
-      if (previousValue !== undefined) {
-        setData((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            items: prev.items.map((item) =>
-              item.id === id ? { ...item, show_in_reviews: previousValue } : item
-            ),
-          };
-        });
-      }
-      showToast("Failed to update review visibility", "error");
-    }
+  function handleToggleShowInReviews(id: string, visible: boolean) {
+    return toggleFeedbackReviewVisibility(id, visible, data, setData, showToast);
   }
 
-  async function handleDelete(id: string) {
-    const headers = await getAuthHeader();
-    try {
-      const res = await fetch(`${API_URL}/api/admin/feedback/${id}`, {
-        method: "DELETE",
-        headers,
-      });
-      if (!res.ok) throw new Error("Failed");
-      setData((prev) => {
-        if (!prev) return prev;
-        const nextItems = prev.items.filter((i) => i.id !== id);
-        return rebuildFeedbackData(prev, nextItems);
-      });
-      setSelectedIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-      if (selectedFeedbackId === id) setSelectedFeedbackId(null);
-      setDeleteTarget(null);
-      showToast("Entry deleted", "success");
-    } catch {
-      showToast("Failed to delete entry", "error");
-    }
+  function handleDelete(id: string) {
+    return deleteFeedbackEntry(id, setData, setSelectedIds, selectedFeedbackId, setSelectedFeedbackId, () => setDeleteTarget(null), showToast);
   }
 
-  function applyBulkFeedbackDeletion(completedIds: string[]) {
-    setData((prev) => {
-      if (!prev) return prev;
-      return rebuildFeedbackData(prev, removeItemsByIds(prev.items, completedIds));
-    });
-    setSelectedIds((prev) => removeSelectedIds(prev, completedIds));
-    if (selectedFeedbackId && completedIds.includes(selectedFeedbackId)) {
-      setSelectedFeedbackId(null);
-    }
+  function handleBulkDelete() {
+    return deleteFeedbackEntries(Array.from(selectedIds), setData, setSelectedIds, selectedFeedbackId, setSelectedFeedbackId, () => setShowBulkDeleteModal(false), showToast);
   }
 
-  function applyBulkFeedbackStatus(completedIds: string[]) {
-    setData((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        items: updateItemStatuses(prev.items, completedIds, bulkStatusTarget),
-      };
-    });
-  }
-
-  async function handleBulkDelete() {
-    const ids = Array.from(selectedIds);
-    await runAdminBulkAction({
-      ids,
-      request: async () => postAdminBulkDelete(
-        `${API_URL}/api/admin/feedback/bulk-delete`, ids, await getAuthHeader(),
-      ),
-      applyCompleted: applyBulkFeedbackDeletion,
-      closeModal: () => setShowBulkDeleteModal(false),
-      notify: showToast,
-      successMessage: `${ids.length} entr${ids.length === 1 ? "y" : "ies"} deleted`,
-      failureAction: "Deleted",
-      failureMessage: "Failed to delete entries",
-    });
-  }
-
-  async function handleBulkStatus() {
-    const ids = Array.from(selectedIds);
-    await runAdminBulkAction({
-      ids,
-      request: async () => postAdminBulkStatus(
-        `${API_URL}/api/admin/feedback/bulk-status`,
-        ids,
-        await getAuthHeader(),
-        bulkStatusTarget,
-      ),
-      applyCompleted: applyBulkFeedbackStatus,
-      closeModal: () => setShowBulkStatusModal(false),
-      notify: showToast,
-      successMessage: `${ids.length} entr${ids.length === 1 ? "y" : "ies"} updated`,
-      failureAction: "Updated",
-      failureMessage: "Failed to update status",
-    });
+  function handleBulkStatus() {
+    return updateFeedbackStatuses(Array.from(selectedIds), bulkStatusTarget, setData, () => setShowBulkStatusModal(false), showToast);
   }
 
   // ---------------------------------------------------------------------------
@@ -1226,194 +1294,36 @@ export default function AdminFeedbackPage() {
         </div>
       )}
 
-      {/* Top metric cards */}
-      {loading ? (
-          <CompactMetricRail>
-          {[...Array(5)].map((_, i) => (
-            <CompactMetricCard key={i} variant={i === 0 ? "dark" : "light"}>
-              <Skeleton w="60%" h={10} />
-              <div style={{ marginTop: 12 }}>
-                <Skeleton w="40%" h={24} />
-              </div>
-            </CompactMetricCard>
-          ))}
-        </CompactMetricRail>
-      ) : data && (
-        <CompactMetricRail>
-          <CompactMetricTotalCard label="Total Responses" value={data.total} />
+      <FeedbackMetrics
+        loading={loading}
+        data={data}
+        sortedMetrics={sortedMetrics}
+        originFilter={originFilter}
+        reasonFilter={preOrderReasonFilter}
+        onOriginFilter={setOriginFilter}
+        onReasonFilter={setPreOrderReasonFilter}
+      />
 
-          <OriginMetricCard label="Contact Us" count={data.origin_counts.contact_us} description="Messages and inquiries" selected={originFilter === "contact_us"} onClick={() => setOriginFilter(originFilter === "contact_us" ? "all" : "contact_us")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-info-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
-          <OriginMetricCard label="Events Page" count={data.origin_counts.events_page_non_customer} description="Pre-order feedback" selected={originFilter === "events_page_non_customer"} onClick={() => setOriginFilter(originFilter === "events_page_non_customer" ? "all" : "events_page_non_customer")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>} />
-          <OriginMetricCard label="Customers" count={data.origin_counts.events_page_customer} description="Post-order feedback" selected={originFilter === "events_page_customer"} onClick={() => setOriginFilter(originFilter === "events_page_customer" ? "all" : "events_page_customer")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-success-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>} />
-          <OriginMetricCard label="Reminder Email" count={data.origin_counts.event_reminder_email} description="Event reminder responses" selected={originFilter === "event_reminder_email"} onClick={() => setOriginFilter(originFilter === "event_reminder_email" ? "all" : "event_reminder_email")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-info-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>} />
-          <OriginMetricCard label="Admin Submitted" count={data.origin_counts.admin_submission} description="Captured outside the platform" selected={originFilter === "admin_submission"} onClick={() => setOriginFilter(originFilter === "admin_submission" ? "all" : "admin_submission")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-success-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12h6" /><path d="M12 9v6" /><path d="M9 3h6l1 2h4v16H4V5h4l1-2z" /></svg>} />
+      <FeedbackReasonBreakdown
+        visible={!loading && Boolean(data) && ((data?.origin_counts.events_page_non_customer ?? 0) + (data?.origin_counts.event_reminder_email ?? 0) > 0)}
+        metrics={sortedMetrics}
+        activeReason={preOrderReasonFilter}
+        onReasonChange={setPreOrderReasonFilter}
+      />
 
-          {sortedMetrics[0] && (() => {
-            const m = sortedMetrics[0];
-            const colors = REASON_COLORS[m.reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" };
-            return (
-              <CompactMetricCard
-                onClick={() => setPreOrderReasonFilter(preOrderReasonFilter === m.reason ? "all" : m.reason)}
-                selected={preOrderReasonFilter === m.reason}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                  <p
-                    style={{
-                      fontSize: 10,
-                      fontWeight: 600,
-                      color: "var(--color-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.08em",
-                    }}
-                  >
-                    Top Reason
-                  </p>
-                  <span style={{ fontSize: 10, fontWeight: 600, padding: "2px 7px", borderRadius: "999px", background: colors.bg, color: colors.text }}>
-                    {m.pct}%
-                  </span>
-                </div>
-                <p style={{ fontSize: 13, fontWeight: 700, color: "var(--color-forest)", lineHeight: 1.3, marginBottom: 6 }}>
-                  {m.label}
-                </p>
-                <p
-                  style={{
-                    fontSize: "clamp(22px, 1.8vw, 24px)",
-                    fontWeight: 700,
-                    color: "var(--color-forest)",
-                    fontFamily: "var(--font-serif)",
-                    lineHeight: 1,
-                  }}
-                >
-                  {m.count}
-                </p>
-              </CompactMetricCard>
-            );
-          })()}
-        </CompactMetricRail>
-      )}
-
-      {/* Reason breakdown (non-customer only) */}
-      {!loading && data && (data.origin_counts.events_page_non_customer + data.origin_counts.event_reminder_email) > 0 && (
-        <div
-          style={{
-            background: "white",
-            border: "1px solid var(--color-border)",
-            borderRadius: 20,
-            padding: 20,
-            marginBottom: 24,
-          }}
-        >
-          <p style={{ fontSize: 12, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 16 }}>
-            Batch Feedback Reason Breakdown
-          </p>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {sortedMetrics.map((m) => {
-              const colors = REASON_COLORS[m.reason] ?? { bg: "var(--color-cream)", text: "var(--color-muted)" };
-              const isActive = preOrderReasonFilter === m.reason;
-              return (
-                <div
-                  key={m.reason}
-                  style={{ display: "flex", alignItems: "center", gap: 12, cursor: "pointer" }}
-                  onClick={() => setPreOrderReasonFilter(isActive ? "all" : m.reason)}
-                >
-                  <div style={{ width: 140, flexShrink: 0, fontSize: 13, color: isActive ? "var(--color-forest)" : "var(--color-text)", fontWeight: isActive ? 600 : 400, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {m.label}
-                  </div>
-                  <div style={{ flex: 1, height: 8, borderRadius: 4, background: "var(--color-cream)", overflow: "hidden" }}>
-                    <div
-                      style={{
-                        height: 8,
-                        borderRadius: 4,
-                        width: `${m.pct}%`,
-                        background: isActive ? "var(--color-forest)" : colors.text,
-                        opacity: isActive ? 1 : 0.6,
-                        transition: "width 0.4s ease, background 0.15s",
-                      }}
-                    />
-                  </div>
-                  <div style={{ width: 36, flexShrink: 0, textAlign: "right", fontSize: 13, fontWeight: 600, color: "var(--color-forest)" }}>
-                    {m.count}
-                  </div>
-                  <div style={{ width: 36, flexShrink: 0, textAlign: "right", fontSize: 12, color: "var(--color-muted)" }}>
-                    {m.pct}%
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        <AdminSearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search origin, type, name, contact, message..." />
-
-        <select
-          value={originFilter}
-          onChange={(e) => setOriginFilter(e.target.value)}
-          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
-        >
-          <option value="all">All origins</option>
-          <option value="contact_us">Contact Us</option>
-          <option value="events_page_non_customer">Events Page (Non-customer)</option>
-          <option value="events_page_customer">Events Page (Customer)</option>
-          <option value="event_reminder_email">Event Reminder Email</option>
-          <option value="reviews_page">Reviews Page</option>
-          <option value="admin_submission">Admin Submission</option>
-        </select>
-
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
-          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
-        >
-          <option value="all">All types</option>
-          <option value="general_question">General Question</option>
-          <option value="feedback">Feedback</option>
-          <option value="collaboration">Collaboration</option>
-          <option value="other">Other</option>
-        </select>
-
-        <select
-          value={preOrderReasonFilter}
-          onChange={(e) => setPreOrderReasonFilter(e.target.value)}
-          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
-        >
-          <option value="all">All pre-order reasons</option>
-          {PRE_ORDER_REASON_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>{option.label}</option>
-          ))}
-        </select>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          style={{ padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
-        >
-          <option value="all">All statuses</option>
-          <option value="new">New</option>
-          <option value="in_progress">In Progress</option>
-          <option value="resolved">Resolved</option>
-        </select>
-
-        {hasFilters && (
-          <AdminClearFiltersButton
-            onClick={() => {
-              setOriginFilter("all");
-              setTypeFilter("all");
-              setPreOrderReasonFilter("all");
-              setStatusFilter("all");
-              setSearchQuery("");
-            }}
-          />
-        )}
-
-        {!loading && (
-          <span style={{ fontSize: 13, color: "var(--color-muted)", marginLeft: "auto" }}>
-            {filtered.length} result{filtered.length !== 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
+      <FeedbackFilters
+        filters={{ originFilter, typeFilter, preOrderReasonFilter, statusFilter, searchQuery }}
+        loading={loading}
+        resultCount={filtered.length}
+        onChange={(field, value) => setFilter(field, value)}
+        onClear={() => {
+          setFilter("originFilter", "all");
+          setFilter("typeFilter", "all");
+          setFilter("preOrderReasonFilter", "all");
+          setFilter("statusFilter", "all");
+          setFilter("searchQuery", "");
+        }}
+      />
 
       <AdminBulkTableFrame
         bulk={buildAdminBulkStatusProps(selectedIds.size, bulkStatusTarget, [{ value: "new", label: "New" }, { value: "in_progress", label: "In Progress" }, { value: "resolved", label: "Resolved" }], setBulkStatusTarget, () => setShowBulkStatusModal(true), () => setShowBulkDeleteModal(true), () => setSelectedIds(new Set()), btnBase, btnDanger)}
@@ -1427,525 +1337,43 @@ export default function AdminFeedbackPage() {
             onToggleAll={toggleSelectAll}
             headers={["Date", "Origin", "Type", "Name", "Contact", "Pre-order Reason", "Status", "Message / Details"]}
           >
-                {paginated.map((item, idx) => {
-                  return (
-                    <Fragment key={item.id}>
-                      <tr
-                        onClick={() => setSelectedFeedbackId(item.id)}
-                        style={{
-                          borderBottom: idx < paginated.length - 1 ? "1px solid var(--color-border)" : "none",
-                          background: "white",
-                          cursor: "pointer",
-                          transition: "background 0.1s",
-                        }}
-                      >
-                        {/* Checkbox */}
-                        <td
-                          style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(item.id)}
-                            onChange={() => toggleSelect(item.id)}
-                            style={{ cursor: "pointer" }}
-                          />
-                        </td>
-
-                        {/* Date */}
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <div style={{ fontWeight: 500, color: "var(--color-text)" }}>{formatDate(item.created_at)}</div>
-                          <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 2 }}>{formatTime(item.created_at)}</div>
-                        </td>
-
-                        {/* Origin */}
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <OriginBadge origin={item.origin} label={item.origin_label} />
-                        </td>
-
-                        {/* Type */}
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <TypeBadge type={item.feedback_type} label={item.feedback_type_label} />
-                        </td>
-
-                        {/* Name */}
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          {item.name ? (
-                            <span style={{ fontWeight: 500, color: "var(--color-text)" }}>{item.name}</span>
-                          ) : (
-                            <span style={{ color: "var(--color-muted)", fontStyle: "italic" }}>Anonymous</span>
-                          )}
-                        </td>
-
-                        {/* Contact */}
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          {item.contact ? (
-                            <span style={{ fontSize: 13, color: "var(--color-text)" }}>{item.contact}</span>
-                          ) : (
-                            <span style={{ color: "var(--color-border)" }}>-</span>
-                          )}
-                        </td>
-
-                        {/* Pre-order Reason */}
-                        <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
-                          {item.reason && item.reason_label ? (
-                            <ReasonBadge reason={item.reason} label={item.reason_label} />
-                          ) : (
-                            <span style={{ color: "var(--color-border)" }}>-</span>
-                          )}
-                        </td>
-
-                        {/* Status */}
-                        <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <StatusBadge status={item.status} />
-                            {item.rating != null && (
-                              <div style={{ display: "flex", gap: 1 }}>
-                                {[1, 2, 3, 4, 5].map((s) => (
-                                  <svg
-                                    key={s}
-                                    width="11"
-                                    height="11"
-                                    viewBox="0 0 24 24"
-                                    fill={s <= item.rating! ? "var(--color-accent)" : "none"}
-                                    stroke={s <= item.rating! ? "var(--color-accent)" : "var(--color-border)"}
-                                    strokeWidth="1.5"
-                                  >
-                                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                                  </svg>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-
-                        {/* Message / Details */}
-                        <td style={{ padding: "13px 16px", color: "var(--color-text)", maxWidth: 280, verticalAlign: "top" }}>
-                          {item.message ? (
-                            <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.message}</span>
-                          ) : item.other_details ? (
-                            <span style={{ color: "var(--color-muted)", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.other_details}</span>
-                          ) : (
-                            <span style={{ color: "var(--color-border)" }}>-</span>
-                          )}
-                        </td>
-
-                        {/* Actions */}
-                        <td
-                          style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                            {/* Show in reviews toggle */}
-                            <button
-                              onClick={() => setPendingReviewToggle({ id: item.id, show: !item.show_in_reviews })}
-                              title={item.show_in_reviews ? "Hide from reviews" : "Show in reviews"}
-                              style={{
-                                padding: "5px 8px",
-                                borderRadius: 8,
-                                border: item.show_in_reviews ? "1px solid var(--color-warning-border)" : "1px solid var(--color-border)",
-                                background: item.show_in_reviews ? "var(--color-warning-bg)" : "white",
-                                cursor: "pointer",
-                                color: item.show_in_reviews ? "var(--color-warning-text)" : "var(--color-muted)",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                transition: "all 0.15s",
-                              }}
-                            >
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill={item.show_in_reviews ? "var(--color-accent)" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                                <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
-                              </svg>
-                            </button>
-                            {/* Delete */}
-                            <AdminDeleteIconButton onClick={() => setDeleteTarget(item.id)} />
-                          </div>
-                        </td>
-                      </tr>
-                    </Fragment>
-                  );
-                })}
+            {paginated.map((item, index) => (
+              <FeedbackTableRow
+                key={item.id}
+                item={item}
+                selected={selectedIds.has(item.id)}
+                last={index === paginated.length - 1}
+                onOpen={() => setSelectedFeedbackId(item.id)}
+                onToggleSelected={() => toggleSelect(item.id)}
+                onToggleReview={() => setPendingReviewToggle({ id: item.id, show: !item.show_in_reviews })}
+                onDelete={() => setDeleteTarget(item.id)}
+              />
+            ))}
           </AdminSelectableTable>
       </AdminBulkTableFrame>
 
       {!loading && <AdminPagination page={page} totalPages={totalPages} onPageChange={setPage} />}
 
       {/* Single delete modal */}
-      <Modal
-        isOpen={showCreateModal}
-        onClose={closeCreateModal}
-        title="Submit admin feedback"
-        size="xl"
-        actions={
-          <>
-            <button onClick={closeCreateModal} disabled={creating} style={btnBase}>Cancel</button>
-            <button onClick={handleCreateFeedback} disabled={creating} style={{ ...btnPrimary, opacity: creating ? 0.7 : 1, cursor: creating ? "not-allowed" : "pointer" }}>
-              {creating ? "Submitting..." : "Submit feedback"}
-            </button>
-          </>
-        }
-      >
-        <div style={{ display: "grid", gap: 20 }}>
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 16,
-              border: "1px solid var(--color-success-border)",
-              background: "var(--color-success-bg)",
-              display: "grid",
-              gap: 6,
-            }}
-          >
-            <p style={{ margin: 0, fontSize: 14, fontWeight: 600, color: "var(--color-forest)" }}>
-              Capture feedback shared outside the platform.
-            </p>
-            <p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>
-              Start by choosing the type. The form keeps only the required fields up front, then moves optional context to the end.
-            </p>
-          </div>
+      <FeedbackCreateModal
+        showCreateModal={showCreateModal}
+        closeCreateModal={closeCreateModal}
+        handleCreateFeedback={handleCreateFeedback}
+        creating={creating}
+        btnBase={btnBase}
+        btnPrimary={btnPrimary}
+        createForm={createForm}
+        createErrors={createErrors}
+        createError={createError}
+        activeCreateType={activeCreateType}
+        createFormSupportsReviews={createFormSupportsReviews}
+        updateCreateForm={updateCreateForm}
+        updateCreateRating={updateCreateRating}
+      />
 
-          <div style={{ display: "grid", gap: 10 }}>
-            <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0 }}>
-              Feedback type
-            </p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-              {(Object.keys(ADMIN_FEEDBACK_TYPE_CONFIG) as FeedbackType[]).map((type) => {
-                const config = ADMIN_FEEDBACK_TYPE_CONFIG[type];
-                const selected = createForm.feedback_type === type;
-                return (
-                  <button
-                    key={type}
-                    onClick={() => updateCreateForm("feedback_type", type)}
-                    style={{
-                      textAlign: "left",
-                      padding: 14,
-                      borderRadius: 14,
-                      border: selected ? "1px solid var(--color-forest)" : "1px solid var(--color-border)",
-                      background: selected ? "var(--color-success-bg)" : "white",
-                      cursor: "pointer",
-                      display: "grid",
-                      gap: 6,
-                    }}
-                  >
-                    <span style={{ fontSize: 14, fontWeight: 600, color: selected ? "var(--color-forest)" : "var(--color-text)" }}>
-                      {config.title}
-                    </span>
-                    <span style={{ fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>
-                      {config.description}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gap: 14 }}>
-            <div>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0, marginBottom: 6 }}>
-                Required details
-              </p>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>
-                {activeCreateType.description}
-              </p>
-            </div>
-
-            {activeCreateType.showContact && activeCreateType.contactRequired && (
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
-                  {activeCreateType.contactLabel} <span style={{ color: "var(--color-error-text)" }}>*</span>
-                </label>
-                <input
-                  type="text"
-                  value={createForm.contact}
-                  onChange={(e) => updateCreateForm("contact", e.target.value)}
-                  placeholder={activeCreateType.contactPlaceholder}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    border: createErrors.contact ? "1px solid var(--color-error-text)" : "1px solid var(--color-border)",
-                    fontSize: 13,
-                    color: "var(--color-text)",
-                    background: "white",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-                {createErrors.contact && <p style={{ margin: 0, fontSize: 12, color: "var(--color-error-text)" }}>{createErrors.contact}</p>}
-              </div>
-            )}
-
-            <div style={{ display: "grid", gap: 6 }}>
-              <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
-                {activeCreateType.messageLabel} <span style={{ color: "var(--color-error-text)" }}>*</span>
-              </label>
-              <textarea
-                value={createForm.message}
-                onChange={(e) => updateCreateForm("message", e.target.value)}
-                placeholder={activeCreateType.messagePlaceholder}
-                rows={5}
-                style={{
-                  width: "100%",
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: createErrors.message ? "1px solid var(--color-error-text)" : "1px solid var(--color-border)",
-                  fontSize: 13,
-                  color: "var(--color-text)",
-                  background: "white",
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-              {createErrors.message && <p style={{ margin: 0, fontSize: 12, color: "var(--color-error-text)" }}>{createErrors.message}</p>}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gap: 14 }}>
-            <div>
-              <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", margin: 0, marginBottom: 6 }}>
-                Optional context
-              </p>
-              <p style={{ margin: 0, fontSize: 13, color: "var(--color-muted)", lineHeight: 1.6 }}>
-                Add supporting details only if they help the team understand or follow up on the entry.
-              </p>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14 }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Name</label>
-                <input
-                  type="text"
-                  value={createForm.name}
-                  onChange={(e) => updateCreateForm("name", e.target.value)}
-                  placeholder="Who shared this feedback?"
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    border: "1px solid var(--color-border)",
-                    fontSize: 13,
-                    color: "var(--color-text)",
-                    background: "white",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-
-              {activeCreateType.showContact && !activeCreateType.contactRequired && (
-                <div style={{ display: "grid", gap: 6 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{activeCreateType.contactLabel}</label>
-                  <input
-                    type="text"
-                    value={createForm.contact}
-                    onChange={(e) => updateCreateForm("contact", e.target.value)}
-                    placeholder={activeCreateType.contactPlaceholder}
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 12,
-                      border: "1px solid var(--color-border)",
-                      fontSize: 13,
-                      color: "var(--color-text)",
-                      background: "white",
-                      outline: "none",
-                      boxSizing: "border-box",
-                    }}
-                  />
-                </div>
-              )}
-
-              {activeCreateType.showOrderId && (
-                <div style={{ display: "grid", gap: 6 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Related order ID</label>
-                  <input
-                    type="text"
-                    value={createForm.order_id}
-                    onChange={(e) => updateCreateForm("order_id", e.target.value)}
-                    placeholder="Add an order ID only if this feedback links to one"
-                    style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 12,
-                      border: "1px solid var(--color-border)",
-                      fontSize: 13,
-                      color: "var(--color-text)",
-                      background: "white",
-                      outline: "none",
-                      boxSizing: "border-box",
-                    }}
-                  />
-                </div>
-              )}
-            </div>
-
-            {activeCreateType.showOtherDetails && (
-              <div style={{ display: "grid", gap: 6 }}>
-                <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>{activeCreateType.otherDetailsLabel}</label>
-                <textarea
-                  value={createForm.other_details}
-                  onChange={(e) => updateCreateForm("other_details", e.target.value)}
-                  placeholder={activeCreateType.otherDetailsPlaceholder}
-                  rows={3}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    borderRadius: 12,
-                    border: "1px solid var(--color-border)",
-                    fontSize: 13,
-                    color: "var(--color-text)",
-                    background: "white",
-                    resize: "vertical",
-                    fontFamily: "inherit",
-                    outline: "none",
-                    boxSizing: "border-box",
-                  }}
-                />
-              </div>
-            )}
-
-            {createFormSupportsReviews && (
-              <div
-                style={{
-                  padding: 16,
-                  borderRadius: 16,
-                  border: "1px solid var(--color-warning-border)",
-                  background: "var(--color-warning-bg)",
-                  display: "grid",
-                  gap: 12,
-                }}
-              >
-                <div style={{ display: "grid", gap: 4 }}>
-                  <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Star rating</label>
-                  <p style={{ margin: 0, fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>
-                    Add an optional rating if this entry should appear as a starred review.
-                  </p>
-                </div>
-
-                <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                  <StarRating value={createForm.rating} onChange={updateCreateRating} size={28} mode="input" />
-                  <span style={{ fontSize: 13, color: "var(--color-muted)" }}>
-                    {createForm.rating > 0 ? `${createForm.rating} out of 5` : "No rating selected"}
-                  </span>
-                  {createForm.rating > 0 && (
-                    <button onClick={() => updateCreateRating(0)} style={btnBase}>
-                      Clear rating
-                    </button>
-                  )}
-                </div>
-
-                <label
-                  style={{
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: 10,
-                    cursor: createForm.rating > 0 ? "pointer" : "not-allowed",
-                    opacity: createForm.rating > 0 ? 1 : 0.6,
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={createForm.show_in_reviews}
-                    disabled={createForm.rating === 0}
-                    onChange={(e) => updateCreateForm("show_in_reviews", e.target.checked)}
-                    style={{ marginTop: 2, cursor: createForm.rating > 0 ? "pointer" : "not-allowed" }}
-                  />
-                  <span style={{ display: "grid", gap: 4 }}>
-                    <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>Show on public reviews page</span>
-                    <span style={{ fontSize: 12, color: "var(--color-muted)", lineHeight: 1.5 }}>
-                      This is available after you add a star rating. The entry can still stay internal if this remains unchecked.
-                    </span>
-                  </span>
-                </label>
-              </div>
-            )}
-          </div>
-
-          {createError && (
-            <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid var(--color-error-border)", background: "var(--color-error-bg)", color: "var(--color-error-text)", fontSize: 13 }}>
-              {createError}
-            </div>
-          )}
-        </div>
-      </Modal>
-
-      {/* Single delete modal */}
-      <Modal
-        isOpen={!!deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        title="Delete feedback entry"
-        variant="danger"
-        actions={
-          <>
-            <button onClick={() => setDeleteTarget(null)} style={btnBase}>Cancel</button>
-            <button onClick={() => deleteTarget && handleDelete(deleteTarget)} style={btnDanger}>Delete</button>
-          </>
-        }
-      >
-        This feedback entry will be permanently deleted. This action cannot be undone.
-      </Modal>
-
-      {/* Bulk delete modal */}
-      <Modal
-        isOpen={showBulkDeleteModal}
-        onClose={() => setShowBulkDeleteModal(false)}
-        title={`Delete ${selectedIds.size} entr${selectedIds.size === 1 ? "y" : "ies"}`}
-        variant="danger"
-        actions={
-          <>
-            <button onClick={() => setShowBulkDeleteModal(false)} style={btnBase}>Cancel</button>
-            <button onClick={handleBulkDelete} style={btnDanger}>Delete all</button>
-          </>
-        }
-      >
-        {selectedIds.size} feedback {selectedIds.size === 1 ? "entry" : "entries"} will be permanently deleted. This action cannot be undone.
-      </Modal>
-
-      {/* Bulk status modal */}
-      <Modal
-        isOpen={showBulkStatusModal}
-        onClose={() => setShowBulkStatusModal(false)}
-        title={`Update ${selectedIds.size} entr${selectedIds.size === 1 ? "y" : "ies"}`}
-        actions={
-          <>
-            <button onClick={() => setShowBulkStatusModal(false)} style={btnBase}>Cancel</button>
-            <button onClick={handleBulkStatus} style={btnPrimary}>Apply</button>
-          </>
-        }
-      >
-        Mark {selectedIds.size} selected {selectedIds.size === 1 ? "entry" : "entries"} as{" "}
-        <strong>{bulkStatusTarget === "in_progress" ? "In Progress" : bulkStatusTarget === "resolved" ? "Resolved" : "New"}</strong>?
-      </Modal>
-
-      {/* Review visibility toggle confirmation */}
-      <Modal
-        isOpen={!!pendingReviewToggle}
-        onClose={() => setPendingReviewToggle(null)}
-        title={pendingReviewToggle?.show ? "Show in Reviews" : "Hide from Reviews"}
-        actions={
-          <>
-            <button onClick={() => setPendingReviewToggle(null)} style={btnBase}>Cancel</button>
-            <button
-              onClick={() => {
-                if (pendingReviewToggle) {
-                  handleToggleShowInReviews(pendingReviewToggle.id, pendingReviewToggle.show);
-                  setPendingReviewToggle(null);
-                }
-              }}
-              style={btnPrimary}
-            >
-              {pendingReviewToggle?.show ? "Show" : "Hide"}
-            </button>
-          </>
-        }
-      >
-        <p style={{ color: "var(--color-muted)", fontSize: 14 }}>
-          {pendingReviewToggle?.show
-            ? "This feedback will be visible on the reviews page. Continue?"
-            : "This feedback will be hidden from the reviews page. Continue?"}
-        </p>
-      </Modal>
+      <FeedbackDeleteModals deleteTarget={deleteTarget} selectedCount={selectedIds.size} showBulkDeleteModal={showBulkDeleteModal} cancelStyle={btnBase} deleteStyle={btnDanger} onCloseDelete={() => setDeleteTarget(null)} onDelete={handleDelete} onCloseBulkDelete={() => setShowBulkDeleteModal(false)} onBulkDelete={handleBulkDelete} />
+      <FeedbackBulkStatusModal open={showBulkStatusModal} selectedCount={selectedIds.size} status={bulkStatusTarget} cancelStyle={btnBase} confirmStyle={btnPrimary} onClose={() => setShowBulkStatusModal(false)} onConfirm={handleBulkStatus} />
+      <FeedbackReviewModal pendingReviewToggle={pendingReviewToggle} cancelStyle={btnBase} confirmStyle={btnPrimary} onClose={() => setPendingReviewToggle(null)} onConfirm={(id, show) => { void handleToggleShowInReviews(id, show); setPendingReviewToggle(null); }} />
 
       {/* Feedback details modal */}
       {selectedFeedback && (
@@ -1957,27 +1385,7 @@ export default function AdminFeedbackPage() {
         />
       )}
 
-      {/* Toast */}
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 24,
-            right: 24,
-            zIndex: 200,
-            padding: "12px 20px",
-            borderRadius: 12,
-            fontSize: 14,
-            fontWeight: 500,
-            color: "white",
-            background: toast.type === "success" ? "var(--color-forest)" : "var(--color-error-text)",
-            boxShadow: "0 4px 20px color-mix(in srgb, var(--color-text) 15%, transparent)",
-            transition: "opacity 0.2s",
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
     </div>
   );
 }
