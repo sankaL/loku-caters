@@ -91,6 +91,15 @@ interface ReportItemTypeTotal {
   share: number;
 }
 
+interface CustomerHandoffRow {
+  location: string;
+  timeSlot: string;
+  customer: string;
+  status: string;
+  items: string[];
+  notes: string[];
+}
+
 interface ConfirmDialogState {
   intent: ConfirmIntent;
   title: string;
@@ -107,6 +116,36 @@ function makeDropId(location: string, timeSlot: string) {
 function parseDropId(id: string) {
   const [location, timeSlot] = id.split("|||");
   return { location: location || "Unassigned", timeSlot: timeSlot || "Unassigned" };
+}
+
+function handoffValue(value: string | null | undefined, fallback: string): string {
+  return value || fallback;
+}
+
+function addUniqueNote(notes: string[], note: string | null | undefined, prepend = false) {
+  if (!note || notes.includes(note)) return;
+  if (prepend) notes.unshift(note);
+  else notes.push(note);
+}
+
+function buildCustomerHandoffRows(snapshot: EventPlanSnapshot): CustomerHandoffRow[] {
+  const bundleNotes = new Map(snapshot.bundles.map((bundle) => [bundle.bundle_id, bundle.order_notes || ""]));
+  const rows = new Map<string, CustomerHandoffRow>();
+  for (const row of snapshot.planned_rows.filter((entry) => entry.row_state !== "removed")) {
+    const location = handoffValue(row.pickup_location, "Unassigned");
+    const timeSlot = handoffValue(row.pickup_time_slot, "Unassigned");
+    const customer = handoffValue(row.customer_name, "Extra");
+    const status = handoffValue(row.status, "extra");
+    const key = [location, timeSlot, customer, status, row.source_bundle_id || ""].join("|||");
+    const current = rows.get(key) ?? { location, timeSlot, customer, status, items: [], notes: [] };
+    current.items.push(`${row.planned_item_name} x${row.quantity}`);
+    addUniqueNote(current.notes, row.notes);
+    addUniqueNote(current.notes, bundleNotes.get(row.source_bundle_id || ""), true);
+    rows.set(key, current);
+  }
+  return Array.from(rows.values()).sort((a, b) =>
+    `${a.location} ${a.timeSlot} ${a.customer}`.localeCompare(`${b.location} ${b.timeSlot} ${b.customer}`),
+  );
 }
 
 function statusTone(status: string) {
@@ -797,33 +836,7 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
   }, [snapshot]);
 
   const customerHandoffRows = useMemo(() => {
-    if (!snapshot) return [];
-    const bundleNotes = new Map(snapshot.bundles.map((bundle) => [bundle.bundle_id, bundle.order_notes || ""]));
-    const map = new Map<string, { location: string; timeSlot: string; customer: string; status: string; items: string[]; notes: string[] }>();
-    for (const row of snapshot.planned_rows) {
-      if (row.row_state === "removed") continue;
-      const key = [
-        row.pickup_location || "Unassigned",
-        row.pickup_time_slot || "Unassigned",
-        row.customer_name || "Extra",
-        row.status || "extra",
-        row.source_bundle_id || "",
-      ].join("|||");
-      const current = map.get(key) ?? {
-        location: row.pickup_location || "Unassigned",
-        timeSlot: row.pickup_time_slot || "Unassigned",
-        customer: row.customer_name || "Extra",
-        status: row.status || "extra",
-        items: [],
-        notes: [],
-      };
-      current.items.push(`${row.planned_item_name} x${row.quantity}`);
-      if (row.notes) current.notes.push(row.notes);
-      const bundleNote = row.source_bundle_id ? bundleNotes.get(row.source_bundle_id) : "";
-      if (bundleNote && !current.notes.includes(bundleNote)) current.notes.unshift(bundleNote);
-      map.set(key, current);
-    }
-    return Array.from(map.values()).sort((a, b) => `${a.location} ${a.timeSlot} ${a.customer}`.localeCompare(`${b.location} ${b.timeSlot} ${b.customer}`));
+    return snapshot ? buildCustomerHandoffRows(snapshot) : [];
   }, [snapshot]);
 
   function updateSnapshot(updater: (draft: EventPlanSnapshot) => void) {
