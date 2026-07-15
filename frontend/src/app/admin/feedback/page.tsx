@@ -4,6 +4,7 @@ import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
 import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
+import { AdminBulkActionBar, AdminBulkDeleteButton } from "@/components/admin/AdminCrudParts";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
@@ -93,21 +94,21 @@ function formatTime(iso: string | null): string {
 }
 
 const REASON_COLORS: Record<string, { bg: string; text: string }> = {
-  price_too_high:          { bg: "#fef2f2", text: "#c53030" },
-  location_not_convenient: { bg: "#fff7ed", text: "#9a3412" },
-  dietary_needs:           { bg: "#fefce8", text: "#854d0e" },
-  not_available:           { bg: "#f0fdf4", text: "#166534" },
-  different_menu:          { bg: "#eff6ff", text: "#1d4ed8" },
-  prefer_delivery:         { bg: "#f0f9ff", text: "#0369a1" },
-  not_interested:          { bg: "#faf5ff", text: "#6b21a8" },
+  price_too_high:          { bg: "var(--color-error-bg)", text: "var(--color-error-text)" },
+  location_not_convenient: { bg: "var(--color-warning-bg)", text: "var(--color-warning-text)" },
+  dietary_needs:           { bg: "var(--color-warning-bg)", text: "var(--color-warning-text)" },
+  not_available:           { bg: "var(--color-success-bg)", text: "var(--color-success-text)" },
+  different_menu:          { bg: "var(--color-info-bg)", text: "var(--color-info-text)" },
+  prefer_delivery:         { bg: "var(--color-info-bg)", text: "var(--color-info-text)" },
+  not_interested:          { bg: "var(--color-cream)", text: "var(--color-muted)" },
   other:                   { bg: "var(--color-cream)", text: "var(--color-muted)" },
 };
 
 const ORIGIN_STYLES: Record<FeedbackOrigin, { bg: string; color: string; border: string; label: string }> = {
   contact_us: {
-    bg: "#eff6ff",
-    color: "#1d4ed8",
-    border: "1px solid #bfdbfe",
+    bg: "var(--color-info-bg)",
+    color: "var(--color-info-text)",
+    border: "1px solid var(--color-info-border)",
     label: "Contact Us",
   },
   events_page_non_customer: {
@@ -117,48 +118,48 @@ const ORIGIN_STYLES: Record<FeedbackOrigin, { bg: string; color: string; border:
     label: "Events Page (Non-customer)",
   },
   events_page_customer: {
-    bg: "#f0f7eb",
-    color: "#2d6a2d",
-    border: "1px solid #c8ddb4",
+    bg: "var(--color-success-bg)",
+    color: "var(--color-success-text)",
+    border: "1px solid var(--color-success-border)",
     label: "Events Page (Customer)",
   },
   event_reminder_email: {
-    bg: "#eef2ff",
-    color: "#4338ca",
-    border: "1px solid #c7d2fe",
+    bg: "var(--color-info-bg)",
+    color: "var(--color-info-text)",
+    border: "1px solid var(--color-info-border)",
     label: "Event Reminder Email",
   },
   reviews_page: {
-    bg: "#fffbeb",
-    color: "#92400e",
-    border: "1px solid #fcd34d",
+    bg: "var(--color-warning-bg)",
+    color: "var(--color-warning-text)",
+    border: "1px solid var(--color-warning-border)",
     label: "Reviews Page",
   },
   admin_submission: {
-    bg: "#ecfdf3",
-    color: "#166534",
-    border: "1px solid #bbf7d0",
+    bg: "var(--color-success-bg)",
+    color: "var(--color-success-text)",
+    border: "1px solid var(--color-success-border)",
     label: "Admin Submission",
   },
 };
 
 const TYPE_STYLES: Record<FeedbackType, { bg: string; color: string; border: string; label: string }> = {
   general_question: {
-    bg: "#eff6ff",
-    color: "#1d4ed8",
-    border: "1px solid #bfdbfe",
+    bg: "var(--color-info-bg)",
+    color: "var(--color-info-text)",
+    border: "1px solid var(--color-info-border)",
     label: "General Question",
   },
   feedback: {
-    bg: "#f0f7eb",
-    color: "#2d6a2d",
-    border: "1px solid #c8ddb4",
+    bg: "var(--color-success-bg)",
+    color: "var(--color-success-text)",
+    border: "1px solid var(--color-success-border)",
     label: "Feedback",
   },
   collaboration: {
-    bg: "#fdf2f8",
-    color: "#be185d",
-    border: "1px solid #fbcfe8",
+    bg: "var(--color-error-bg)",
+    color: "var(--color-error-text)",
+    border: "1px solid var(--color-error-border)",
     label: "Collaboration",
   },
   other: {
@@ -362,9 +363,9 @@ function TypeBadge({ type, label }: { type: string; label?: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, { bg: string; text: string; label: string }> = {
-    new:         { bg: "#f3f4f6", text: "#374151", label: "New" },
-    in_progress: { bg: "#fffbeb", text: "#92400e", label: "In Progress" },
-    resolved:    { bg: "#f0fdf4", text: "#166534", label: "Resolved" },
+    new:         { bg: "var(--color-cream)", text: "var(--color-text)", label: "New" },
+    in_progress: { bg: "var(--color-warning-bg)", text: "var(--color-warning-text)", label: "In Progress" },
+    resolved:    { bg: "var(--color-success-bg)", text: "var(--color-success-text)", label: "Resolved" },
   };
   const s = styles[status] ?? styles.new;
   return (
@@ -435,6 +436,82 @@ function DetailField({
   );
 }
 
+function FeedbackStatusControl({ item, onStatusChange }: { item: FeedbackItem; onStatusChange: (id: string, status: string) => Promise<void> }) {
+  const [updating, setUpdating] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
+
+  useEffect(() => setPendingStatus(null), [item.id]);
+
+  async function confirmStatusChange() {
+    if (!pendingStatus) return;
+    const nextStatus = pendingStatus;
+    setPendingStatus(null);
+    setUpdating(true);
+    try {
+      await onStatusChange(item.id, nextStatus);
+    } finally {
+      setUpdating(false);
+    }
+  }
+
+  return (
+    <DetailField label="Status">
+      <select
+        value={item.status}
+        onChange={(event) => setPendingStatus(event.target.value)}
+        disabled={updating}
+        style={{ width: "100%", padding: "9px 12px", borderRadius: 10, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: updating ? "not-allowed" : "pointer", outline: "none" }}
+      >
+        <option value="new">New</option>
+        <option value="in_progress">In Progress</option>
+        <option value="resolved">Resolved</option>
+      </select>
+      {pendingStatus && (
+        <div style={{ marginTop: 10, padding: "10px 12px", background: "var(--color-warning-bg)", border: "1px solid var(--color-warning-border)", borderRadius: 10 }}>
+          <p style={{ fontSize: 12, color: "var(--color-text)", marginBottom: 8 }}>Change status from <strong>{item.status}</strong> to <strong>{pendingStatus}</strong>?</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => setPendingStatus(null)} disabled={updating} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid var(--color-border)", background: "white", color: "var(--color-text)", fontSize: 12, fontWeight: 600, cursor: updating ? "not-allowed" : "pointer" }}>Cancel</button>
+            <button onClick={confirmStatusChange} disabled={updating} style={{ padding: "5px 10px", borderRadius: 8, border: "none", background: "var(--color-forest)", color: "var(--color-cream)", fontSize: 12, fontWeight: 600, cursor: updating ? "not-allowed" : "pointer" }}>{updating ? "Updating..." : "Confirm"}</button>
+          </div>
+        </div>
+      )}
+    </DetailField>
+  );
+}
+
+function FeedbackTextSection({ label, value, emptyMessage }: { label: string; value: string | null; emptyMessage: string }) {
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</p>
+      <div style={{ padding: 16, borderRadius: 16, border: "1px solid var(--color-border)", background: "var(--color-cream)" }}>
+        {value
+          ? <p style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--color-text)", lineHeight: 1.7 }}>{value}</p>
+          : <p style={{ margin: 0, color: "var(--color-muted)", fontStyle: "italic" }}>{emptyMessage}</p>}
+      </div>
+    </div>
+  );
+}
+
+function OriginMetricCard({ label, count, description, icon, selected, onClick }: {
+  label: string;
+  count: number;
+  description: string;
+  icon: React.ReactNode;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <CompactMetricCard onClick={onClick} selected={selected}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+        <p style={{ fontSize: 10, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</p>
+        {icon}
+      </div>
+      <p style={{ fontSize: "clamp(24px, 2vw, 28px)", fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>{count}</p>
+      <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>{description}</p>
+    </CompactMetricCard>
+  );
+}
+
 function FeedbackDetailsModal({
   item,
   onClose,
@@ -448,28 +525,10 @@ function FeedbackDetailsModal({
 }) {
   const [commentText, setCommentText] = useState(item.admin_comment ?? "");
   const [savingComment, setSavingComment] = useState(false);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [pendingStatusChange, setPendingStatusChange] = useState<string | null>(null);
 
   useEffect(() => {
     setCommentText(item.admin_comment ?? "");
   }, [item.admin_comment, item.id]);
-
-  async function handleStatusChangeSelect(e: React.ChangeEvent<HTMLSelectElement>) {
-    setPendingStatusChange(e.target.value);
-  }
-
-  async function confirmStatusChange() {
-    if (!pendingStatusChange) return;
-    const nextStatus = pendingStatusChange;
-    setPendingStatusChange(null);
-    setUpdatingStatus(true);
-    try {
-      await onStatusChange(item.id, nextStatus);
-    } finally {
-      setUpdatingStatus(false);
-    }
-  }
 
   async function handleSaveComment() {
     setSavingComment(true);
@@ -520,77 +579,7 @@ function FeedbackDetailsModal({
             </div>
           </DetailField>
 
-          <DetailField label="Status">
-            <select
-              value={item.status}
-              onChange={handleStatusChangeSelect}
-              disabled={updatingStatus}
-              style={{
-                width: "100%",
-                padding: "9px 12px",
-                borderRadius: 10,
-                border: "1px solid var(--color-border)",
-                fontSize: 13,
-                color: "var(--color-text)",
-                background: "white",
-                cursor: updatingStatus ? "not-allowed" : "pointer",
-                outline: "none",
-              }}
-            >
-              <option value="new">New</option>
-              <option value="in_progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-            </select>
-            {pendingStatusChange && (
-              <div
-                style={{
-                  marginTop: 10,
-                  padding: "10px 12px",
-                  background: "#fff7ed",
-                  border: "1px solid #fed7aa",
-                  borderRadius: 10,
-                }}
-              >
-                <p style={{ fontSize: 12, color: "var(--color-text)", marginBottom: 8 }}>
-                  Change status from <strong>{item.status}</strong> to <strong>{pendingStatusChange}</strong>?
-                </p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    onClick={() => setPendingStatusChange(null)}
-                    disabled={updatingStatus}
-                    style={{
-                      padding: "5px 10px",
-                      borderRadius: 8,
-                      border: "1px solid var(--color-border)",
-                      background: "white",
-                      color: "var(--color-text)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: updatingStatus ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmStatusChange}
-                    disabled={updatingStatus}
-                    style={{
-                      padding: "5px 10px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "var(--color-forest)",
-                      color: "var(--color-cream)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: updatingStatus ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {updatingStatus ? "Updating..." : "Confirm"}
-                  </button>
-                </div>
-              </div>
-            )}
-          </DetailField>
+          <FeedbackStatusControl item={item} onStatusChange={onStatusChange} />
 
           <DetailField label="Name">
             {item.name ? (
@@ -629,69 +618,8 @@ function FeedbackDetailsModal({
           </DetailField>
         </div>
 
-        <div style={{ display: "grid", gap: 10 }}>
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: "var(--color-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-            }}
-          >
-            Message
-          </p>
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 16,
-              border: "1px solid var(--color-border)",
-              background: "#fafaf9",
-            }}
-          >
-            {item.message ? (
-              <p style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--color-text)", lineHeight: 1.7 }}>
-                {item.message}
-              </p>
-            ) : (
-              <p style={{ margin: 0, color: "var(--color-muted)", fontStyle: "italic" }}>
-                No message provided.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gap: 10 }}>
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 600,
-              color: "var(--color-muted)",
-              textTransform: "uppercase",
-              letterSpacing: "0.06em",
-            }}
-          >
-            Other details
-          </p>
-          <div
-            style={{
-              padding: 16,
-              borderRadius: 16,
-              border: "1px solid var(--color-border)",
-              background: "#fafaf9",
-            }}
-          >
-            {item.other_details ? (
-              <p style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--color-text)", lineHeight: 1.7 }}>
-                {item.other_details}
-              </p>
-            ) : (
-              <p style={{ margin: 0, color: "var(--color-muted)", fontStyle: "italic" }}>
-                No additional details provided.
-              </p>
-            )}
-          </div>
-        </div>
+        <FeedbackTextSection label="Message" value={item.message} emptyMessage="No message provided." />
+        <FeedbackTextSection label="Other details" value={item.other_details} emptyMessage="No additional details provided." />
 
         <div style={{ display: "grid", gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
@@ -751,6 +679,39 @@ function FeedbackDetailsModal({
       </div>
     </Modal>
   );
+}
+
+function buildAdminFeedbackPayload(
+  form: AdminFeedbackFormState,
+  typeConfig: AdminFeedbackTypeConfig,
+  supportsReviews: boolean,
+) {
+  const hasRating = supportsReviews && form.rating > 0;
+  return {
+    feedback_type: form.feedback_type,
+    name: form.name.trim() || undefined,
+    contact: form.contact.trim() || undefined,
+    order_id: typeConfig.showOrderId ? form.order_id.trim() || undefined : undefined,
+    message: form.message.trim(),
+    other_details: typeConfig.showOtherDetails ? form.other_details.trim() || undefined : undefined,
+    rating: hasRating ? form.rating : undefined,
+    show_in_reviews: hasRating ? form.show_in_reviews : false,
+  };
+}
+
+async function submitAdminFeedback(headers: Record<string, string>, payload: ReturnType<typeof buildAdminFeedbackPayload>) {
+  const response = await fetch(`${API_URL}/api/admin/feedback`, {
+    method: "POST",
+    headers: { ...headers, "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (response.status === 401) return null;
+  if (!response.ok) {
+    const result = await response.json().catch(() => null);
+    const detail = typeof result?.detail === "string" ? result.detail : "Failed to submit feedback";
+    throw new Error(detail);
+  }
+  return response.json() as Promise<FeedbackItem>;
 }
 
 // ---------------------------------------------------------------------------
@@ -1014,40 +975,17 @@ export default function AdminFeedbackPage() {
       return;
     }
 
-    const headers = await getAuthHeader();
-    const payload = {
-      feedback_type: createForm.feedback_type,
-      name: createForm.name.trim() || undefined,
-      contact: createForm.contact.trim() || undefined,
-      order_id: activeCreateType.showOrderId ? createForm.order_id.trim() || undefined : undefined,
-      message: createForm.message.trim(),
-      other_details: activeCreateType.showOtherDetails ? createForm.other_details.trim() || undefined : undefined,
-      rating: createFormSupportsReviews && createForm.rating > 0 ? createForm.rating : undefined,
-      show_in_reviews: createFormSupportsReviews && createForm.rating > 0 ? createForm.show_in_reviews : false,
-    };
-
     setCreating(true);
     setCreateError("");
 
     try {
-      const res = await fetch(`${API_URL}/api/admin/feedback`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      if (res.status === 401) {
+      const headers = await getAuthHeader();
+      const payload = buildAdminFeedbackPayload(createForm, activeCreateType, createFormSupportsReviews);
+      const created = await submitAdminFeedback(headers, payload);
+      if (!created) {
         router.push("/admin/login");
         return;
       }
-
-      if (!res.ok) {
-        const result = await res.json().catch(() => null);
-        const detail = typeof result?.detail === "string" ? result.detail : "Failed to submit feedback";
-        throw new Error(detail);
-      }
-
-      const created: FeedbackItem = await res.json();
       setData((prev) => (prev ? rebuildFeedbackData(prev, [created, ...prev.items]) : buildEmptyFeedbackData([created])));
       setPage(1);
       setShowCreateModal(false);
@@ -1278,12 +1216,12 @@ export default function AdminFeedbackPage() {
       {error && (
         <div
           style={{
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
+            background: "var(--color-error-bg)",
+            border: "1px solid var(--color-error-border)",
             borderRadius: 12,
             padding: "12px 16px",
             fontSize: 14,
-            color: "#c53030",
+            color: "var(--color-error-text)",
             marginBottom: 24,
           }}
         >
@@ -1331,186 +1269,11 @@ export default function AdminFeedbackPage() {
             </p>
           </CompactMetricCard>
 
-          <CompactMetricCard
-            onClick={() => setOriginFilter(originFilter === "contact_us" ? "all" : "contact_us")}
-            selected={originFilter === "contact_us"}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--color-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                Contact Us
-              </p>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1d4ed8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            </div>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-forest)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {data.origin_counts.contact_us}
-            </p>
-            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
-              Messages and inquiries
-            </p>
-          </CompactMetricCard>
-
-          <CompactMetricCard
-            onClick={() => setOriginFilter(originFilter === "events_page_non_customer" ? "all" : "events_page_non_customer")}
-            selected={originFilter === "events_page_non_customer"}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--color-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                Events Page
-              </p>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-            </div>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-forest)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {data.origin_counts.events_page_non_customer}
-            </p>
-            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
-              Pre-order feedback
-            </p>
-          </CompactMetricCard>
-
-          <CompactMetricCard
-            onClick={() => setOriginFilter(originFilter === "events_page_customer" ? "all" : "events_page_customer")}
-            selected={originFilter === "events_page_customer"}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--color-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                Customers
-              </p>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2d6a2d" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" />
-              </svg>
-            </div>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-forest)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {data.origin_counts.events_page_customer}
-            </p>
-            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
-              Post-order feedback
-            </p>
-          </CompactMetricCard>
-
-          <CompactMetricCard
-            onClick={() => setOriginFilter(originFilter === "event_reminder_email" ? "all" : "event_reminder_email")}
-            selected={originFilter === "event_reminder_email"}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--color-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                Reminder Email
-              </p>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4338ca" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" />
-                <polyline points="22,6 12,13 2,6" />
-              </svg>
-            </div>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-forest)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {data.origin_counts.event_reminder_email}
-            </p>
-            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
-              Event reminder responses
-            </p>
-          </CompactMetricCard>
-
-          <CompactMetricCard
-            onClick={() => setOriginFilter(originFilter === "admin_submission" ? "all" : "admin_submission")}
-            selected={originFilter === "admin_submission"}
-          >
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-              <p
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  color: "var(--color-muted)",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.08em",
-                }}
-              >
-                Admin Submitted
-              </p>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#166534" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 12h6" /><path d="M12 9v6" /><path d="M9 3h6l1 2h4v16H4V5h4l1-2z" />
-              </svg>
-            </div>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-forest)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {data.origin_counts.admin_submission}
-            </p>
-            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
-              Captured outside the platform
-            </p>
-          </CompactMetricCard>
+          <OriginMetricCard label="Contact Us" count={data.origin_counts.contact_us} description="Messages and inquiries" selected={originFilter === "contact_us"} onClick={() => setOriginFilter(originFilter === "contact_us" ? "all" : "contact_us")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-info-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
+          <OriginMetricCard label="Events Page" count={data.origin_counts.events_page_non_customer} description="Pre-order feedback" selected={originFilter === "events_page_non_customer"} onClick={() => setOriginFilter(originFilter === "events_page_non_customer" ? "all" : "events_page_non_customer")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>} />
+          <OriginMetricCard label="Customers" count={data.origin_counts.events_page_customer} description="Post-order feedback" selected={originFilter === "events_page_customer"} onClick={() => setOriginFilter(originFilter === "events_page_customer" ? "all" : "events_page_customer")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-success-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>} />
+          <OriginMetricCard label="Reminder Email" count={data.origin_counts.event_reminder_email} description="Event reminder responses" selected={originFilter === "event_reminder_email"} onClick={() => setOriginFilter(originFilter === "event_reminder_email" ? "all" : "event_reminder_email")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-info-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z" /><polyline points="22,6 12,13 2,6" /></svg>} />
+          <OriginMetricCard label="Admin Submitted" count={data.origin_counts.admin_submission} description="Captured outside the platform" selected={originFilter === "admin_submission"} onClick={() => setOriginFilter(originFilter === "admin_submission" ? "all" : "admin_submission")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-success-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12h6" /><path d="M12 9v6" /><path d="M9 3h6l1 2h4v16H4V5h4l1-2z" /></svg>} />
 
           {sortedMetrics[0] && (() => {
             const m = sortedMetrics[0];
@@ -1715,54 +1478,22 @@ export default function AdminFeedbackPage() {
         )}
       </div>
 
-      {/* Bulk action bar */}
-      {selectedIds.size > 0 && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "10px 16px",
-            background: "#f0f7eb",
-            border: "1px solid #c8ddb4",
-            borderRadius: 12,
-            marginBottom: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-forest)" }}>
-            {selectedIds.size} selected
-          </span>
-          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <select
-              value={bulkStatusTarget}
-              onChange={(e) => setBulkStatusTarget(e.target.value)}
-              style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #c8ddb4", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}
-            >
-              <option value="new">New</option>
-              <option value="in_progress">In Progress</option>
-              <option value="resolved">Resolved</option>
-            </select>
-            <button onClick={() => setShowBulkStatusModal(true)} style={btnBase}>
-              Mark all as
-            </button>
-          </div>
-          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
-          <button onClick={() => setShowBulkDeleteModal(true)} style={btnDanger}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
-            </svg>
-            Delete selected
-          </button>
-          <button
-            onClick={() => setSelectedIds(new Set())}
-            style={{ ...btnBase, marginLeft: "auto" }}
-          >
-            Clear
-          </button>
+      <AdminBulkActionBar
+        selectedCount={selectedIds.size}
+        onClear={() => setSelectedIds(new Set())}
+        clearButtonStyle={btnBase}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <select value={bulkStatusTarget} onChange={(event) => setBulkStatusTarget(event.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--color-success-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}>
+            <option value="new">New</option>
+            <option value="in_progress">In Progress</option>
+            <option value="resolved">Resolved</option>
+          </select>
+          <button onClick={() => setShowBulkStatusModal(true)} style={btnBase}>Mark all as</button>
         </div>
-      )}
+        <div style={{ width: 1, height: 20, background: "var(--color-success-border)" }} />
+        <AdminBulkDeleteButton onClick={() => setShowBulkDeleteModal(true)} buttonStyle={btnDanger} />
+      </AdminBulkActionBar>
 
       {/* Table */}
       <div
@@ -1907,8 +1638,8 @@ export default function AdminFeedbackPage() {
                                     width="11"
                                     height="11"
                                     viewBox="0 0 24 24"
-                                    fill={s <= item.rating! ? "#f59e0b" : "none"}
-                                    stroke={s <= item.rating! ? "#f59e0b" : "var(--color-border)"}
+                                    fill={s <= item.rating! ? "var(--color-accent)" : "none"}
+                                    stroke={s <= item.rating! ? "var(--color-accent)" : "var(--color-border)"}
                                     strokeWidth="1.5"
                                   >
                                     <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
@@ -1943,16 +1674,16 @@ export default function AdminFeedbackPage() {
                               style={{
                                 padding: "5px 8px",
                                 borderRadius: 8,
-                                border: item.show_in_reviews ? "1px solid #fcd34d" : "1px solid var(--color-border)",
-                                background: item.show_in_reviews ? "#fffbeb" : "white",
+                                border: item.show_in_reviews ? "1px solid var(--color-warning-border)" : "1px solid var(--color-border)",
+                                background: item.show_in_reviews ? "var(--color-warning-bg)" : "white",
                                 cursor: "pointer",
-                                color: item.show_in_reviews ? "#92400e" : "var(--color-muted)",
+                                color: item.show_in_reviews ? "var(--color-warning-text)" : "var(--color-muted)",
                                 display: "inline-flex",
                                 alignItems: "center",
                                 transition: "all 0.15s",
                               }}
                             >
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill={item.show_in_reviews ? "#f59e0b" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                              <svg width="13" height="13" viewBox="0 0 24 24" fill={item.show_in_reviews ? "var(--color-accent)" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
                               </svg>
                             </button>
@@ -2038,8 +1769,8 @@ export default function AdminFeedbackPage() {
             style={{
               padding: 16,
               borderRadius: 16,
-              border: "1px solid #c8ddb4",
-              background: "#f0f7eb",
+              border: "1px solid var(--color-success-border)",
+              background: "var(--color-success-bg)",
               display: "grid",
               gap: 6,
             }}
@@ -2069,7 +1800,7 @@ export default function AdminFeedbackPage() {
                       padding: 14,
                       borderRadius: 14,
                       border: selected ? "1px solid var(--color-forest)" : "1px solid var(--color-border)",
-                      background: selected ? "#f0f7eb" : "white",
+                      background: selected ? "var(--color-success-bg)" : "white",
                       cursor: "pointer",
                       display: "grid",
                       gap: 6,
@@ -2100,7 +1831,7 @@ export default function AdminFeedbackPage() {
             {activeCreateType.showContact && activeCreateType.contactRequired && (
               <div style={{ display: "grid", gap: 6 }}>
                 <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
-                  {activeCreateType.contactLabel} <span style={{ color: "#c53030" }}>*</span>
+                  {activeCreateType.contactLabel} <span style={{ color: "var(--color-error-text)" }}>*</span>
                 </label>
                 <input
                   type="text"
@@ -2111,7 +1842,7 @@ export default function AdminFeedbackPage() {
                     width: "100%",
                     padding: "10px 12px",
                     borderRadius: 12,
-                    border: createErrors.contact ? "1px solid #c53030" : "1px solid var(--color-border)",
+                    border: createErrors.contact ? "1px solid var(--color-error-text)" : "1px solid var(--color-border)",
                     fontSize: 13,
                     color: "var(--color-text)",
                     background: "white",
@@ -2119,13 +1850,13 @@ export default function AdminFeedbackPage() {
                     boxSizing: "border-box",
                   }}
                 />
-                {createErrors.contact && <p style={{ margin: 0, fontSize: 12, color: "#c53030" }}>{createErrors.contact}</p>}
+                {createErrors.contact && <p style={{ margin: 0, fontSize: 12, color: "var(--color-error-text)" }}>{createErrors.contact}</p>}
               </div>
             )}
 
             <div style={{ display: "grid", gap: 6 }}>
               <label style={{ fontSize: 13, fontWeight: 600, color: "var(--color-text)" }}>
-                {activeCreateType.messageLabel} <span style={{ color: "#c53030" }}>*</span>
+                {activeCreateType.messageLabel} <span style={{ color: "var(--color-error-text)" }}>*</span>
               </label>
               <textarea
                 value={createForm.message}
@@ -2136,7 +1867,7 @@ export default function AdminFeedbackPage() {
                   width: "100%",
                   padding: "10px 12px",
                   borderRadius: 12,
-                  border: createErrors.message ? "1px solid #c53030" : "1px solid var(--color-border)",
+                  border: createErrors.message ? "1px solid var(--color-error-text)" : "1px solid var(--color-border)",
                   fontSize: 13,
                   color: "var(--color-text)",
                   background: "white",
@@ -2146,7 +1877,7 @@ export default function AdminFeedbackPage() {
                   boxSizing: "border-box",
                 }}
               />
-              {createErrors.message && <p style={{ margin: 0, fontSize: 12, color: "#c53030" }}>{createErrors.message}</p>}
+              {createErrors.message && <p style={{ margin: 0, fontSize: 12, color: "var(--color-error-text)" }}>{createErrors.message}</p>}
             </div>
           </div>
 
@@ -2259,8 +1990,8 @@ export default function AdminFeedbackPage() {
                 style={{
                   padding: 16,
                   borderRadius: 16,
-                  border: "1px solid #f3e3b2",
-                  background: "#fffaf0",
+                  border: "1px solid var(--color-warning-border)",
+                  background: "var(--color-warning-bg)",
                   display: "grid",
                   gap: 12,
                 }}
@@ -2312,7 +2043,7 @@ export default function AdminFeedbackPage() {
           </div>
 
           {createError && (
-            <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid #fecaca", background: "#fef2f2", color: "#c53030", fontSize: 13 }}>
+            <div style={{ padding: "12px 14px", borderRadius: 12, border: "1px solid var(--color-error-border)", background: "var(--color-error-bg)", color: "var(--color-error-text)", fontSize: 13 }}>
               {createError}
             </div>
           )}
@@ -2419,7 +2150,7 @@ export default function AdminFeedbackPage() {
             fontSize: 14,
             fontWeight: 500,
             color: "white",
-            background: toast.type === "success" ? "var(--color-forest)" : "#c53030",
+            background: toast.type === "success" ? "var(--color-forest)" : "var(--color-error-text)",
             boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
             transition: "opacity 0.2s",
           }}

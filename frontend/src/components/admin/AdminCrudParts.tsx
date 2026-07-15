@@ -1,4 +1,4 @@
-import type { ReactNode, RefObject } from "react";
+import type { CSSProperties, ReactNode, RefObject } from "react";
 
 export const ADMIN_FORM_INPUT_CLASS = "w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]";
 export const ADMIN_FORM_LABEL_CLASS = "block text-sm font-medium mb-1.5";
@@ -58,6 +58,42 @@ export function AdminSelectableTable({
         <tbody>{children}</tbody>
       </table>
     </div>
+  );
+}
+
+export function AdminBulkActionBar({
+  selectedCount,
+  children,
+  onClear,
+  clearButtonStyle,
+}: {
+  selectedCount: number;
+  children: ReactNode;
+  onClear: () => void;
+  clearButtonStyle?: CSSProperties;
+}) {
+  if (selectedCount === 0) return null;
+  return (
+    <div className="mb-3 flex flex-wrap items-center gap-3 rounded-xl border px-4 py-2.5" style={{ background: "var(--color-success-bg)", borderColor: "var(--color-success-border)" }}>
+      <span className="text-[13px] font-semibold" style={{ color: "var(--color-forest)" }}>{selectedCount} selected</span>
+      <div className="h-5 w-px" style={{ background: "var(--color-success-border)" }} />
+      {children}
+      <button onClick={onClear} style={{ ...clearButtonStyle, marginLeft: "auto" }}>Clear</button>
+    </div>
+  );
+}
+
+export function AdminBulkDeleteButton({ onClick, buttonStyle }: { onClick: () => void; buttonStyle?: CSSProperties }) {
+  return (
+    <button onClick={onClick} style={buttonStyle}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6l-1 14H6L5 6" />
+        <path d="M10 11v6M14 11v6" />
+        <path d="M9 6V4h6v2" />
+      </svg>
+      Delete selected
+    </button>
   );
 }
 
