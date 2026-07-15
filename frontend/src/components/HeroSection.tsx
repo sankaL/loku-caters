@@ -168,6 +168,123 @@ function TooltipModal({ title, body, imagePath, onClose }: TooltipModalProps) {
   );
 }
 
+function HeroSideImage({ path }: { path?: string | null }) {
+  if (!path) return null;
+  return (
+    <img
+      src={path}
+      alt=""
+      aria-hidden="true"
+      className="pointer-events-none absolute right-0 inset-y-0 hidden h-full w-auto max-w-[50%] select-none object-contain object-right-bottom opacity-80 md:block"
+      style={{
+        maskImage: "linear-gradient(to right, transparent 0%, black 45%)",
+        WebkitMaskImage: "linear-gradient(to right, transparent 0%, black 45%)",
+      }}
+    />
+  );
+}
+
+function HeroTitle({ header, sageText }: { header: string; sageText?: string }) {
+  return (
+    <h1 className="mb-4 animate-fade-up delay-100 text-4xl font-bold leading-tight md:text-5xl" style={{ color: "var(--color-cream)", fontFamily: "var(--font-serif)" }}>
+      {header || "We're Making"}
+      {sageText && <><br /><span style={{ color: "var(--color-sage)" }}>{sageText}</span></>}
+    </h1>
+  );
+}
+
+function HeroTooltipButton({ visible, label, onClick }: { visible: boolean; label?: string | null; onClick: () => void }) {
+  if (!visible) return null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="animate-fade-up delay-150"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "5px 12px",
+        borderRadius: "999px",
+        border: "1px solid rgba(114,145,82,0.45)",
+        background: "rgba(114,145,82,0.12)",
+        fontSize: "12px",
+        fontWeight: 600,
+        color: "var(--color-sage)",
+        cursor: "pointer",
+        marginBottom: "16px",
+        transition: "background 0.15s, border-color 0.15s",
+      }}
+      onMouseEnter={(event) => {
+        event.currentTarget.style.background = "rgba(114,145,82,0.22)";
+        event.currentTarget.style.borderColor = "rgba(114,145,82,0.75)";
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = "rgba(114,145,82,0.12)";
+        event.currentTarget.style.borderColor = "rgba(114,145,82,0.45)";
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      {label}
+    </button>
+  );
+}
+
+function HeroFeedbackButton({ onClick }: { onClick?: () => void }) {
+  if (!onClick) return null;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="animate-fade-up delay-300 hover:bg-[color:var(--color-bark-hover)]"
+      style={{
+        marginTop: "16px",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "6px",
+        padding: "7px 14px",
+        borderRadius: "999px",
+        border: "1px solid var(--color-bark)",
+        background: "var(--color-bark)",
+        fontSize: "12px",
+        color: "white",
+        cursor: "pointer",
+        transition: "background 0.15s",
+      }}
+    >
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      Can&apos;t join this batch?
+    </button>
+  );
+}
+
+function HeroTooltip({
+  open,
+  visible,
+  title,
+  body,
+  imagePath,
+  onClose,
+}: {
+  open: boolean;
+  visible: boolean;
+  title?: string | null;
+  body?: string | null;
+  imagePath?: string | null;
+  onClose: () => void;
+}) {
+  if (!open || !visible || !title || !body) return null;
+  return <TooltipModal title={title} body={body} imagePath={imagePath} onClose={onClose} />;
+}
+
 export default function HeroSection({
   eventDate,
   heroHeader,
@@ -195,23 +312,10 @@ export default function HeroSection({
           className="absolute inset-0 opacity-10"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 80% 50%, #729152 0%, transparent 60%)",
+              "radial-gradient(circle at 80% 50%, var(--color-sage) 0%, transparent 60%)",
           }}
         />
-
-        {heroSideImagePath && (
-          <img
-            src={heroSideImagePath}
-            alt=""
-            aria-hidden="true"
-            className="pointer-events-none absolute right-0 inset-y-0 hidden h-full w-auto max-w-[50%] select-none object-contain object-right-bottom opacity-80 md:block"
-            style={{
-              maskImage: "linear-gradient(to right, transparent 0%, black 45%)",
-              WebkitMaskImage:
-                "linear-gradient(to right, transparent 0%, black 45%)",
-            }}
-          />
-        )}
+        <HeroSideImage path={heroSideImagePath} />
 
         <div className="relative px-8 py-10 md:px-14 md:py-16">
           {eventDate && (
@@ -223,72 +327,8 @@ export default function HeroSection({
             </p>
           )}
 
-          <h1
-            className="mb-4 animate-fade-up delay-100 text-4xl font-bold leading-tight md:text-5xl"
-            style={{
-              color: "var(--color-cream)",
-              fontFamily: "var(--font-serif)",
-            }}
-          >
-            {heroHeader || "We're Making"}
-            {heroHeaderSage && (
-              <>
-                <br />
-                <span style={{ color: "var(--color-sage)" }}>
-                  {heroHeaderSage}
-                </span>
-              </>
-            )}
-          </h1>
-
-          {canShowTooltip && (
-            <button
-              type="button"
-              onClick={() => setModalOpen(true)}
-              className="animate-fade-up delay-150"
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "5px 12px",
-                borderRadius: "999px",
-                border: "1px solid rgba(114,145,82,0.45)",
-                background: "rgba(114,145,82,0.12)",
-                fontSize: "12px",
-                fontWeight: 600,
-                color: "var(--color-sage)",
-                cursor: "pointer",
-                marginBottom: "16px",
-                transition: "background 0.15s, border-color 0.15s",
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.background = "rgba(114,145,82,0.22)";
-                event.currentTarget.style.borderColor =
-                  "rgba(114,145,82,0.75)";
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.background = "rgba(114,145,82,0.12)";
-                event.currentTarget.style.borderColor =
-                  "rgba(114,145,82,0.45)";
-              }}
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              {tooltipHeader}
-            </button>
-          )}
+          <HeroTitle header={heroHeader} sageText={heroHeaderSage} />
+          <HeroTooltipButton visible={canShowTooltip} label={tooltipHeader} onClick={() => setModalOpen(true)} />
 
           <p
             className="mb-2 max-w-xl animate-fade-up delay-200 text-base leading-relaxed md:text-lg"
@@ -315,60 +355,18 @@ export default function HeroSection({
             pickup.
           </p>
 
-          {onFeedbackClick && (
-            <button
-              type="button"
-              onClick={onFeedbackClick}
-              className="animate-fade-up delay-300"
-              style={{
-                marginTop: "16px",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "7px 14px",
-                borderRadius: "999px",
-                border: "1px solid var(--color-bark)",
-                background: "var(--color-bark)",
-                fontSize: "12px",
-                color: "white",
-                cursor: "pointer",
-                transition: "background 0.15s",
-              }}
-              onMouseEnter={(event) => {
-                event.currentTarget.style.background = "#7a5234";
-              }}
-              onMouseLeave={(event) => {
-                event.currentTarget.style.background = "var(--color-bark)";
-              }}
-            >
-              <svg
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <circle cx="12" cy="12" r="10" />
-                <line x1="12" y1="8" x2="12" y2="12" />
-                <line x1="12" y1="16" x2="12.01" y2="16" />
-              </svg>
-              Can&apos;t join this batch?
-            </button>
-          )}
+          <HeroFeedbackButton onClick={onFeedbackClick} />
         </div>
       </div>
 
-      {modalOpen && canShowTooltip && tooltipHeader && tooltipBody && (
-        <TooltipModal
-          title={tooltipHeader}
-          body={tooltipBody}
-          imagePath={tooltipImagePath}
-          onClose={() => setModalOpen(false)}
-        />
-      )}
+      <HeroTooltip
+        open={modalOpen}
+        visible={canShowTooltip}
+        title={tooltipHeader}
+        body={tooltipBody}
+        imagePath={tooltipImagePath}
+        onClose={() => setModalOpen(false)}
+      />
     </section>
   );
 }

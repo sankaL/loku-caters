@@ -6,6 +6,7 @@ import { DownloadSimple, GearSix, MagnifyingGlass, Plus, Receipt } from "@phosph
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
+import AdminToast from "@/components/admin/AdminToast";
 import { formatInvoiceDate, formatInvoiceMoney, InvoiceSummary } from "@/lib/invoices";
 import Modal from "@/components/ui/Modal";
 
@@ -148,11 +149,7 @@ export default function InvoicesPage() {
 
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      {toast && (
-        <div className="fixed right-6 top-6 z-50 rounded-2xl px-5 py-3 text-sm font-semibold shadow-xl" style={{ background: toast.type === "success" ? "var(--color-success-bg)" : "var(--color-error-bg)", color: toast.type === "success" ? "var(--color-success-text)" : "var(--color-error-text)", border: `1px solid ${toast.type === "success" ? "var(--color-success-border)" : "var(--color-error-border)"}` }}>
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
 
       <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
