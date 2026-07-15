@@ -3,8 +3,9 @@
 import { useState, useEffect, useMemo, useRef, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
-import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
-import { AdminBulkActionBar, AdminBulkDeleteButton } from "@/components/admin/AdminCrudParts";
+import { CompactMetricCard, CompactMetricRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
+import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDeleteIconButton, AdminPagination, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
+import { usePendingStatusChange } from "@/hooks/usePendingStatusChange";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
@@ -437,22 +438,7 @@ function DetailField({
 }
 
 function FeedbackStatusControl({ item, onStatusChange }: { item: FeedbackItem; onStatusChange: (id: string, status: string) => Promise<void> }) {
-  const [updating, setUpdating] = useState(false);
-  const [pendingStatus, setPendingStatus] = useState<string | null>(null);
-
-  useEffect(() => setPendingStatus(null), [item.id]);
-
-  async function confirmStatusChange() {
-    if (!pendingStatus) return;
-    const nextStatus = pendingStatus;
-    setPendingStatus(null);
-    setUpdating(true);
-    try {
-      await onStatusChange(item.id, nextStatus);
-    } finally {
-      setUpdating(false);
-    }
-  }
+  const { updating, pendingStatus, setPendingStatus, confirmStatusChange, cancelStatusChange } = usePendingStatusChange(item.id, onStatusChange);
 
   return (
     <DetailField label="Status">
@@ -470,7 +456,7 @@ function FeedbackStatusControl({ item, onStatusChange }: { item: FeedbackItem; o
         <div style={{ marginTop: 10, padding: "10px 12px", background: "var(--color-warning-bg)", border: "1px solid var(--color-warning-border)", borderRadius: 10 }}>
           <p style={{ fontSize: 12, color: "var(--color-text)", marginBottom: 8 }}>Change status from <strong>{item.status}</strong> to <strong>{pendingStatus}</strong>?</p>
           <div style={{ display: "flex", gap: 8 }}>
-            <button onClick={() => setPendingStatus(null)} disabled={updating} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid var(--color-border)", background: "white", color: "var(--color-text)", fontSize: 12, fontWeight: 600, cursor: updating ? "not-allowed" : "pointer" }}>Cancel</button>
+            <button onClick={cancelStatusChange} disabled={updating} style={{ padding: "5px 10px", borderRadius: 8, border: "1px solid var(--color-border)", background: "white", color: "var(--color-text)", fontSize: 12, fontWeight: 600, cursor: updating ? "not-allowed" : "pointer" }}>Cancel</button>
             <button onClick={confirmStatusChange} disabled={updating} style={{ padding: "5px 10px", borderRadius: 8, border: "none", background: "var(--color-forest)", color: "var(--color-cream)", fontSize: 12, fontWeight: 600, cursor: updating ? "not-allowed" : "pointer" }}>{updating ? "Updating..." : "Confirm"}</button>
           </div>
         </div>
@@ -509,6 +495,17 @@ function OriginMetricCard({ label, count, description, icon, selected, onClick }
       <p style={{ fontSize: "clamp(24px, 2vw, 28px)", fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>{count}</p>
       <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>{description}</p>
     </CompactMetricCard>
+  );
+}
+
+function FeedbackEmptyState({ hasFilters, onCreate, buttonStyle }: { hasFilters: boolean; onCreate: () => void; buttonStyle: React.CSSProperties }) {
+  return (
+    <AdminTableEmptyState
+      icon={<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>}
+      title="No feedback yet"
+      description={hasFilters ? "No results match your filters." : "Feedback, contact messages, customer notes, and admin-submitted entries will appear here."}
+      action={!hasFilters ? <button onClick={onCreate} style={buttonStyle}>Submit feedback</button> : undefined}
+    />
   );
 }
 
@@ -1243,31 +1240,7 @@ export default function AdminFeedbackPage() {
         </CompactMetricRail>
       ) : data && (
         <CompactMetricRail>
-          <CompactMetricCard variant="dark">
-            <p
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: "var(--color-sage)",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                marginBottom: 8,
-              }}
-            >
-              Total Responses
-            </p>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-cream)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {data.total}
-            </p>
-          </CompactMetricCard>
+          <CompactMetricTotalCard label="Total Responses" value={data.total} />
 
           <OriginMetricCard label="Contact Us" count={data.origin_counts.contact_us} description="Messages and inquiries" selected={originFilter === "contact_us"} onClick={() => setOriginFilter(originFilter === "contact_us" ? "all" : "contact_us")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-info-text)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>} />
           <OriginMetricCard label="Events Page" count={data.origin_counts.events_page_non_customer} description="Pre-order feedback" selected={originFilter === "events_page_non_customer"} onClick={() => setOriginFilter(originFilter === "events_page_non_customer" ? "all" : "events_page_non_customer")} icon={<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-bark)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>} />
@@ -1373,32 +1346,7 @@ export default function AdminFeedbackPage() {
 
       {/* Filters */}
       <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ position: "relative", flex: "1 1 220px", minWidth: 0 }}>
-          <svg
-            width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
-            strokeLinecap="round" strokeLinejoin="round"
-            style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-muted)", pointerEvents: "none" }}
-          >
-            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search origin, type, name, contact, message..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "9px 12px 9px 36px",
-              borderRadius: 12,
-              border: "1px solid var(--color-border)",
-              fontSize: 13,
-              color: "var(--color-text)",
-              background: "white",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
+        <AdminSearchInput value={searchQuery} onChange={setSearchQuery} placeholder="Search origin, type, name, contact, message..." />
 
         <select
           value={originFilter}
@@ -1449,7 +1397,7 @@ export default function AdminFeedbackPage() {
         </select>
 
         {hasFilters && (
-          <button
+          <AdminClearFiltersButton
             onClick={() => {
               setOriginFilter("all");
               setTypeFilter("all");
@@ -1457,18 +1405,7 @@ export default function AdminFeedbackPage() {
               setStatusFilter("all");
               setSearchQuery("");
             }}
-            style={{
-              display: "inline-flex", alignItems: "center", gap: 6,
-              padding: "8px 12px", borderRadius: 12,
-              border: "1px solid var(--color-border)", background: "white",
-              fontSize: 13, color: "var(--color-muted)", cursor: "pointer",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-            Clear
-          </button>
+          />
         )}
 
         {!loading && (
@@ -1478,86 +1415,18 @@ export default function AdminFeedbackPage() {
         )}
       </div>
 
-      <AdminBulkActionBar
-        selectedCount={selectedIds.size}
-        onClear={() => setSelectedIds(new Set())}
-        clearButtonStyle={btnBase}
+      <AdminBulkTableFrame
+        bulk={buildAdminBulkStatusProps(selectedIds.size, bulkStatusTarget, [{ value: "new", label: "New" }, { value: "in_progress", label: "In Progress" }, { value: "resolved", label: "Resolved" }], setBulkStatusTarget, () => setShowBulkStatusModal(true), () => setShowBulkDeleteModal(true), () => setSelectedIds(new Set()), btnBase, btnDanger)}
+        loading={loading}
+        empty={filtered.length === 0}
+        emptyState={<FeedbackEmptyState hasFilters={hasFilters} onCreate={openCreateModal} buttonStyle={btnPrimary} />}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <select value={bulkStatusTarget} onChange={(event) => setBulkStatusTarget(event.target.value)} style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid var(--color-success-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" }}>
-            <option value="new">New</option>
-            <option value="in_progress">In Progress</option>
-            <option value="resolved">Resolved</option>
-          </select>
-          <button onClick={() => setShowBulkStatusModal(true)} style={btnBase}>Mark all as</button>
-        </div>
-        <div style={{ width: 1, height: 20, background: "var(--color-success-border)" }} />
-        <AdminBulkDeleteButton onClick={() => setShowBulkDeleteModal(true)} buttonStyle={btnDanger} />
-      </AdminBulkActionBar>
-
-      {/* Table */}
-      <div
-        style={{
-          background: "white",
-          border: "1px solid var(--color-border)",
-          borderRadius: 20,
-          overflow: "hidden",
-        }}
-      >
-        {loading ? (
-          <div style={{ padding: 32, display: "flex", flexDirection: "column", gap: 16 }}>
-            {[...Array(5)].map((_, i) => <Skeleton key={i} h={20} />)}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 48, textAlign: "center" }}>
-            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--color-border)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: "0 auto 12px" }}>
-              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-            </svg>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--color-forest)", marginBottom: 4 }}>No feedback yet</p>
-            <p style={{ fontSize: 13, color: "var(--color-muted)" }}>
-              {hasFilters ? "No results match your filters." : "Feedback, contact messages, customer notes, and admin-submitted entries will appear here."}
-            </p>
-            {!hasFilters && (
-              <div style={{ marginTop: 16, display: "flex", justifyContent: "center" }}>
-                <button onClick={openCreateModal} style={btnPrimary}>Submit feedback</button>
-              </div>
-            )}
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-cream)" }}>
-                  {/* Checkbox */}
-                  <th style={{ padding: "11px 12px 11px 16px", width: 36 }}>
-                    <input
-                      ref={headerCheckboxRef}
-                      type="checkbox"
-                      checked={allOnPageSelected}
-                      onChange={toggleSelectAll}
-                      style={{ cursor: "pointer" }}
-                    />
-                  </th>
-                  {["Date", "Origin", "Type", "Name", "Contact", "Pre-order Reason", "Status", "Message / Details", ""].map((col) => (
-                    <th
-                      key={col}
-                      style={{
-                        textAlign: "left",
-                        padding: "11px 16px",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "var(--color-muted)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.07em",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
+          <AdminSelectableTable
+            headerCheckboxRef={headerCheckboxRef}
+            allSelected={allOnPageSelected}
+            onToggleAll={toggleSelectAll}
+            headers={["Date", "Origin", "Type", "Name", "Contact", "Pre-order Reason", "Status", "Message / Details"]}
+          >
                 {paginated.map((item, idx) => {
                   return (
                     <Fragment key={item.id}>
@@ -1688,66 +1557,17 @@ export default function AdminFeedbackPage() {
                               </svg>
                             </button>
                             {/* Delete */}
-                            <button
-                              onClick={() => setDeleteTarget(item.id)}
-                              title="Delete"
-                              style={{
-                                padding: "5px 8px",
-                                borderRadius: 8,
-                                border: "1px solid var(--color-border)",
-                                background: "white",
-                                cursor: "pointer",
-                                color: "var(--color-muted)",
-                                display: "inline-flex",
-                                alignItems: "center",
-                              }}
-                            >
-                              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" />
-                              </svg>
-                            </button>
+                            <AdminDeleteIconButton onClick={() => setDeleteTarget(item.id)} />
                           </div>
                         </td>
                       </tr>
                     </Fragment>
                   );
                 })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+          </AdminSelectableTable>
+      </AdminBulkTableFrame>
 
-      {/* Pagination */}
-      {!loading && totalPages > 1 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 16 }}>
-          <button
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page === 1}
-            style={{
-              padding: "7px 14px", borderRadius: 10, border: "1px solid var(--color-border)",
-              background: "white", fontSize: 13, color: page === 1 ? "var(--color-border)" : "var(--color-text)",
-              cursor: page === 1 ? "not-allowed" : "pointer",
-            }}
-          >
-            Previous
-          </button>
-          <span style={{ fontSize: 13, color: "var(--color-muted)" }}>
-            Page {page} of {totalPages}
-          </span>
-          <button
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page === totalPages}
-            style={{
-              padding: "7px 14px", borderRadius: 10, border: "1px solid var(--color-border)",
-              background: "white", fontSize: 13, color: page === totalPages ? "var(--color-border)" : "var(--color-text)",
-              cursor: page === totalPages ? "not-allowed" : "pointer",
-            }}
-          >
-            Next
-          </button>
-        </div>
-      )}
+      {!loading && <AdminPagination page={page} totalPages={totalPages} onPageChange={setPage} />}
 
       {/* Single delete modal */}
       <Modal
@@ -2151,7 +1971,7 @@ export default function AdminFeedbackPage() {
             fontWeight: 500,
             color: "white",
             background: toast.type === "success" ? "var(--color-forest)" : "var(--color-error-text)",
-            boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+            boxShadow: "0 4px 20px color-mix(in srgb, var(--color-text) 15%, transparent)",
             transition: "opacity 0.2s",
           }}
         >

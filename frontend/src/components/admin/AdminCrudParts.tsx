@@ -61,7 +61,7 @@ export function AdminSelectableTable({
   );
 }
 
-export function AdminBulkActionBar({
+function AdminBulkActionBar({
   selectedCount,
   children,
   onClear,
@@ -83,7 +83,7 @@ export function AdminBulkActionBar({
   );
 }
 
-export function AdminBulkDeleteButton({ onClick, buttonStyle }: { onClick: () => void; buttonStyle?: CSSProperties }) {
+function AdminBulkDeleteButton({ onClick, buttonStyle }: { onClick: () => void; buttonStyle?: CSSProperties }) {
   return (
     <button onClick={onClick} style={buttonStyle}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -94,6 +94,155 @@ export function AdminBulkDeleteButton({ onClick, buttonStyle }: { onClick: () =>
       </svg>
       Delete selected
     </button>
+  );
+}
+
+export function AdminDeleteIconButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} title="Delete" className="inline-flex cursor-pointer items-center rounded-lg border bg-white px-2 py-1.5" style={{ borderColor: "var(--color-border)", color: "var(--color-muted)" }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
+    </button>
+  );
+}
+
+export function AdminSearchInput({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) {
+  return (
+    <div className="relative min-w-0 flex-[1_1_240px]">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2" style={{ color: "var(--color-muted)" }}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.35-4.35" /></svg>
+      <input type="text" value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className="w-full rounded-xl border bg-white py-[9px] pl-9 pr-3 text-[13px] outline-none" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />
+    </div>
+  );
+}
+
+export function AdminClearFiltersButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border bg-white px-3 py-2 text-[13px]" style={{ borderColor: "var(--color-border)", color: "var(--color-muted)" }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+      Clear
+    </button>
+  );
+}
+
+function AdminTableSkeleton() {
+  return <div className="flex flex-col gap-4 p-8">{[0, 1, 2, 3, 4].map((index) => <div key={index} className="h-5 animate-pulse rounded-full" style={{ background: "var(--color-border)" }} />)}</div>;
+}
+
+export function AdminTableEmptyState({ icon, title, description, action }: { icon: ReactNode; title: string; description: string; action?: ReactNode }) {
+  return (
+    <div className="p-12 text-center">
+      <div className="mx-auto mb-3 w-fit" style={{ color: "var(--color-border)" }}>{icon}</div>
+      <p className="mb-1 text-[15px] font-semibold" style={{ color: "var(--color-forest)" }}>{title}</p>
+      <p className="text-[13px]" style={{ color: "var(--color-muted)" }}>{description}</p>
+      {action && <div className="mt-4 flex justify-center">{action}</div>}
+    </div>
+  );
+}
+
+function AdminBulkStatusControl<TStatus extends string>({
+  value,
+  options,
+  onChange,
+  onApply,
+  buttonStyle,
+}: {
+  value: TStatus;
+  options: Array<{ value: TStatus; label: string }>;
+  onChange: (status: TStatus) => void;
+  onApply: () => void;
+  buttonStyle?: CSSProperties;
+}) {
+  return (
+    <div className="flex items-center gap-2">
+      <select value={value} onChange={(event) => onChange(event.target.value as TStatus)} className="cursor-pointer rounded-lg border bg-white px-2.5 py-1.5 text-[13px] outline-none" style={{ borderColor: "var(--color-success-border)", color: "var(--color-text)" }}>
+        {options.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      <button onClick={onApply} style={buttonStyle}>Mark all as</button>
+    </div>
+  );
+}
+
+interface AdminBulkStatusProps<TStatus extends string> {
+  selectedCount: number;
+  status: TStatus;
+  options: Array<{ value: TStatus; label: string }>;
+  onStatusChange: (status: TStatus) => void;
+  onApply: () => void;
+  onDelete: () => void;
+  onClear: () => void;
+  buttonStyle?: CSSProperties;
+  dangerButtonStyle?: CSSProperties;
+}
+
+export function buildAdminBulkStatusProps<TStatus extends string>(selectedCount: number, status: TStatus, options: Array<{ value: TStatus; label: string }>, onStatusChange: (status: TStatus) => void, onApply: () => void, onDelete: () => void, onClear: () => void, buttonStyle?: CSSProperties, dangerButtonStyle?: CSSProperties): AdminBulkStatusProps<TStatus> {
+  return { selectedCount, status, options, onStatusChange, onApply, onDelete, onClear, buttonStyle, dangerButtonStyle };
+}
+
+function AdminBulkStatusBar<TStatus extends string>({ selectedCount, status, options, onStatusChange, onApply, onDelete, onClear, buttonStyle, dangerButtonStyle }: AdminBulkStatusProps<TStatus>) {
+  return (
+    <AdminBulkActionBar selectedCount={selectedCount} onClear={onClear} clearButtonStyle={buttonStyle}>
+      <AdminBulkStatusControl value={status} options={options} onChange={onStatusChange} onApply={onApply} buttonStyle={buttonStyle} />
+      <div className="h-5 w-px" style={{ background: "var(--color-success-border)" }} />
+      <AdminBulkDeleteButton onClick={onDelete} buttonStyle={dangerButtonStyle} />
+    </AdminBulkActionBar>
+  );
+}
+
+function AdminTableFrame({
+  loading,
+  empty,
+  loadingState,
+  emptyState,
+  children,
+}: {
+  loading: boolean;
+  empty: boolean;
+  loadingState: ReactNode;
+  emptyState: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="overflow-hidden rounded-[20px] border bg-white" style={{ borderColor: "var(--color-border)" }}>
+      {loading ? loadingState : empty ? emptyState : children}
+    </div>
+  );
+}
+
+export function AdminBulkTableFrame<TStatus extends string>({
+  bulk,
+  loading,
+  empty,
+  emptyState,
+  children,
+}: {
+  bulk: AdminBulkStatusProps<TStatus>;
+  loading: boolean;
+  empty: boolean;
+  emptyState: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <>
+      <AdminBulkStatusBar {...bulk} />
+      <AdminTableFrame loading={loading} empty={empty} loadingState={<AdminTableSkeleton />} emptyState={emptyState}>{children}</AdminTableFrame>
+    </>
+  );
+}
+
+export function AdminPagination({ page, totalPages, onPageChange }: { page: number; totalPages: number; onPageChange: (page: number) => void }) {
+  if (totalPages <= 1) return null;
+  const buttonStyle: CSSProperties = {
+    padding: "7px 14px",
+    borderRadius: 10,
+    border: "1px solid var(--color-border)",
+    background: "white",
+    fontSize: 13,
+  };
+  return (
+    <div className="mt-4 flex items-center justify-center gap-2">
+      <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page === 1} style={{ ...buttonStyle, color: page === 1 ? "var(--color-border)" : "var(--color-text)", cursor: page === 1 ? "not-allowed" : "pointer" }}>Previous</button>
+      <span className="text-[13px]" style={{ color: "var(--color-muted)" }}>Page {page} of {totalPages}</span>
+      <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page === totalPages} style={{ ...buttonStyle, color: page === totalPages ? "var(--color-border)" : "var(--color-text)", cursor: page === totalPages ? "not-allowed" : "pointer" }}>Next</button>
+    </div>
   );
 }
 

@@ -76,7 +76,7 @@ export function CompactMetricCard({
       ...sharedStyle,
       background: "var(--color-forest)",
       color: "var(--color-cream)",
-      border: "1px solid rgba(255,255,255,0.08)",
+      border: "1px solid color-mix(in srgb, var(--color-cream) 8%, transparent)",
     };
 
     if (onClick) {
@@ -89,7 +89,7 @@ export function CompactMetricCard({
             ...darkStyle,
             cursor: "pointer",
             appearance: "none",
-            border: "1px solid rgba(255,255,255,0.08)",
+            border: "1px solid color-mix(in srgb, var(--color-cream) 8%, transparent)",
             ...style,
           }}
         >
@@ -127,4 +127,13 @@ export function CompactMetricCard({
   }
 
   return <div style={{ ...lightStyle, ...style }}>{children}</div>;
+}
+
+export function CompactMetricTotalCard({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <CompactMetricCard variant="dark">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--color-sage)" }}>{label}</p>
+      <p className="font-bold leading-none" style={{ fontSize: "clamp(24px, 2vw, 28px)", color: "var(--color-cream)", fontFamily: "var(--font-serif)" }}>{value}</p>
+    </CompactMetricCard>
+  );
 }
