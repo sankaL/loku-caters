@@ -23,7 +23,9 @@ class RateLimitRule:
     window_seconds: int
 
     def matches(self, request: Request) -> bool:
-        return request.method in self.methods and bool(self.path.fullmatch(request.url.path))
+        return request.method in self.methods and bool(
+            self.path.fullmatch(request.url.path)
+        )
 
 
 RATE_LIMIT_RULES = (
@@ -93,7 +95,9 @@ def apply_security_headers(response: Response, path: str) -> Response:
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
-    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault(
+        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
+    )
     if path.startswith("/api/admin"):
         response.headers.setdefault("Cache-Control", "no-store")
     return response
@@ -104,7 +108,11 @@ def get_client_ip(request: Request, trusted_proxy_hops: int) -> str:
     if trusted_proxy_hops <= 0:
         return direct_peer
 
-    forwarded = [part.strip() for part in request.headers.get("x-forwarded-for", "").split(",") if part.strip()]
+    forwarded = [
+        part.strip()
+        for part in request.headers.get("x-forwarded-for", "").split(",")
+        if part.strip()
+    ]
     chain = forwarded + [direct_peer]
     if len(chain) <= trusted_proxy_hops:
         return direct_peer
@@ -134,11 +142,15 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self._buckets: OrderedDict[tuple[str, str], deque[float]] = OrderedDict()
         self._lock = Lock()
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         if not self.enabled or request.method == "OPTIONS":
             return await call_next(request)
 
-        rule = next((candidate for candidate in self.rules if candidate.matches(request)), None)
+        rule = next(
+            (candidate for candidate in self.rules if candidate.matches(request)), None
+        )
         if rule is None:
             return await call_next(request)
 
@@ -177,7 +189,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         response = await call_next(request)
         response.headers.setdefault("RateLimit-Limit", str(rule.requests))
-        response.headers.setdefault("RateLimit-Policy", f"{rule.requests};w={rule.window_seconds}")
+        response.headers.setdefault(
+            "RateLimit-Policy", f"{rule.requests};w={rule.window_seconds}"
+        )
         return response
 
 
@@ -186,24 +200,32 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         self.max_request_body_bytes = max(1, max_request_body_bytes)
 
-    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         content_length = request.headers.get("content-length")
         if content_length:
             try:
                 declared_size = int(content_length)
             except ValueError:
                 return apply_security_headers(
-                    JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"}),
+                    JSONResponse(
+                        status_code=400, content={"detail": "Invalid Content-Length"}
+                    ),
                     request.url.path,
                 )
             if declared_size < 0:
                 return apply_security_headers(
-                    JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"}),
+                    JSONResponse(
+                        status_code=400, content={"detail": "Invalid Content-Length"}
+                    ),
                     request.url.path,
                 )
             if declared_size > self.max_request_body_bytes:
                 return apply_security_headers(
-                    JSONResponse(status_code=413, content={"detail": "Request body too large"}),
+                    JSONResponse(
+                        status_code=413, content={"detail": "Request body too large"}
+                    ),
                     request.url.path,
                 )
 
@@ -213,7 +235,10 @@ class RequestSecurityMiddleware(BaseHTTPMiddleware):
                 body.extend(chunk)
                 if len(body) > self.max_request_body_bytes:
                     return apply_security_headers(
-                        JSONResponse(status_code=413, content={"detail": "Request body too large"}),
+                        JSONResponse(
+                            status_code=413,
+                            content={"detail": "Request body too large"},
+                        ),
                         request.url.path,
                     )
             request._body = bytes(body)

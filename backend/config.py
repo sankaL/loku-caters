@@ -7,7 +7,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     database_url: str
     resend_api_key: str
@@ -43,7 +45,9 @@ class Settings(BaseSettings):
                 or parsed.query
                 or parsed.fragment
             ):
-                raise ValueError("SUPABASE_URL must be a canonical Supabase HTTPS project URL")
+                raise ValueError(
+                    "SUPABASE_URL must be a canonical Supabase HTTPS project URL"
+                )
             return f"https://{hostname}/auth/v1"
 
         parsed = urlparse(self.database_url)

@@ -22,7 +22,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column("items", sa.Column("image_key", sa.Text(), nullable=True))
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         UPDATE items
         SET image_key = CASE lower(trim(name))
             WHEN 'lamprais' THEN 'menu-item-lamprais'
@@ -47,7 +48,8 @@ def upgrade() -> None:
             'cutlets',
             'seeni sambol'
         )
-    """))
+    """)
+    )
 
 
 def downgrade() -> None:

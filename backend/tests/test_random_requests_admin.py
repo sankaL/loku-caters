@@ -142,7 +142,9 @@ class FakeQuery:
         for key, value in self.filter_kwargs.items():
             if getattr(row, key, None) != value:
                 return False
-        return all(self._criterion_matches(row, criterion) for criterion in self.criteria)
+        return all(
+            self._criterion_matches(row, criterion) for criterion in self.criteria
+        )
 
     def all(self):
         return [row for row in self.rows if self._matches(row)]
@@ -201,10 +203,16 @@ class FakeSession:
 
 
 class RandomRequestsAdminTests(unittest.TestCase):
-    def test_admin_create_order_random_mode_persists_manual_pricing_for_multiple_lines(self):
+    def test_admin_create_order_random_mode_persists_manual_pricing_for_multiple_lines(
+        self,
+    ):
         event = make_event()
-        first_item = make_item(id="item-a", name="Lamprais", price=20.0, minimum_order_quantity=5)
-        second_item = make_item(id="item-b", name="Fish Cutlet", price=8.0, minimum_order_quantity=3)
+        first_item = make_item(
+            id="item-a", name="Lamprais", price=20.0, minimum_order_quantity=5
+        )
+        second_item = make_item(
+            id="item-b", name="Fish Cutlet", price=8.0, minimum_order_quantity=3
+        )
         db = FakeSession(events=[event], items=[first_item, second_item])
 
         first_body = AdminOrderCreate(
@@ -256,7 +264,9 @@ class RandomRequestsAdminTests(unittest.TestCase):
 
     def test_admin_create_order_random_mode_keeps_subtotal_consistent_for_markups(self):
         event = make_event()
-        item = make_item(id="item-a", name="Lamprais", price=20.0, minimum_order_quantity=5)
+        item = make_item(
+            id="item-a", name="Lamprais", price=20.0, minimum_order_quantity=5
+        )
         db = FakeSession(events=[event], items=[item])
 
         body = AdminOrderCreate(
@@ -287,14 +297,21 @@ class RandomRequestsAdminTests(unittest.TestCase):
 
     def test_admin_update_order_random_mode_preserves_existing_unit_price(self):
         event = make_event()
-        item = make_item(id="item-a", name="Lamprais", price=20.0, minimum_order_quantity=5)
-        order = make_order(quantity=2, total_price=28.5, base_total_price=40.0, pricing_meta={
-            "mode": "manual",
-            "base_unit_price": 20.0,
-            "manual_unit_price": 14.25,
-            "base_total": 40.0,
-            "manual_total_price": 28.5,
-        })
+        item = make_item(
+            id="item-a", name="Lamprais", price=20.0, minimum_order_quantity=5
+        )
+        order = make_order(
+            quantity=2,
+            total_price=28.5,
+            base_total_price=40.0,
+            pricing_meta={
+                "mode": "manual",
+                "base_unit_price": 20.0,
+                "manual_unit_price": 14.25,
+                "base_total": 40.0,
+                "manual_total_price": 28.5,
+            },
+        )
         db = FakeSession(events=[event], items=[item], orders=[order])
 
         body = AdminOrderUpdate(

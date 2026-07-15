@@ -45,7 +45,9 @@ def normalize_pickup_location(pickup_location: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
-def merge_pickup_locations(existing_locations: Sequence[Any], pickup_location: Optional[str]) -> list[str]:
+def merge_pickup_locations(
+    existing_locations: Sequence[Any], pickup_location: Optional[str]
+) -> list[str]:
     merged: list[str] = []
     seen: set[str] = set()
 
@@ -88,7 +90,9 @@ def _apply_customer_updates(
         customer.phone_number = normalized_phone
         changed = True
 
-    merged_locations = merge_pickup_locations(customer.pickup_locations or [], normalized_pickup_location)
+    merged_locations = merge_pickup_locations(
+        customer.pickup_locations or [], normalized_pickup_location
+    )
     if merged_locations != list(customer.pickup_locations or []):
         customer.pickup_locations = merged_locations
         changed = True
@@ -125,7 +129,9 @@ def update_customer_from_admin(
     changed = False
 
     if normalized_email != customer.email:
-        duplicate_customer = db.query(Customer).filter_by(email=normalized_email).first()
+        duplicate_customer = (
+            db.query(Customer).filter_by(email=normalized_email).first()
+        )
         if duplicate_customer is not None and duplicate_customer.id != customer.id:
             raise CustomerEmailConflictError(normalized_email)
         customer.email = normalized_email

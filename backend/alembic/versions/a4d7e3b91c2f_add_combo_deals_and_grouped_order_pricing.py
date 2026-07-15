@@ -35,11 +35,15 @@ def upgrade() -> None:
     op.add_column("orders", sa.Column("group_id", sa.String(), nullable=True))
     op.add_column(
         "orders",
-        sa.Column("base_total_price", sa.Numeric(10, 2), nullable=False, server_default="0"),
+        sa.Column(
+            "base_total_price", sa.Numeric(10, 2), nullable=False, server_default="0"
+        ),
     )
     op.add_column(
         "orders",
-        sa.Column("discount_total", sa.Numeric(10, 2), nullable=False, server_default="0"),
+        sa.Column(
+            "discount_total", sa.Numeric(10, 2), nullable=False, server_default="0"
+        ),
     )
     op.add_column(
         "orders",

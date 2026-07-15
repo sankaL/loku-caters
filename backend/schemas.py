@@ -152,7 +152,9 @@ class ComboDealModel(BaseModel):
         for group in normalized_groups:
             for item_id in group.item_ids:
                 if item_id in requirement_item_ids:
-                    raise ValueError("Combo deal cannot include the same item in multiple groups")
+                    raise ValueError(
+                        "Combo deal cannot include the same item in multiple groups"
+                    )
                 requirement_item_ids.append(item_id)
 
         if self.discount.applies_to == "item":
@@ -161,15 +163,23 @@ class ComboDealModel(BaseModel):
             if self.discount.target_item_id not in requirement_item_ids:
                 raise ValueError("target_item_id must be one of the combo requirements")
             target_group = next(
-                (group for group in normalized_groups if self.discount.target_item_id in group.item_ids),
+                (
+                    group
+                    for group in normalized_groups
+                    if self.discount.target_item_id in group.item_ids
+                ),
                 None,
             )
-            self.discount.target_group_id = target_group.id if target_group is not None else None
+            self.discount.target_group_id = (
+                target_group.id if target_group is not None else None
+            )
         elif self.discount.applies_to == "group":
             if not self.discount.target_group_id:
                 raise ValueError("target_group_id is required when applies_to is group")
             if self.discount.target_group_id not in group_ids:
-                raise ValueError("target_group_id must be one of the combo requirement groups")
+                raise ValueError(
+                    "target_group_id must be one of the combo requirement groups"
+                )
             self.discount.target_item_id = None
         else:
             self.discount.target_item_id = None
@@ -510,7 +520,13 @@ class EventBase(BaseModel):
         stripped = str(v).strip()
         return stripped or None
 
-    @field_validator("promo_details", "tooltip_header", "tooltip_body", "tooltip_image_key", "hero_side_image_key")
+    @field_validator(
+        "promo_details",
+        "tooltip_header",
+        "tooltip_body",
+        "tooltip_image_key",
+        "hero_side_image_key",
+    )
     @classmethod
     def optional_nullable_fields(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
@@ -532,7 +548,9 @@ class EventBase(BaseModel):
 
         if self.etransfer_enabled:
             if not self.etransfer_email:
-                raise ValueError("etransfer_email is required when e-transfer is enabled")
+                raise ValueError(
+                    "etransfer_email is required when e-transfer is enabled"
+                )
         else:
             self.etransfer_email = None
         return self
@@ -639,7 +657,9 @@ class FeedbackCreate(BaseModel):
         stripped = str(v).strip().lower()
         return stripped or None
 
-    @field_validator("order_id", "name", "contact", "other_details", "message", mode="before")
+    @field_validator(
+        "order_id", "name", "contact", "other_details", "message", mode="before"
+    )
     @classmethod
     def normalize_optional_text_fields(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
@@ -664,7 +684,11 @@ class FeedbackCreate(BaseModel):
     @field_validator("reason")
     @classmethod
     def reason_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in FEEDBACK_REASONS and v not in LEGACY_CONTACT_REASONS:
+        if (
+            v is not None
+            and v not in FEEDBACK_REASONS
+            and v not in LEGACY_CONTACT_REASONS
+        ):
             raise ValueError("Invalid feedback reason")
         return v
 
@@ -720,7 +744,9 @@ class CustomerEventReminderRequest(BaseModel):
         return list(dict.fromkeys(cleaned))
 
 
-def parse_legacy_contact_subject(message: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+def parse_legacy_contact_subject(
+    message: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
     if not message:
         return None, message
 
@@ -732,7 +758,7 @@ def parse_legacy_contact_subject(message: Optional[str]) -> tuple[Optional[str],
     if not first_line.startswith("Subject:"):
         return None, message
 
-    subject = first_line[len("Subject:"):].strip().lower()
+    subject = first_line[len("Subject:") :].strip().lower()
     feedback_type = LEGACY_CONTACT_SUBJECT_TO_TYPE.get(subject, "other")
 
     remaining_lines = lines[1:]

@@ -8,6 +8,7 @@ from schemas import CateringRequestCreate, CateringRequestResponse
 
 router = APIRouter(prefix="/api/catering-requests", tags=["catering"])
 
+
 @router.post(
     "",
     response_model=CateringRequestResponse,
@@ -26,7 +27,7 @@ def create_catering_request(
             guest_count=request.guest_count,
             event_type=request.event_type,
             budget_range=request.budget_range,
-            special_requests=request.special_requests
+            special_requests=request.special_requests,
         )
         db.add(new_request)
         db.commit()
@@ -35,5 +36,6 @@ def create_catering_request(
     except SQLAlchemyError as err:
         db.rollback()
         raise HTTPException(
-            status_code=500, detail="Database error occurred while processing catering request"
+            status_code=500,
+            detail="Database error occurred while processing catering request",
         ) from err

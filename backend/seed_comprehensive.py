@@ -32,21 +32,93 @@ fake = Faker()
 # ---------------------------------------------------------------------------
 
 ITEM_DATA = [
-    {"name": "Lamprais", "description": "Traditional Dutch-influenced Sri Lankan rice and curry dish baked in a banana leaf", "price": 20.00, "discounted_price": None, "minimum_order_quantity": 1},
-    {"name": "Chicken Biryani", "description": "Aromatic basmati rice layered with spiced chicken and fried onions", "price": 18.00, "discounted_price": 15.00, "minimum_order_quantity": 1},
-    {"name": "Fish Curry", "description": "Fresh tilapia in a rich Sri Lankan coconut curry with curry leaves", "price": 16.00, "discounted_price": None, "minimum_order_quantity": 1},
-    {"name": "Dhal Curry", "description": "Creamy red lentil curry tempered with mustard seeds and curry leaves", "price": 8.00, "discounted_price": None, "minimum_order_quantity": 1},
-    {"name": "Pol Sambol", "description": "Spicy coconut relish with red onions, chili, and lime", "price": 6.00, "discounted_price": None, "minimum_order_quantity": 1},
-    {"name": "Watalappan", "description": "Traditional coconut custard pudding with cardamom and jaggery", "price": 7.00, "discounted_price": None, "minimum_order_quantity": 1},
+    {
+        "name": "Lamprais",
+        "description": "Traditional Dutch-influenced Sri Lankan rice and curry dish baked in a banana leaf",
+        "price": 20.00,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "name": "Chicken Biryani",
+        "description": "Aromatic basmati rice layered with spiced chicken and fried onions",
+        "price": 18.00,
+        "discounted_price": 15.00,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "name": "Fish Curry",
+        "description": "Fresh tilapia in a rich Sri Lankan coconut curry with curry leaves",
+        "price": 16.00,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "name": "Dhal Curry",
+        "description": "Creamy red lentil curry tempered with mustard seeds and curry leaves",
+        "price": 8.00,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "name": "Pol Sambol",
+        "description": "Spicy coconut relish with red onions, chili, and lime",
+        "price": 6.00,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "name": "Watalappan",
+        "description": "Traditional coconut custard pudding with cardamom and jaggery",
+        "price": 7.00,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
 ]
 
 LOCATION_DATA = [
-    {"name": "Welland", "address": "123 King Street, Welland, ON", "time_slots": ["11:00 AM - 12:00 PM", "12:00 PM - 1:00 PM", "1:00 PM - 2:00 PM"]},
-    {"name": "Woodbridge", "address": "456 Weston Road, Woodbridge, ON", "time_slots": ["12:00 PM - 1:00 PM", "1:00 PM - 2:00 PM", "2:00 PM - 3:00 PM"]},
-    {"name": "Scarborough", "address": "789 Kennedy Road, Scarborough, ON", "time_slots": ["11:30 AM - 12:30 PM", "12:30 PM - 1:30 PM", "1:30 PM - 2:30 PM"]},
-    {"name": "Mississauga", "address": "321 Hurontario Street, Mississauga, ON", "time_slots": ["12:00 PM - 1:00 PM", "1:00 PM - 2:00 PM", "2:00 PM - 3:00 PM"]},
-    {"name": "North York", "address": "654 Yonge Street, North York, ON", "time_slots": ["11:00 AM - 12:00 PM", "12:00 PM - 1:00 PM", "1:00 PM - 2:00 PM"]},
-    {"name": "Brampton", "address": "987 Main Street North, Brampton, ON", "time_slots": ["12:30 PM - 1:30 PM", "1:30 PM - 2:30 PM", "2:30 PM - 3:30 PM"]},
+    {
+        "name": "Welland",
+        "address": "123 King Street, Welland, ON",
+        "time_slots": [
+            "11:00 AM - 12:00 PM",
+            "12:00 PM - 1:00 PM",
+            "1:00 PM - 2:00 PM",
+        ],
+    },
+    {
+        "name": "Woodbridge",
+        "address": "456 Weston Road, Woodbridge, ON",
+        "time_slots": ["12:00 PM - 1:00 PM", "1:00 PM - 2:00 PM", "2:00 PM - 3:00 PM"],
+    },
+    {
+        "name": "Scarborough",
+        "address": "789 Kennedy Road, Scarborough, ON",
+        "time_slots": [
+            "11:30 AM - 12:30 PM",
+            "12:30 PM - 1:30 PM",
+            "1:30 PM - 2:30 PM",
+        ],
+    },
+    {
+        "name": "Mississauga",
+        "address": "321 Hurontario Street, Mississauga, ON",
+        "time_slots": ["12:00 PM - 1:00 PM", "1:00 PM - 2:00 PM", "2:00 PM - 3:00 PM"],
+    },
+    {
+        "name": "North York",
+        "address": "654 Yonge Street, North York, ON",
+        "time_slots": [
+            "11:00 AM - 12:00 PM",
+            "12:00 PM - 1:00 PM",
+            "1:00 PM - 2:00 PM",
+        ],
+    },
+    {
+        "name": "Brampton",
+        "address": "987 Main Street North, Brampton, ON",
+        "time_slots": ["12:30 PM - 1:30 PM", "1:30 PM - 2:30 PM", "2:30 PM - 3:30 PM"],
+    },
 ]
 
 EVENT_DATA = [
@@ -84,17 +156,41 @@ EVENT_DATA = [
 
 FEEDBACK_ORIGINS = ["contact_us", "events_page_non_customer", "events_page_customer"]
 FEEDBACK_TYPES = ["general_question", "feedback", "collaboration", "other"]
-FEEDBACK_REASONS = ["price_too_high", "location_not_convenient", "dietary_needs", "not_available", "different_menu", "prefer_delivery", "not_interested", "other"]
+FEEDBACK_REASONS = [
+    "price_too_high",
+    "location_not_convenient",
+    "dietary_needs",
+    "not_available",
+    "different_menu",
+    "prefer_delivery",
+    "not_interested",
+    "other",
+]
 FEEDBACK_STATUSES = ["new", "in_progress", "resolved"]
 
-CATERING_EVENT_TYPES = ["wedding", "corporate", "birthday", "anniversary", "religious", "cultural", "other"]
-CATERING_BUDGET_RANGES = ["under_500", "500_to_1000", "1000_to_2500", "2500_to_5000", "over_5000"]
+CATERING_EVENT_TYPES = [
+    "wedding",
+    "corporate",
+    "birthday",
+    "anniversary",
+    "religious",
+    "cultural",
+    "other",
+]
+CATERING_BUDGET_RANGES = [
+    "under_500",
+    "500_to_1000",
+    "1000_to_2500",
+    "2500_to_5000",
+    "over_5000",
+]
 CATERING_STATUSES = ["new", "in_review", "in_progress", "rejected", "done"]
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def clear_all_tables(db):
     """Clear all data from tables in correct order (respecting dependencies)."""
@@ -158,7 +254,9 @@ def seed_events(db, items, locations):
         event = Event(
             name=data["name"],
             event_date=data["event_date"],
-            pickup_date=date.fromisoformat(data["pickup_date"]) if data["pickup_date"] else None,
+            pickup_date=date.fromisoformat(data["pickup_date"])
+            if data["pickup_date"]
+            else None,
             kind="event",
             hero_header=data["hero_header"],
             hero_header_sage=data["hero_header_sage"],
@@ -174,7 +272,7 @@ def seed_events(db, items, locations):
         )
         db.add(event)
         events.append(event)
-    
+
     # Create the Random Requests system event (used for manual/admin orders)
     random_requests_event = Event(
         name="Random Requests",
@@ -195,7 +293,7 @@ def seed_events(db, items, locations):
     )
     db.add(random_requests_event)
     events.append(random_requests_event)
-    
+
     db.commit()
     print(f"  Created {len(events)} events (including Random Requests system event).")
     return events
@@ -203,45 +301,60 @@ def seed_events(db, items, locations):
 
 def generate_orders_for_event(db, event, items, locations, count=30):
     """Generate orders for a specific event.
-    
+
     About half of the orders are multi-item "cart" orders with a shared group_id.
     The rest are single-item orders.
     """
     orders = []
-    statuses = [OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.CONFIRMED, OrderStatus.CONFIRMED, OrderStatus.PICKED_UP, OrderStatus.NO_SHOW, OrderStatus.CANCELLED]
-    
+    statuses = [
+        OrderStatus.PENDING,
+        OrderStatus.CONFIRMED,
+        OrderStatus.CONFIRMED,
+        OrderStatus.CONFIRMED,
+        OrderStatus.PICKED_UP,
+        OrderStatus.NO_SHOW,
+        OrderStatus.CANCELLED,
+    ]
+
     # Vary creation times over the past 2 weeks
     base_offset_hours = random.randint(0, 168)  # base offset for this batch of orders
-    
+
     for i in range(count):
         location = random.choice(locations)
         time_slot = random.choice(location.time_slots)
-        
+
         # Vary creation times within the past 2 weeks
         offset_hours = base_offset_hours + random.randint(0, 168)
         created_at = datetime.now(timezone.utc) - timedelta(hours=offset_hours)
-        
+
         status = random.choice(statuses)
-        paid = status in [OrderStatus.CONFIRMED, OrderStatus.PICKED_UP] and random.choice([True, False])
-        
+        paid = status in [
+            OrderStatus.CONFIRMED,
+            OrderStatus.PICKED_UP,
+        ] and random.choice([True, False])
+
         name = fake.name()
         email = fake.email()
         phone = fake.phone_number()
-        
+
         # Decide if this is a multi-item order (about 50%)
         is_multi_item = random.random() < 0.5
-        
+
         if is_multi_item:
             # Multi-item cart order - 2 to 4 items
             num_items_in_cart = random.randint(2, 4)
             group_id = str(uuid.uuid4())
             cart_items = random.sample(items, num_items_in_cart)
-            
+
             for cart_item in cart_items:
                 quantity = random.randint(1, 3)
-                base_price = float(cart_item.discounted_price) if cart_item.discounted_price else float(cart_item.price)
+                base_price = (
+                    float(cart_item.discounted_price)
+                    if cart_item.discounted_price
+                    else float(cart_item.price)
+                )
                 line_total = base_price * quantity
-                
+
                 order = Order(
                     id=str(uuid.uuid4()),
                     event_id=event.id,
@@ -272,10 +385,14 @@ def generate_orders_for_event(db, event, items, locations, count=30):
             # Single-item order
             item = random.choice(items)
             quantity = random.randint(1, 5)
-            
-            base_price = float(item.discounted_price) if item.discounted_price else float(item.price)
+
+            base_price = (
+                float(item.discounted_price)
+                if item.discounted_price
+                else float(item.price)
+            )
             total_price = base_price * quantity
-            
+
             order = Order(
                 id=str(uuid.uuid4()),
                 event_id=event.id,
@@ -301,7 +418,7 @@ def generate_orders_for_event(db, event, items, locations, count=30):
             )
             db.add(order)
             orders.append(order)
-    
+
     db.commit()
     return orders
 
@@ -325,7 +442,7 @@ def seed_customers_from_orders(db, orders):
     print("Seeding customers...")
     seen_emails = set()
     customers = []
-    
+
     for order in orders:
         if order.email and order.email.lower() not in seen_emails:
             seen_emails.add(order.email.lower())
@@ -334,13 +451,15 @@ def seed_customers_from_orders(db, orders):
                 email=order.email.lower(),
                 name=order.name,
                 phone_number=order.phone_number,
-                pickup_locations=[order.pickup_location] if order.pickup_location else [],
+                pickup_locations=[order.pickup_location]
+                if order.pickup_location
+                else [],
                 created_at=order.created_at,
                 updated_at=datetime.now(timezone.utc),
             )
             db.add(customer)
             customers.append(customer)
-    
+
     db.commit()
     print(f"  Created {len(customers)} customers.")
     return customers
@@ -350,22 +469,22 @@ def seed_feedback(db, events, orders):
     """Seed 30 feedback entries across events, including ratings for the new reviews page."""
     print("Seeding feedback...")
     feedback_list = []
-    
+
     # Get customer orders for linking
     order_by_email = {o.email.lower(): o for o in orders if o.email}
-    
+
     # Extended origins to include the new reviews_page
     EXTENDED_ORIGINS = FEEDBACK_ORIGINS + ["reviews_page"]
-    
+
     for i in range(30):
         origin = random.choice(EXTENDED_ORIGINS)
         feedback_type = random.choice(FEEDBACK_TYPES)
-        
+
         # New: Add rating logic
         rating = random.randint(3, 5) if random.random() > 0.2 else random.randint(1, 2)
         # Show in reviews if it's high rated (4-5) and random chance
         show_in_reviews = rating >= 4 and random.random() > 0.4
-        
+
         # For event-related feedback, try to link to an order
         linked_order = None
         name = None
@@ -373,24 +492,24 @@ def seed_feedback(db, events, orders):
         reason = None
         other_details = None
         message = fake.paragraph(nb_sentences=3)
-        
+
         if origin == "events_page_customer" and order_by_email:
             # Link to a random customer order
             linked_order = random.choice(list(order_by_email.values()))
             name = linked_order.name
             contact = linked_order.email
-        
+
         if origin == "events_page_non_customer":
             reason = random.choice(FEEDBACK_REASONS)
             if reason == "other":
                 other_details = fake.sentence()
             name = fake.name()
             contact = fake.email()
-            
+
         if origin == "reviews_page":
             name = fake.name()
             feedback_type = "feedback"
-        
+
         feedback = Feedback(
             id=str(uuid.uuid4()),
             origin=origin,
@@ -403,21 +522,38 @@ def seed_feedback(db, events, orders):
             message=message,
             rating=rating,
             show_in_reviews=show_in_reviews,
-            created_at=datetime.now(timezone.utc) - timedelta(hours=random.randint(0, 504)),  # up to 3 weeks ago
+            created_at=datetime.now(timezone.utc)
+            - timedelta(hours=random.randint(0, 504)),  # up to 3 weeks ago
             status=random.choice(FEEDBACK_STATUSES),
             admin_comment=None,
         )
         db.add(feedback)
         feedback_list.append(feedback)
-    
+
     # Add a few guaranteed high-quality reviews for the carousel
     stellar_reviews = [
-        ("The lamprais was out of this world! Reminded me exactly of home. Thank you Loku Caters!", 5, "Nimal Perera"),
-        ("Best Sri Lankan food in the GTA. The pol sambol was perfectly spicy.", 5, "Sarah J."),
-        ("Very impressed with the packaging and the care taken. Highly recommended.", 4, "Michael De Silva"),
-        ("A bit of a wait at the pickup point, but the food made it all worth it. 5 stars for the taste!", 5, "Priya K."),
+        (
+            "The lamprais was out of this world! Reminded me exactly of home. Thank you Loku Caters!",
+            5,
+            "Nimal Perera",
+        ),
+        (
+            "Best Sri Lankan food in the GTA. The pol sambol was perfectly spicy.",
+            5,
+            "Sarah J.",
+        ),
+        (
+            "Very impressed with the packaging and the care taken. Highly recommended.",
+            4,
+            "Michael De Silva",
+        ),
+        (
+            "A bit of a wait at the pickup point, but the food made it all worth it. 5 stars for the taste!",
+            5,
+            "Priya K.",
+        ),
     ]
-    
+
     for msg, rat, n in stellar_reviews:
         f = Feedback(
             id=str(uuid.uuid4()),
@@ -427,14 +563,17 @@ def seed_feedback(db, events, orders):
             message=msg,
             rating=rat,
             show_in_reviews=True,
-            created_at=datetime.now(timezone.utc) - timedelta(days=random.randint(1, 5)),
-            status="resolved"
+            created_at=datetime.now(timezone.utc)
+            - timedelta(days=random.randint(1, 5)),
+            status="resolved",
         )
         db.add(f)
         feedback_list.append(f)
-    
+
     db.commit()
-    print(f"  Created {len(feedback_list)} feedback entries (including {len(stellar_reviews)} stellar public reviews).")
+    print(
+        f"  Created {len(feedback_list)} feedback entries (including {len(stellar_reviews)} stellar public reviews)."
+    )
     return feedback_list
 
 
@@ -442,16 +581,18 @@ def seed_catering_requests(db):
     """Seed 30 catering requests."""
     print("Seeding catering requests...")
     requests = []
-    
+
     for i in range(30):
         first_name = fake.first_name()
         last_name = fake.last_name()
         event_type = random.choice(CATERING_EVENT_TYPES)
-        
+
         # Generate event date in the future (1-6 months from now)
         days_ahead = random.randint(30, 180)
-        event_date = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
-        
+        event_date = (datetime.now(timezone.utc) + timedelta(days=days_ahead)).strftime(
+            "%Y-%m-%d"
+        )
+
         request = CateringRequest(
             id=str(uuid.uuid4()),
             first_name=first_name,
@@ -462,13 +603,16 @@ def seed_catering_requests(db):
             guest_count=random.randint(10, 200),
             event_type=event_type,
             budget_range=random.choice(CATERING_BUDGET_RANGES),
-            special_requests=fake.paragraph(nb_sentences=2) if random.random() > 0.3 else None,
+            special_requests=fake.paragraph(nb_sentences=2)
+            if random.random() > 0.3
+            else None,
             status=random.choice(CATERING_STATUSES),
-            created_at=datetime.now(timezone.utc) - timedelta(hours=random.randint(0, 720)),  # up to 30 days ago
+            created_at=datetime.now(timezone.utc)
+            - timedelta(hours=random.randint(0, 720)),  # up to 30 days ago
         )
         db.add(request)
         requests.append(request)
-    
+
     db.commit()
     print(f"  Created {len(requests)} catering requests.")
     return requests
@@ -478,8 +622,10 @@ def seed_catering_requests(db):
 # Main
 # ---------------------------------------------------------------------------
 
+
 def main():
     import sys
+
     db = SessionLocal()
     try:
         if "--only-if-empty" in sys.argv:
@@ -487,29 +633,37 @@ def main():
                 # A fresh migration database contains 'Event 1' and one default item ('Lamprais')
                 # We check if there are any regular events (not 'Event 1' or 'Random Requests'),
                 # any orders, or more than the default 1 item.
-                regular_events = db.query(Event).filter(Event.name != "Event 1", Event.kind != "random_requests").count()
+                regular_events = (
+                    db.query(Event)
+                    .filter(Event.name != "Event 1", Event.kind != "random_requests")
+                    .count()
+                )
                 item_count = db.query(Item).count()
                 order_count = db.query(Order).count()
                 if regular_events > 0 or order_count > 0 or item_count > 1:
-                    print("Database already has data (found existing regular events, orders, or items). Skipping seeding.")
+                    print(
+                        "Database already has data (found existing regular events, orders, or items). Skipping seeding."
+                    )
                     return
             except Exception as e:
-                print(f"Error checking database contents: {e}. Proceeding with seeding.")
+                print(
+                    f"Error checking database contents: {e}. Proceeding with seeding."
+                )
 
         # Clear existing data
         clear_all_tables(db)
-        
+
         # Seed core entities
         items = seed_items(db)
         locations = seed_locations(db)
         events = seed_events(db, items, locations)
-        
+
         # Seed related entities
         orders = seed_orders(db, events, items, locations)
         customers = seed_customers_from_orders(db, orders)
         feedback = seed_feedback(db, events, orders)
         catering_requests = seed_catering_requests(db)
-        
+
         print("\n" + "=" * 50)
         print("SEED SUMMARY")
         print("=" * 50)
@@ -522,7 +676,7 @@ def main():
         print(f"  Catering Requests:  {len(catering_requests)}")
         print("=" * 50)
         print("Seed complete!")
-        
+
     finally:
         db.close()
 

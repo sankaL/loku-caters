@@ -39,7 +39,9 @@ class OrderSchemaTests(unittest.TestCase):
     def test_quote_request_rejects_excessive_cart_lines(self):
         with self.assertRaises(ValidationError):
             OrderQuoteRequest(
-                lines=[{"item_id": f"item-{index}", "quantity": 1} for index in range(51)]
+                lines=[
+                    {"item_id": f"item-{index}", "quantity": 1} for index in range(51)
+                ]
             )
 
     def test_quote_request_rejects_excessive_total_quantity(self):

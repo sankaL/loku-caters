@@ -33,7 +33,9 @@ class FakeQuery:
 
     def first(self):
         for item in self.items:
-            if all(getattr(item, key, None) == value for key, value in self.filters.items()):
+            if all(
+                getattr(item, key, None) == value for key, value in self.filters.items()
+            ):
                 return item
         return None
 
@@ -81,7 +83,11 @@ class RaceSession(FakeSession):
             self.fail_once = False
             self.pending_customer = None
             self.customers = [self.conflicting_customer]
-            raise IntegrityError("insert", {}, Exception("duplicate key value violates unique constraint"))
+            raise IntegrityError(
+                "insert",
+                {},
+                Exception("duplicate key value violates unique constraint"),
+            )
         return None
 
 
@@ -100,7 +106,9 @@ class CustomerServiceTests(unittest.TestCase):
         return SimpleNamespace(**customer)
 
     def test_normalize_customer_email_trims_and_lowercases(self):
-        self.assertEqual(normalize_customer_email("  Test@Example.COM "), "test@example.com")
+        self.assertEqual(
+            normalize_customer_email("  Test@Example.COM "), "test@example.com"
+        )
         self.assertIsNone(normalize_customer_email("   "))
 
     def test_merge_pickup_locations_deduplicates(self):
@@ -129,7 +137,9 @@ class CustomerServiceTests(unittest.TestCase):
         self.assertEqual(customer.created_at, now)
         self.assertEqual(customer.updated_at, now)
 
-    def test_sync_customer_from_contact_updates_existing_customer_without_wiping_phone(self):
+    def test_sync_customer_from_contact_updates_existing_customer_without_wiping_phone(
+        self,
+    ):
         session = FakeSession()
         created_at = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
         updated_at = datetime(2026, 3, 19, 12, 0, tzinfo=timezone.utc)
@@ -226,7 +236,9 @@ class CustomerServiceTests(unittest.TestCase):
     def test_update_customer_from_admin_clears_phone_number(self):
         session = FakeSession()
         created_at = datetime(2026, 3, 18, 12, 0, tzinfo=timezone.utc)
-        customer = self.make_customer(phone_number="111-222-3333", created_at=created_at, updated_at=created_at)
+        customer = self.make_customer(
+            phone_number="111-222-3333", created_at=created_at, updated_at=created_at
+        )
         session.customers = [customer]
         updated_at = datetime(2026, 3, 20, 9, 30, tzinfo=timezone.utc)
 
@@ -328,8 +340,12 @@ class CustomerServiceTests(unittest.TestCase):
         self.assertEqual(first["name"], "Updated Name")
         self.assertEqual(first["phone_number"], "111-222-3333")
         self.assertEqual(first["pickup_locations"], ["Markham", "Toronto"])
-        self.assertEqual(first["created_at"], datetime(2026, 3, 1, 9, 0, tzinfo=timezone.utc))
-        self.assertEqual(first["updated_at"], datetime(2026, 3, 5, 9, 0, tzinfo=timezone.utc))
+        self.assertEqual(
+            first["created_at"], datetime(2026, 3, 1, 9, 0, tzinfo=timezone.utc)
+        )
+        self.assertEqual(
+            first["updated_at"], datetime(2026, 3, 5, 9, 0, tzinfo=timezone.utc)
+        )
 
     def test_build_customer_backfill_rows_is_idempotent(self):
         orders = [

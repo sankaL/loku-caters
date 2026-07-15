@@ -4,7 +4,7 @@
 
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
-        docker-ready db-up db-down db-migrate db-seed db-seed-if-empty db-reset test-backend \
+        docker-ready db-up db-down db-migrate db-seed db-seed-if-empty db-reset test-backend quality-backend audit-backend \
         stop stop-backend-port stop-frontend-port logs-backend help
 
 # ----------------------------------------------------------------------------
@@ -189,6 +189,19 @@ db-reset: db-up
 test-backend: sync-config db-up db-migrate
 	@cd backend && $(BACKEND_DEV_ENV) python3 -m pytest -q
 
+## Run backend lint, bytecode compilation, and unit tests
+quality-backend:
+	@cd backend && python3 -m ruff check .
+	@cd backend && python3 -m ruff format --check .
+	@cd backend && python3 -m compileall -q .
+	@cd backend && python3 -m pytest -q
+
+## Scan production backend code and Python dependencies for security issues
+audit-backend:
+	@cd backend && python3 -m bandit -q -r . \
+		-x ./tests,./alembic,./seed.py,./seed_dev.py,./seed_comprehensive.py,./backfill_customers.py
+	@cd backend && python3 -m pip_audit -r requirements.txt
+
 # ============================================================================
 # Process management
 # ============================================================================
@@ -236,6 +249,8 @@ help:
 	@echo "    make db-seed         Insert comprehensive test data (clears existing first)"
 	@echo "    make db-reset        Drop schema + migrate + seed (full wipe)"
 	@echo "    make test-backend    Run backend tests against the local database"
+	@echo "    make quality-backend Run backend lint, compile, and unit-test checks"
+	@echo "    make audit-backend   Run backend code and dependency security scans"
 	@echo ""
 	@echo "  CONFIG:"
 	@echo "    make sync-config     Copy config/event-config.json to frontend and backend"

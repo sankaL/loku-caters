@@ -23,7 +23,9 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     op.add_column(
         "items",
-        sa.Column("minimum_order_quantity", sa.Integer(), nullable=False, server_default="1"),
+        sa.Column(
+            "minimum_order_quantity", sa.Integer(), nullable=False, server_default="1"
+        ),
     )
     op.create_check_constraint(
         "ck_items_minimum_order_quantity_gte_1",

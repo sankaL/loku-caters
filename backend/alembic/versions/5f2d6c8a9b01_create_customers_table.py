@@ -60,12 +60,24 @@ def upgrade() -> None:
             nullable=False,
             server_default=sa.text("'[]'::jsonb"),
         ),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("now()"),
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("email", name="uq_customers_email"),
     )
-    op.execute(sa.text("ALTER TABLE IF EXISTS public.customers ENABLE ROW LEVEL SECURITY"))
+    op.execute(
+        sa.text("ALTER TABLE IF EXISTS public.customers ENABLE ROW LEVEL SECURITY")
+    )
     _revoke_api_role_access("public", "customers")
 
 

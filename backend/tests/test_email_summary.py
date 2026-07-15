@@ -76,7 +76,10 @@ class EmailSummaryTests(unittest.TestCase):
         self.assertIn("&lt;script&gt;", html)
 
     def test_email_subject_removes_header_control_characters(self):
-        self.assertEqual(_subject_text("Order\r\nBcc: attacker@example.com"), "Order Bcc: attacker@example.com")
+        self.assertEqual(
+            _subject_text("Order\r\nBcc: attacker@example.com"),
+            "Order Bcc: attacker@example.com",
+        )
 
 
 if __name__ == "__main__":

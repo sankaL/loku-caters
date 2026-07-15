@@ -47,7 +47,9 @@ def _revoke_api_role_access(schema: str, table: str) -> None:
 
 
 def upgrade() -> None:
-    op.add_column("orders", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "orders", sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True)
+    )
     op.execute(sa.text("UPDATE orders SET updated_at = COALESCE(created_at, NOW())"))
     op.alter_column("orders", "updated_at", nullable=False)
 
@@ -56,23 +58,73 @@ def upgrade() -> None:
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("name", sa.Text(), nullable=False),
         sa.Column("source_event_id", sa.Integer(), nullable=False),
-        sa.Column("source_event_kind", sa.Text(), nullable=False, server_default=sa.text("'event'")),
-        sa.Column("status", sa.Text(), nullable=False, server_default=sa.text("'draft'")),
-        sa.Column("included_order_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("ordered_quantity", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("planned_quantity", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("issue_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("warning_count", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.Column("snapshot", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.CheckConstraint("status IN ('draft', 'ready', 'archived')", name="ck_event_plans_status"),
-        sa.CheckConstraint("source_event_kind IN ('event', 'random_requests')", name="ck_event_plans_source_event_kind"),
+        sa.Column(
+            "source_event_kind",
+            sa.Text(),
+            nullable=False,
+            server_default=sa.text("'event'"),
+        ),
+        sa.Column(
+            "status", sa.Text(), nullable=False, server_default=sa.text("'draft'")
+        ),
+        sa.Column(
+            "included_order_count",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "ordered_quantity",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "planned_quantity",
+            sa.Integer(),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
+        sa.Column(
+            "issue_count", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
+        sa.Column(
+            "warning_count", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
+        sa.Column(
+            "snapshot",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("NOW()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("NOW()"),
+        ),
+        sa.CheckConstraint(
+            "status IN ('draft', 'ready', 'archived')", name="ck_event_plans_status"
+        ),
+        sa.CheckConstraint(
+            "source_event_kind IN ('event', 'random_requests')",
+            name="ck_event_plans_source_event_kind",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_event_plans_source_event_id", "event_plans", ["source_event_id"])
+    op.create_index(
+        "ix_event_plans_source_event_id", "event_plans", ["source_event_id"]
+    )
     op.create_index("ix_event_plans_status", "event_plans", ["status"])
-    op.execute(sa.text("ALTER TABLE IF EXISTS public.event_plans ENABLE ROW LEVEL SECURITY"))
+    op.execute(
+        sa.text("ALTER TABLE IF EXISTS public.event_plans ENABLE ROW LEVEL SECURITY")
+    )
     _revoke_api_role_access("public", "event_plans")
 
 

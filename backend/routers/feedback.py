@@ -29,7 +29,7 @@ def create_feedback(feedback_in: FeedbackCreate, db: Session = Depends(get_db)):
 def get_public_reviews(db: Session = Depends(get_db)):
     rows = (
         db.query(Feedback)
-        .filter(Feedback.show_in_reviews == True)
+        .filter(Feedback.show_in_reviews.is_(True))
         .order_by(Feedback.created_at.desc())
         .all()
     )

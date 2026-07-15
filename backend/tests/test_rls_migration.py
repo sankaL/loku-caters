@@ -18,7 +18,9 @@ class RowLevelSecurityMigrationTests(unittest.TestCase):
             / "versions"
             / "0026_harden_row_level_security.py"
         )
-        spec = importlib.util.spec_from_file_location("rls_hardening_migration", migration_path)
+        spec = importlib.util.spec_from_file_location(
+            "rls_hardening_migration", migration_path
+        )
         self.assertIsNotNone(spec)
         self.assertIsNotNone(spec.loader)
         module = importlib.util.module_from_spec(spec)

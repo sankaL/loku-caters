@@ -29,14 +29,43 @@ from event_config import (
     get_config_from_db,
     get_config_for_event_id_from_db,
 )
-from event_images import get_event_image_catalog, resolve_event_image_path, validate_event_image_key
-from models import CateringRequest, CateringRequestComment, Customer, Event, EventPlan, Feedback, Item, Location, Order
+from event_images import (
+    get_event_image_catalog,
+    resolve_event_image_path,
+    validate_event_image_key,
+)
+from models import (
+    CateringRequest,
+    CateringRequestComment,
+    Customer,
+    Event,
+    EventPlan,
+    Feedback,
+    Item,
+    Location,
+    Order,
+)
 from schemas import (
-    CustomerUpdate, EventCreate, EventUpdate, ItemCreate, ItemUpdate, LocationCreate, LocationUpdate,
-    CATERING_REQUEST_STATUSES, FEEDBACK_ORIGIN_LABELS, FEEDBACK_REASON_LABELS, FEEDBACK_STATUSES,
-    FEEDBACK_TYPE_LABELS, CateringRequestCommentCreate, CateringRequestStatusUpdate,
-    CustomerEventReminderRequest, AdminFeedbackCreate, FeedbackStatusUpdate, FeedbackCommentUpdate,
-    FeedbackReviewVisibilityUpdate, normalize_feedback_create,
+    CustomerUpdate,
+    EventCreate,
+    EventUpdate,
+    ItemCreate,
+    ItemUpdate,
+    LocationCreate,
+    LocationUpdate,
+    CATERING_REQUEST_STATUSES,
+    FEEDBACK_ORIGIN_LABELS,
+    FEEDBACK_REASON_LABELS,
+    FEEDBACK_STATUSES,
+    FEEDBACK_TYPE_LABELS,
+    CateringRequestCommentCreate,
+    CateringRequestStatusUpdate,
+    CustomerEventReminderRequest,
+    AdminFeedbackCreate,
+    FeedbackStatusUpdate,
+    FeedbackCommentUpdate,
+    FeedbackReviewVisibilityUpdate,
+    normalize_feedback_create,
 )
 from services.customers import (
     CustomerEmailConflictError,
@@ -44,7 +73,12 @@ from services.customers import (
     sync_customer_from_contact,
     update_customer_from_admin,
 )
-from services.email import send_confirmation, send_event_reminder_email, send_payment_reminder, send_reminder
+from services.email import (
+    send_confirmation,
+    send_event_reminder_email,
+    send_payment_reminder,
+    send_reminder,
+)
 from services.event_plan_pdf import build_event_plan_pdf
 from services.event_planning import (
     PLAN_STATUS_ARCHIVED,
@@ -58,7 +92,12 @@ from services.event_planning import (
     summarize_snapshot,
     utc_now,
 )
-from services.pricing import PricingLineInput, normalize_combo_deals, quote_cart, serialize_combo_deals
+from services.pricing import (
+    PricingLineInput,
+    normalize_combo_deals,
+    quote_cart,
+    serialize_combo_deals,
+)
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
@@ -73,6 +112,7 @@ _jwks_last_good: dict[str, dict] = {}
 # ---------------------------------------------------------------------------
 # Auth
 # ---------------------------------------------------------------------------
+
 
 @lru_cache(maxsize=8)
 def _fetch_jwks(issuer: str) -> dict:
@@ -131,7 +171,11 @@ def _find_jwk(issuer: str, kid: Optional[str]) -> Optional[dict]:
                 _jwks_failure_until.pop(issuer, None)
 
         key_data = next(
-            (key for key in jwks["keys"] if isinstance(key, dict) and key.get("kid") == kid),
+            (
+                key
+                for key in jwks["keys"]
+                if isinstance(key, dict) and key.get("kid") == kid
+            ),
             None,
         )
         if key_data is not None:
@@ -151,7 +195,11 @@ def _find_jwk(issuer: str, kid: Optional[str]) -> Optional[dict]:
         _jwks_last_good[issuer] = jwks
         _jwks_failure_until.pop(issuer, None)
         return next(
-            (key for key in jwks["keys"] if isinstance(key, dict) and key.get("kid") == kid),
+            (
+                key
+                for key in jwks["keys"]
+                if isinstance(key, dict) and key.get("kid") == kid
+            ),
             None,
         )
 
@@ -175,7 +223,7 @@ def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> d
         raise HTTPException(status_code=401, detail="Missing Bearer token")
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
-    token = authorization[len("Bearer "):]
+    token = authorization[len("Bearer ") :]
     if not token or token != token.strip():
         raise HTTPException(status_code=401, detail="Invalid Bearer token")
 
@@ -183,7 +231,9 @@ def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> d
         try:
             expected_issuer = settings.get_supabase_issuer()
         except ValueError as exc:
-            raise HTTPException(status_code=503, detail="Admin authentication is not configured") from exc
+            raise HTTPException(
+                status_code=503, detail="Admin authentication is not configured"
+            ) from exc
 
         header = jwt.get_unverified_header(token)
         alg = header.get("alg")
@@ -193,7 +243,9 @@ def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> d
             if not settings.supabase_jwt_secret:
                 raise HTTPException(status_code=401, detail="Server missing JWT secret")
             if len(settings.supabase_jwt_secret.encode("utf-8")) < 32:
-                raise HTTPException(status_code=503, detail="Admin authentication is not configured")
+                raise HTTPException(
+                    status_code=503, detail="Admin authentication is not configured"
+                )
             return _validate_admin_claims(
                 jwt.decode(
                     token,
@@ -231,12 +283,15 @@ def verify_admin_token(authorization: Optional[str] = Header(default=None)) -> d
 # Dev login retained for compatibility with older local frontend sessions.
 # ---------------------------------------------------------------------------
 
+
 @router.post("/dev-login")
 def dev_login():
     if not settings.dev_mode:
         raise HTTPException(status_code=404, detail="Not found")
     if not settings.supabase_jwt_secret:
-        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET is required for dev login")
+        raise HTTPException(
+            status_code=500, detail="SUPABASE_JWT_SECRET is required for dev login"
+        )
     now = datetime.now(timezone.utc)
     payload = {
         "sub": "dev-admin",
@@ -252,6 +307,7 @@ def dev_login():
 # ---------------------------------------------------------------------------
 # Inline schemas
 # ---------------------------------------------------------------------------
+
 
 class StatusUpdate(BaseModel):
     status: str
@@ -299,11 +355,14 @@ class PaymentUpdate(BaseModel):
 
         if self.payment_method == "other":
             if not self.payment_method_other:
-                raise ValueError("payment_method_other is required when payment_method is other")
+                raise ValueError(
+                    "payment_method_other is required when payment_method is other"
+                )
             return self
 
         self.payment_method_other = None
         return self
+
 
 class BulkCustomerDeleteRequest(BaseModel):
     ids: list[str] = Field(max_length=500)
@@ -318,11 +377,32 @@ class BulkCustomerDeleteRequest(BaseModel):
 
 
 ALLOWED_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    OrderStatus.PENDING: {OrderStatus.PENDING, OrderStatus.CONFIRMED, OrderStatus.CANCELLED},
-    OrderStatus.CONFIRMED: {OrderStatus.CONFIRMED, OrderStatus.PICKED_UP, OrderStatus.NO_SHOW, OrderStatus.CANCELLED},
-    OrderStatus.PICKED_UP: {OrderStatus.PICKED_UP, OrderStatus.NO_SHOW, OrderStatus.CANCELLED},
-    OrderStatus.NO_SHOW: {OrderStatus.NO_SHOW, OrderStatus.PICKED_UP, OrderStatus.CANCELLED},
-    OrderStatus.CANCELLED: {OrderStatus.CANCELLED, OrderStatus.PICKED_UP, OrderStatus.NO_SHOW},
+    OrderStatus.PENDING: {
+        OrderStatus.PENDING,
+        OrderStatus.CONFIRMED,
+        OrderStatus.CANCELLED,
+    },
+    OrderStatus.CONFIRMED: {
+        OrderStatus.CONFIRMED,
+        OrderStatus.PICKED_UP,
+        OrderStatus.NO_SHOW,
+        OrderStatus.CANCELLED,
+    },
+    OrderStatus.PICKED_UP: {
+        OrderStatus.PICKED_UP,
+        OrderStatus.NO_SHOW,
+        OrderStatus.CANCELLED,
+    },
+    OrderStatus.NO_SHOW: {
+        OrderStatus.NO_SHOW,
+        OrderStatus.PICKED_UP,
+        OrderStatus.CANCELLED,
+    },
+    OrderStatus.CANCELLED: {
+        OrderStatus.CANCELLED,
+        OrderStatus.PICKED_UP,
+        OrderStatus.NO_SHOW,
+    },
 }
 
 
@@ -572,8 +652,13 @@ class EventPlanDuplicateRequest(BaseModel):
 # Events CRUD
 # ---------------------------------------------------------------------------
 
-def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 0) -> dict:
-    normalized_combo_deals = serialize_combo_deals(normalize_combo_deals(event.combo_deals or []))
+
+def _event_dict(
+    event: Event, *, total_revenue: float = 0.0, order_count: int = 0
+) -> dict:
+    normalized_combo_deals = serialize_combo_deals(
+        normalize_combo_deals(event.combo_deals or [])
+    )
     return {
         "id": event.id,
         "name": event.name,
@@ -601,7 +686,10 @@ def _event_dict(event: Event, *, total_revenue: float = 0.0, order_count: int = 
 
 
 def _is_random_requests_event(event: Optional[Event]) -> bool:
-    return bool(event is not None and getattr(event, "kind", "event") == RANDOM_REQUESTS_EVENT_KIND)
+    return bool(
+        event is not None
+        and getattr(event, "kind", "event") == RANDOM_REQUESTS_EVENT_KIND
+    )
 
 
 def _customer_email_event_date(event: Optional[Event], fallback: str = "") -> str:
@@ -619,7 +707,12 @@ def _format_pickup_date_display(pickup_date) -> str:
     if isinstance(pickup_date, str) and pickup_date:
         return pickup_date
     try:
-        return pickup_date.strftime("%B ") + str(pickup_date.day) + _ordinal_suffix(pickup_date.day) + pickup_date.strftime(", %Y")
+        return (
+            pickup_date.strftime("%B ")
+            + str(pickup_date.day)
+            + _ordinal_suffix(pickup_date.day)
+            + pickup_date.strftime(", %Y")
+        )
     except (AttributeError, TypeError):
         return str(pickup_date) if pickup_date else ""
 
@@ -630,7 +723,9 @@ def _ordinal_suffix(day: int) -> str:
     return {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
 
 
-def _resolve_order_email_date(order: Order, event: Optional[Event], fallback: str = "") -> str:
+def _resolve_order_email_date(
+    order: Order, event: Optional[Event], fallback: str = ""
+) -> str:
     pickup_date = getattr(order, "pickup_date", None)
     if pickup_date is not None:
         formatted = _format_pickup_date_display(pickup_date)
@@ -650,7 +745,13 @@ def _require_random_requests_event(db: Session) -> Event:
 # Event plans
 # ---------------------------------------------------------------------------
 
-def _event_plan_dict(plan: EventPlan, *, include_snapshot: bool = False, is_out_of_date: Optional[bool] = None) -> dict:
+
+def _event_plan_dict(
+    plan: EventPlan,
+    *,
+    include_snapshot: bool = False,
+    is_out_of_date: Optional[bool] = None,
+) -> dict:
     data = {
         "id": plan.id,
         "name": plan.name,
@@ -665,7 +766,11 @@ def _event_plan_dict(plan: EventPlan, *, include_snapshot: bool = False, is_out_
         "created_at": plan.created_at.isoformat() if plan.created_at else None,
         "updated_at": plan.updated_at.isoformat() if plan.updated_at else None,
     }
-    source_event = (plan.snapshot or {}).get("source_event") if isinstance(plan.snapshot, dict) else None
+    source_event = (
+        (plan.snapshot or {}).get("source_event")
+        if isinstance(plan.snapshot, dict)
+        else None
+    )
     if source_event:
         data["source_event"] = source_event
     if is_out_of_date is not None:
@@ -675,7 +780,9 @@ def _event_plan_dict(plan: EventPlan, *, include_snapshot: bool = False, is_out_
     return data
 
 
-def _require_event_plan(db: Session, plan_id: str, *, for_update: bool = False) -> EventPlan:
+def _require_event_plan(
+    db: Session, plan_id: str, *, for_update: bool = False
+) -> EventPlan:
     query = db.query(EventPlan).filter(EventPlan.id == plan_id)
     if for_update:
         query = query.with_for_update()
@@ -711,9 +818,13 @@ def _source_order_line_dict(order: Order) -> dict:
         "quantity": int(order.quantity or 0),
         "pickup_location": order.pickup_location or "",
         "pickup_time_slot": order.pickup_time_slot or "",
-        "pickup_date": order.pickup_date.isoformat() if getattr(order, "pickup_date", None) is not None else None,
+        "pickup_date": order.pickup_date.isoformat()
+        if getattr(order, "pickup_date", None) is not None
+        else None,
         "status": order.status or OrderStatus.PENDING,
-        "updated_at": (order.updated_at or order.created_at).isoformat() if (order.updated_at or order.created_at) else None,
+        "updated_at": (order.updated_at or order.created_at).isoformat()
+        if (order.updated_at or order.created_at)
+        else None,
     }
 
 
@@ -724,10 +835,14 @@ def _source_fingerprint_for_event(db: Session, event_id: int) -> dict:
         .order_by(Order.created_at.asc(), Order.id.asc())
         .all()
     )
-    return build_source_order_fingerprint(_source_order_line_dict(order) for order in orders)
+    return build_source_order_fingerprint(
+        _source_order_line_dict(order) for order in orders
+    )
 
 
-def _source_fingerprints_for_events(db: Session, event_ids: set[int]) -> dict[int, dict]:
+def _source_fingerprints_for_events(
+    db: Session, event_ids: set[int]
+) -> dict[int, dict]:
     grouped: dict[int, list[dict]] = {event_id: [] for event_id in event_ids}
     if not event_ids:
         return grouped
@@ -738,7 +853,9 @@ def _source_fingerprints_for_events(db: Session, event_ids: set[int]) -> dict[in
         .all()
     )
     for order in orders:
-        grouped.setdefault(int(order.event_id), []).append(_source_order_line_dict(order))
+        grouped.setdefault(int(order.event_id), []).append(
+            _source_order_line_dict(order)
+        )
     return {
         event_id: build_source_order_fingerprint(lines)
         for event_id, lines in grouped.items()
@@ -770,44 +887,69 @@ def _check_event_plan_fresh(plan: EventPlan, expected_updated_at: str) -> None:
 
 def _ensure_event_plan_editable(plan: EventPlan) -> None:
     if plan.status == PLAN_STATUS_ARCHIVED:
-        raise HTTPException(status_code=409, detail="Archived event plans must be restored before editing")
+        raise HTTPException(
+            status_code=409,
+            detail="Archived event plans must be restored before editing",
+        )
 
 
 def _validate_event_plan_snapshot(snapshot: dict) -> None:
     if not isinstance(snapshot, dict):
         raise HTTPException(status_code=422, detail="Invalid event plan snapshot")
     if snapshot.get("version") != 1:
-        raise HTTPException(status_code=422, detail="Unsupported event plan snapshot version")
+        raise HTTPException(
+            status_code=422, detail="Unsupported event plan snapshot version"
+        )
     source_event = snapshot.get("source_event")
     if not isinstance(source_event, dict) or source_event.get("id") is None:
         raise HTTPException(status_code=422, detail="Snapshot source event is missing")
     if not isinstance(snapshot.get("source_fingerprint"), dict):
-        raise HTTPException(status_code=422, detail="Snapshot source fingerprint is missing")
+        raise HTTPException(
+            status_code=422, detail="Snapshot source fingerprint is missing"
+        )
     for key in ("bundles", "order_lines", "planned_rows", "issues", "warnings"):
         if not isinstance(snapshot.get(key), list):
-            raise HTTPException(status_code=422, detail=f"Snapshot {key} must be a list")
+            raise HTTPException(
+                status_code=422, detail=f"Snapshot {key} must be a list"
+            )
     for row in snapshot.get("planned_rows", []):
         if not isinstance(row, dict):
-            raise HTTPException(status_code=422, detail="Snapshot planned row is invalid")
+            raise HTTPException(
+                status_code=422, detail="Snapshot planned row is invalid"
+            )
         if row.get("row_type") not in {"order", "extra"}:
-            raise HTTPException(status_code=422, detail="Snapshot planned row type is invalid")
+            raise HTTPException(
+                status_code=422, detail="Snapshot planned row type is invalid"
+            )
         if not str(row.get("id") or "").strip():
-            raise HTTPException(status_code=422, detail="Snapshot planned row id is missing")
+            raise HTTPException(
+                status_code=422, detail="Snapshot planned row id is missing"
+            )
         if row.get("row_state", "active") not in {"active", "removed"}:
-            raise HTTPException(status_code=422, detail="Snapshot planned row state is invalid")
+            raise HTTPException(
+                status_code=422, detail="Snapshot planned row state is invalid"
+            )
 
 
-def _is_event_plan_out_of_date(db: Session, plan: EventPlan, *, current_fingerprint: Optional[dict] = None) -> bool:
+def _is_event_plan_out_of_date(
+    db: Session, plan: EventPlan, *, current_fingerprint: Optional[dict] = None
+) -> bool:
     stored = _stored_source_fingerprint(plan)
     if stored is None:
         return True
-    current = current_fingerprint if current_fingerprint is not None else _source_fingerprint_for_event(db, plan.source_event_id)
+    current = (
+        current_fingerprint
+        if current_fingerprint is not None
+        else _source_fingerprint_for_event(db, plan.source_event_id)
+    )
     return stored != current
 
 
 def _ensure_event_plan_source_fresh(db: Session, plan: EventPlan) -> None:
     if _is_event_plan_out_of_date(db, plan):
-        raise HTTPException(status_code=409, detail="Refresh this event plan before continuing")
+        raise HTTPException(
+            status_code=409, detail="Refresh this event plan before continuing"
+        )
 
 
 @router.get("/event-plans")
@@ -819,8 +961,12 @@ def admin_list_event_plans(
     query = db.query(EventPlan)
     if not include_archived:
         query = query.filter(EventPlan.status != PLAN_STATUS_ARCHIVED)
-    plans = query.order_by(EventPlan.updated_at.desc(), EventPlan.created_at.desc()).all()
-    fingerprints = _source_fingerprints_for_events(db, {int(plan.source_event_id) for plan in plans})
+    plans = query.order_by(
+        EventPlan.updated_at.desc(), EventPlan.created_at.desc()
+    ).all()
+    fingerprints = _source_fingerprints_for_events(
+        db, {int(plan.source_event_id) for plan in plans}
+    )
     return [
         _event_plan_dict(
             plan,
@@ -869,7 +1015,9 @@ def admin_get_event_plan(
     _: dict = Depends(verify_admin_token),
 ):
     plan = _require_event_plan(db, plan_id)
-    return _event_plan_dict(plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan))
+    return _event_plan_dict(
+        plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan)
+    )
 
 
 @router.put("/event-plans/{plan_id}")
@@ -891,7 +1039,9 @@ def admin_save_event_plan(
         plan.status = PLAN_STATUS_DRAFT
     db.commit()
     db.refresh(plan)
-    return _event_plan_dict(plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan))
+    return _event_plan_dict(
+        plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan)
+    )
 
 
 @router.post("/event-plans/{plan_id}/refresh")
@@ -906,7 +1056,9 @@ def admin_refresh_event_plan(
     _check_event_plan_fresh(plan, body.expected_updated_at)
     event = _require_source_event(db, plan.source_event_id)
     orders = _source_orders_for_plan(db, event.id)
-    snapshot = build_event_plan_snapshot(event, orders, previous_snapshot=plan.snapshot or {})
+    snapshot = build_event_plan_snapshot(
+        event, orders, previous_snapshot=plan.snapshot or {}
+    )
     _apply_event_plan_summary(plan, snapshot)
     plan.status = PLAN_STATUS_DRAFT
     db.commit()
@@ -933,7 +1085,9 @@ def admin_mark_event_plan_ready(
     plan.updated_at = utc_now()
     db.commit()
     db.refresh(plan)
-    return _event_plan_dict(plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan))
+    return _event_plan_dict(
+        plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan)
+    )
 
 
 @router.post("/event-plans/{plan_id}/archive")
@@ -949,7 +1103,9 @@ def admin_archive_event_plan(
     plan.updated_at = utc_now()
     db.commit()
     db.refresh(plan)
-    return _event_plan_dict(plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan))
+    return _event_plan_dict(
+        plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan)
+    )
 
 
 @router.post("/event-plans/{plan_id}/restore")
@@ -965,7 +1121,9 @@ def admin_restore_event_plan(
     plan.updated_at = utc_now()
     db.commit()
     db.refresh(plan)
-    return _event_plan_dict(plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan))
+    return _event_plan_dict(
+        plan, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, plan)
+    )
 
 
 @router.post("/event-plans/{plan_id}/duplicate", status_code=201)
@@ -991,7 +1149,11 @@ def admin_duplicate_event_plan(
     db.add(duplicate)
     db.commit()
     db.refresh(duplicate)
-    return _event_plan_dict(duplicate, include_snapshot=True, is_out_of_date=_is_event_plan_out_of_date(db, duplicate))
+    return _event_plan_dict(
+        duplicate,
+        include_snapshot=True,
+        is_out_of_date=_is_event_plan_out_of_date(db, duplicate),
+    )
 
 
 @router.get("/event-plans/{plan_id}/pdf")
@@ -1005,9 +1167,16 @@ def admin_export_event_plan_pdf(
     _ensure_event_plan_source_fresh(db, plan)
     summary = summarize_snapshot(snapshot)
     if summary["issue_count"] > 0:
-        raise HTTPException(status_code=409, detail="Resolve blocking issues before exporting this plan")
-    pdf = build_event_plan_pdf(plan_name=plan.name, status=plan.status, snapshot=snapshot)
-    safe_name = "".join(ch if ch.isalnum() else "-" for ch in plan.name.lower()).strip("-") or "event-plan"
+        raise HTTPException(
+            status_code=409, detail="Resolve blocking issues before exporting this plan"
+        )
+    pdf = build_event_plan_pdf(
+        plan_name=plan.name, status=plan.status, snapshot=snapshot
+    )
+    safe_name = (
+        "".join(ch if ch.isalnum() else "-" for ch in plan.name.lower()).strip("-")
+        or "event-plan"
+    )
     return Response(
         content=pdf,
         media_type="application/pdf",
@@ -1020,7 +1189,9 @@ def _normalize_price(value: float) -> float:
 
 
 def _item_base_unit_price(item: Item) -> float:
-    return float(item.discounted_price if item.discounted_price is not None else item.price)
+    return float(
+        item.discounted_price if item.discounted_price is not None else item.price
+    )
 
 
 def _apply_manual_pricing(
@@ -1030,7 +1201,9 @@ def _apply_manual_pricing(
     unit_price: Optional[float],
 ) -> None:
     base_unit_price = _item_base_unit_price(item)
-    manual_unit_price = _normalize_price(unit_price if unit_price is not None else base_unit_price)
+    manual_unit_price = _normalize_price(
+        unit_price if unit_price is not None else base_unit_price
+    )
     quantity = int(order.quantity)
     catalog_base_total = _normalize_price(base_unit_price * quantity)
     total_price = _normalize_price(manual_unit_price * quantity)
@@ -1073,18 +1246,31 @@ def _resolve_order_pickup_address(db: Session, order: Order) -> str:
     if pickup_address:
         return pickup_address
 
-    location = db.query(Location).filter(
-        or_(Location.name == order.pickup_location, Location.id == order.pickup_location)
-    ).first()
+    location = (
+        db.query(Location)
+        .filter(
+            or_(
+                Location.name == order.pickup_location,
+                Location.id == order.pickup_location,
+            )
+        )
+        .first()
+    )
     if location and getattr(location, "address", None):
         return str(location.address).strip()
     return ""
 
 
-def _validate_event_images(payload: Union[EventCreate, EventUpdate]) -> tuple[Optional[str], Optional[str]]:
+def _validate_event_images(
+    payload: Union[EventCreate, EventUpdate],
+) -> tuple[Optional[str], Optional[str]]:
     try:
-        tooltip_image_key = validate_event_image_key(payload.tooltip_image_key, "tooltip")
-        hero_side_image_key = validate_event_image_key(payload.hero_side_image_key, "hero_side")
+        tooltip_image_key = validate_event_image_key(
+            payload.tooltip_image_key, "tooltip"
+        )
+        hero_side_image_key = validate_event_image_key(
+            payload.hero_side_image_key, "hero_side"
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return tooltip_image_key, hero_side_image_key
@@ -1097,10 +1283,14 @@ def _validate_menu_item_image_key(image_key: Optional[str]) -> Optional[str]:
         raise HTTPException(status_code=400, detail=str(exc))
 
 
-def _validate_event_combo_deals(payload: Union[EventCreate, EventUpdate]) -> list[dict[str, Any]]:
+def _validate_event_combo_deals(
+    payload: Union[EventCreate, EventUpdate],
+) -> list[dict[str, Any]]:
     try:
         combo_payload = [entry.model_dump(mode="json") for entry in payload.combo_deals]
-        normalized = normalize_combo_deals(combo_payload, allowed_item_ids=set(payload.item_ids))
+        normalized = normalize_combo_deals(
+            combo_payload, allowed_item_ids=set(payload.item_ids)
+        )
         return serialize_combo_deals(normalized)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
@@ -1196,7 +1386,9 @@ def admin_create_event(
         tooltip_image_key=tooltip_image_key,
         hero_side_image_key=hero_side_image_key,
         etransfer_enabled=body.etransfer_enabled,
-        etransfer_email=str(body.etransfer_email) if body.etransfer_email is not None else None,
+        etransfer_email=str(body.etransfer_email)
+        if body.etransfer_email is not None
+        else None,
         is_active=False,
         item_ids=body.item_ids,
         location_ids=body.location_ids,
@@ -1217,7 +1409,9 @@ def admin_update_random_requests_config(
 ):
     event = _require_random_requests_event(db)
     event.etransfer_enabled = body.etransfer_enabled
-    event.etransfer_email = str(body.etransfer_email) if body.etransfer_email is not None else None
+    event.etransfer_email = (
+        str(body.etransfer_email) if body.etransfer_email is not None else None
+    )
     event.updated_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(event)
@@ -1237,7 +1431,10 @@ def admin_update_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     if _is_random_requests_event(event):
-        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be edited")
+        raise HTTPException(
+            status_code=400,
+            detail="Random Requests is a system event and cannot be edited",
+        )
     event.name = body.name
     event.event_date = body.event_date
     event.hero_header = body.hero_header
@@ -1250,7 +1447,9 @@ def admin_update_event(
     event.tooltip_image_key = tooltip_image_key
     event.hero_side_image_key = hero_side_image_key
     event.etransfer_enabled = body.etransfer_enabled
-    event.etransfer_email = str(body.etransfer_email) if body.etransfer_email is not None else None
+    event.etransfer_email = (
+        str(body.etransfer_email) if body.etransfer_email is not None else None
+    )
     event.item_ids = body.item_ids
     event.location_ids = body.location_ids
     event.combo_deals = combo_deals
@@ -1270,7 +1469,10 @@ def admin_activate_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     if _is_random_requests_event(event):
-        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be activated")
+        raise HTTPException(
+            status_code=400,
+            detail="Random Requests is a system event and cannot be activated",
+        )
     db.query(Event).update({"is_active": False})
     event.is_active = True
     event.updated_at = datetime.now(timezone.utc)
@@ -1289,7 +1491,10 @@ def admin_deactivate_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     if _is_random_requests_event(event):
-        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be deactivated")
+        raise HTTPException(
+            status_code=400,
+            detail="Random Requests is a system event and cannot be deactivated",
+        )
     event.is_active = False
     event.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -1307,13 +1512,18 @@ def admin_delete_event(
     if event is None:
         raise HTTPException(status_code=404, detail="Event not found")
     if _is_random_requests_event(event):
-        raise HTTPException(status_code=400, detail="Random Requests is a system event and cannot be deleted")
+        raise HTTPException(
+            status_code=400,
+            detail="Random Requests is a system event and cannot be deleted",
+        )
     if event.is_active:
         raise HTTPException(status_code=400, detail="Cannot delete the active event")
 
     existing_orders = db.query(Order).filter(Order.event_id == event_id).count()
     if existing_orders > 0:
-        raise HTTPException(status_code=400, detail="Cannot delete event with existing orders")
+        raise HTTPException(
+            status_code=400, detail="Cannot delete event with existing orders"
+        )
     db.delete(event)
     db.commit()
     return {"success": True}
@@ -1323,15 +1533,20 @@ def admin_delete_event(
 # Items CRUD
 # ---------------------------------------------------------------------------
 
+
 def _item_dict(item: Item) -> dict:
-    minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+    minimum_order_quantity = max(
+        1, int(getattr(item, "minimum_order_quantity", 1) or 1)
+    )
     image_key = getattr(item, "image_key", None)
     return {
         "id": item.id,
         "name": item.name,
         "description": item.description,
         "price": float(item.price),
-        "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
+        "discounted_price": float(item.discounted_price)
+        if item.discounted_price is not None
+        else None,
         "minimum_order_quantity": minimum_order_quantity,
         "image_key": image_key,
         "image_path": resolve_event_image_path(image_key),
@@ -1362,7 +1577,9 @@ def admin_create_item(
         description=body.description,
         price=body.price,
         discounted_price=body.discounted_price,
-        minimum_order_quantity=body.minimum_order_quantity if body.minimum_order_quantity is not None else 1,
+        minimum_order_quantity=body.minimum_order_quantity
+        if body.minimum_order_quantity is not None
+        else 1,
         image_key=image_key,
         sort_order=next_sort,
     )
@@ -1413,6 +1630,7 @@ def admin_delete_item(
 # Locations CRUD
 # ---------------------------------------------------------------------------
 
+
 def _location_dict(loc: Location) -> dict:
     return {
         "id": loc.id,
@@ -1429,7 +1647,7 @@ def admin_list_locations(
     _: dict = Depends(verify_admin_token),
 ):
     locations = db.query(Location).order_by(Location.sort_order).all()
-    return [_location_dict(l) for l in locations]
+    return [_location_dict(location) for location in locations]
 
 
 @router.post("/locations", status_code=201)
@@ -1488,10 +1706,13 @@ def admin_delete_location(
 # Order endpoints
 # ---------------------------------------------------------------------------
 
+
 def _order_dict(order: Order) -> dict:
     return {
         "id": order.id,
-        "event_id": int(order.event_id) if getattr(order, "event_id", None) is not None else None,
+        "event_id": int(order.event_id)
+        if getattr(order, "event_id", None) is not None
+        else None,
         "group_id": order.group_id,
         "name": order.name,
         "email": order.email,
@@ -1502,7 +1723,9 @@ def _order_dict(order: Order) -> dict:
         "pickup_location": order.pickup_location,
         "pickup_time_slot": order.pickup_time_slot,
         "pickup_address": getattr(order, "pickup_address", None),
-        "pickup_date": order.pickup_date.isoformat() if getattr(order, "pickup_date", None) is not None else None,
+        "pickup_date": order.pickup_date.isoformat()
+        if getattr(order, "pickup_date", None) is not None
+        else None,
         "base_total_price": float(order.base_total_price),
         "discount_total": float(order.discount_total),
         "total_price": float(order.total_price),
@@ -1551,7 +1774,9 @@ def _project_order_bundle(orders: list[Order]) -> dict[str, Any]:
     unique_statuses = set(breakdown.keys())
     status = sorted(unique_statuses)[0] if len(unique_statuses) == 1 else "mixed"
 
-    normalized_notes = [_normalize_group_text(getattr(order, "notes", None)) for order in sorted_orders]
+    normalized_notes = [
+        _normalize_group_text(getattr(order, "notes", None)) for order in sorted_orders
+    ]
     primary_notes = normalized_notes[0]
     notes_mixed = any(note != primary_notes for note in normalized_notes[1:])
 
@@ -1560,22 +1785,47 @@ def _project_order_bundle(orders: list[Order]) -> dict[str, Any]:
         "bundle_id": bundle_id,
         "group_id": primary.group_id,
         "primary_order_id": primary.id,
-        "event_id": int(primary.event_id) if getattr(primary, "event_id", None) is not None else None,
+        "event_id": int(primary.event_id)
+        if getattr(primary, "event_id", None) is not None
+        else None,
         "name": primary.name,
         "email": primary.email,
         "phone_number": primary.phone_number,
         "pickup_location": primary.pickup_location,
         "pickup_time_slot": primary.pickup_time_slot,
         "pickup_address": getattr(primary, "pickup_address", None),
-        "pickup_date": primary.pickup_date.isoformat() if getattr(primary, "pickup_date", None) is not None else None,
+        "pickup_date": primary.pickup_date.isoformat()
+        if getattr(primary, "pickup_date", None) is not None
+        else None,
         "line_count": len(sorted_orders),
-        "quantity_total": int(sum(int(getattr(order, "quantity", 0) or 0) for order in sorted_orders)),
-        "base_total_price": round(sum(float(getattr(order, "base_total_price", 0) or 0) for order in sorted_orders), 2),
-        "discount_total": round(sum(float(getattr(order, "discount_total", 0) or 0) for order in sorted_orders), 2),
-        "total_price": round(sum(float(getattr(order, "total_price", 0) or 0) for order in sorted_orders), 2),
+        "quantity_total": int(
+            sum(int(getattr(order, "quantity", 0) or 0) for order in sorted_orders)
+        ),
+        "base_total_price": round(
+            sum(
+                float(getattr(order, "base_total_price", 0) or 0)
+                for order in sorted_orders
+            ),
+            2,
+        ),
+        "discount_total": round(
+            sum(
+                float(getattr(order, "discount_total", 0) or 0)
+                for order in sorted_orders
+            ),
+            2,
+        ),
+        "total_price": round(
+            sum(
+                float(getattr(order, "total_price", 0) or 0) for order in sorted_orders
+            ),
+            2,
+        ),
         "status": status,
         "status_breakdown": breakdown,
-        "reminded": all(bool(getattr(order, "reminded", False)) for order in sorted_orders),
+        "reminded": all(
+            bool(getattr(order, "reminded", False)) for order in sorted_orders
+        ),
         "paid": all(bool(getattr(order, "paid", False)) for order in sorted_orders),
         "payment_method": primary.payment_method,
         "payment_method_other": primary.payment_method_other,
@@ -1591,7 +1841,9 @@ def _orders_to_bundle_rows(orders: list[Order]) -> list[dict[str, Any]]:
     for order in orders:
         grouped.setdefault(_bundle_id_for_order(order), []).append(order)
 
-    bundle_rows = [_project_order_bundle(group_orders) for group_orders in grouped.values()]
+    bundle_rows = [
+        _project_order_bundle(group_orders) for group_orders in grouped.values()
+    ]
     bundle_rows.sort(
         key=lambda row: (
             row.get("created_at") or "",
@@ -1618,12 +1870,20 @@ def _find_orders_for_bundle_id(db: Session, bundle_id: str) -> list[Order]:
     return [single]
 
 
-def _get_reminder_context(db: Session, orders: list[Order]) -> tuple[dict[int, Event], str, dict]:
-    event_ids = sorted({int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None})
+def _get_reminder_context(
+    db: Session, orders: list[Order]
+) -> tuple[dict[int, Event], str, dict]:
+    event_ids = sorted(
+        {int(o.event_id) for o in orders if getattr(o, "event_id", None) is not None}
+    )
     events = db.query(Event).filter(Event.id.in_(event_ids)).all() if event_ids else []
     events_by_id: dict[int, Event] = {int(event.id): event for event in events}
 
-    active_event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+    active_event = (
+        db.query(Event)
+        .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+        .first()
+    )
     active_event_date = active_event.event_date if active_event else ""
     active_etransfer = {
         "enabled": bool(active_event.etransfer_enabled) if active_event else False,
@@ -1657,23 +1917,51 @@ def _normalize_group_email(value: Optional[str]) -> Optional[str]:
     return normalized.lower() if normalized is not None else None
 
 
-def _validate_group_order_payload(existing_group_orders: list[Order], body: AdminOrderCreate) -> None:
+def _validate_group_order_payload(
+    existing_group_orders: list[Order], body: AdminOrderCreate
+) -> None:
     if not existing_group_orders:
         return
 
     existing_statuses = {order.status for order in existing_group_orders}
     if len(existing_statuses) > 1:
-        raise HTTPException(status_code=409, detail="Cannot add items to a mixed-status bundle")
+        raise HTTPException(
+            status_code=409, detail="Cannot add items to a mixed-status bundle"
+        )
 
     first_order = existing_group_orders[0]
     mismatched_fields: list[str] = []
     shared_fields = (
-        ("name", _normalize_group_text(first_order.name), _normalize_group_text(body.name)),
-        ("email", _normalize_group_email(first_order.email), _normalize_group_email(str(body.email) if body.email is not None else None)),
-        ("phone_number", _normalize_group_text(first_order.phone_number), _normalize_group_text(body.phone_number)),
-        ("pickup_location", _normalize_group_text(first_order.pickup_location), _normalize_group_text(body.pickup_location)),
-        ("pickup_time_slot", _normalize_group_text(first_order.pickup_time_slot), _normalize_group_text(body.pickup_time_slot)),
-        ("pickup_address", _normalize_group_text(getattr(first_order, "pickup_address", None)), _normalize_group_text(getattr(body, "pickup_address", None))),
+        (
+            "name",
+            _normalize_group_text(first_order.name),
+            _normalize_group_text(body.name),
+        ),
+        (
+            "email",
+            _normalize_group_email(first_order.email),
+            _normalize_group_email(str(body.email) if body.email is not None else None),
+        ),
+        (
+            "phone_number",
+            _normalize_group_text(first_order.phone_number),
+            _normalize_group_text(body.phone_number),
+        ),
+        (
+            "pickup_location",
+            _normalize_group_text(first_order.pickup_location),
+            _normalize_group_text(body.pickup_location),
+        ),
+        (
+            "pickup_time_slot",
+            _normalize_group_text(first_order.pickup_time_slot),
+            _normalize_group_text(body.pickup_time_slot),
+        ),
+        (
+            "pickup_address",
+            _normalize_group_text(getattr(first_order, "pickup_address", None)),
+            _normalize_group_text(getattr(body, "pickup_address", None)),
+        ),
         ("exclude_email", bool(first_order.exclude_email), bool(body.exclude_email)),
     )
     for field_name, existing_value, incoming_value in shared_fields:
@@ -1694,8 +1982,12 @@ def _reset_group_payment_state(orders: list[Order]) -> None:
         order.payment_method_other = None
 
 
-def _already_confirmed_response(order: Order, group_orders: list[Order]) -> Optional[dict[str, Any]]:
-    if not group_orders or not all(group_order.status == OrderStatus.CONFIRMED for group_order in group_orders):
+def _already_confirmed_response(
+    order: Order, group_orders: list[Order]
+) -> Optional[dict[str, Any]]:
+    if not group_orders or not all(
+        group_order.status == OrderStatus.CONFIRMED for group_order in group_orders
+    ):
         return None
 
     return {
@@ -1703,7 +1995,9 @@ def _already_confirmed_response(order: Order, group_orders: list[Order]) -> Opti
         "order_id": order.id,
         "status": order.status,
         "email_sent": False,
-        "email_suppressed": any(group_order.exclude_email for group_order in group_orders),
+        "email_suppressed": any(
+            group_order.exclude_email for group_order in group_orders
+        ),
     }
 
 
@@ -1775,43 +2069,67 @@ def _prepare_reminder_order_data(
     group_orders = _get_order_group_rows(db, order)
 
     if any(group_order.status != OrderStatus.CONFIRMED for group_order in group_orders):
-        return _reminder_result(
-            order,
-            status="skipped_not_confirmed",
-            message="Only confirmed orders can be reminded",
-        ), None, group_orders
+        return (
+            _reminder_result(
+                order,
+                status="skipped_not_confirmed",
+                message="Only confirmed orders can be reminded",
+            ),
+            None,
+            group_orders,
+        )
 
     if all(group_order.reminded for group_order in group_orders):
-        return _reminder_result(
-            order,
-            status="skipped_already_reminded",
-            message="Already reminded",
-        ), None, group_orders
+        return (
+            _reminder_result(
+                order,
+                status="skipped_already_reminded",
+                message="Already reminded",
+            ),
+            None,
+            group_orders,
+        )
 
     if any(group_order.exclude_email for group_order in group_orders):
-        return _reminder_result(
-            order,
-            status="skipped_excluded",
-            message="Excluded from email",
-        ), None, group_orders
+        return (
+            _reminder_result(
+                order,
+                status="skipped_excluded",
+                message="Excluded from email",
+            ),
+            None,
+            group_orders,
+        )
 
     if not order.email or not str(order.email).strip():
-        return _reminder_result(
-            order,
-            status="skipped_missing_email",
-            message="Missing email",
-        ), None, group_orders
+        return (
+            _reminder_result(
+                order,
+                status="skipped_missing_email",
+                message="Missing email",
+            ),
+            None,
+            group_orders,
+        )
 
     address = _resolve_order_pickup_address(db, order)
 
-    event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
+    event = (
+        events_by_id.get(int(order.event_id))
+        if getattr(order, "event_id", None) is not None
+        else None
+    )
     event_date = _resolve_order_email_date(order, event, active_event_date)
     etransfer = {
-        "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
+        "enabled": bool(event.etransfer_enabled)
+        if event
+        else active_etransfer["enabled"],
         "email": event.etransfer_email if event else active_etransfer["email"],
     }
 
-    order_data = _group_email_order_data(orders=group_orders, event=event, address=address)
+    order_data = _group_email_order_data(
+        orders=group_orders, event=event, address=address
+    )
     order_data["event_date"] = event_date
     order_data["etransfer_enabled"] = etransfer["enabled"]
     order_data["etransfer_email"] = etransfer["email"]
@@ -1839,8 +2157,8 @@ def _send_order_reminder(
 
     try:
         send_reminder(order_data)
-    except Exception as exc:
-        print(f"[email] Failed to send reminder to {order.email}: {exc}")
+    except Exception:
+        logger.exception("Failed to send pickup reminder")
         return _reminder_result(
             order,
             status="failed",
@@ -1866,48 +2184,77 @@ def _prepare_payment_reminder_order_data(
 ) -> tuple[Optional[dict], Optional[dict], list[Order]]:
     group_orders = _get_order_group_rows(db, order)
 
-    if any(group_order.status not in {OrderStatus.CONFIRMED, OrderStatus.PICKED_UP} for group_order in group_orders):
-        return _reminder_result(
-            order,
-            status="skipped_not_confirmed",
-            message="Only confirmed or picked up unpaid orders can be reminded",
-        ), None, group_orders
+    if any(
+        group_order.status not in {OrderStatus.CONFIRMED, OrderStatus.PICKED_UP}
+        for group_order in group_orders
+    ):
+        return (
+            _reminder_result(
+                order,
+                status="skipped_not_confirmed",
+                message="Only confirmed or picked up unpaid orders can be reminded",
+            ),
+            None,
+            group_orders,
+        )
 
     if all(group_order.paid for group_order in group_orders):
-        return _reminder_result(
-            order,
-            status="skipped_paid",
-            message="Order is already marked paid",
-        ), None, group_orders
+        return (
+            _reminder_result(
+                order,
+                status="skipped_paid",
+                message="Order is already marked paid",
+            ),
+            None,
+            group_orders,
+        )
 
     if any(group_order.exclude_email for group_order in group_orders):
-        return _reminder_result(
-            order,
-            status="skipped_excluded",
-            message="Excluded from email",
-        ), None, group_orders
+        return (
+            _reminder_result(
+                order,
+                status="skipped_excluded",
+                message="Excluded from email",
+            ),
+            None,
+            group_orders,
+        )
 
     if not order.email or not str(order.email).strip():
-        return _reminder_result(
-            order,
-            status="skipped_missing_email",
-            message="Missing email",
-        ), None, group_orders
+        return (
+            _reminder_result(
+                order,
+                status="skipped_missing_email",
+                message="Missing email",
+            ),
+            None,
+            group_orders,
+        )
 
     address = _resolve_order_pickup_address(db, order)
 
-    event = events_by_id.get(int(order.event_id)) if getattr(order, "event_id", None) is not None else None
+    event = (
+        events_by_id.get(int(order.event_id))
+        if getattr(order, "event_id", None) is not None
+        else None
+    )
     event_date = _resolve_order_email_date(order, event, active_event_date)
     etransfer = {
-        "enabled": bool(event.etransfer_enabled) if event else active_etransfer["enabled"],
+        "enabled": bool(event.etransfer_enabled)
+        if event
+        else active_etransfer["enabled"],
         "email": event.etransfer_email if event else active_etransfer["email"],
     }
 
-    order_data = _group_email_order_data(orders=group_orders, event=event, address=address)
+    order_data = _group_email_order_data(
+        orders=group_orders, event=event, address=address
+    )
     order_data["event_date"] = event_date
     order_data["etransfer_enabled"] = etransfer["enabled"]
     order_data["etransfer_email"] = etransfer["email"]
-    order_data["pickup_completed"] = all(group_order.status == OrderStatus.PICKED_UP for group_order in group_orders)
+    order_data["pickup_completed"] = all(
+        group_order.status == OrderStatus.PICKED_UP for group_order in group_orders
+    )
 
     return None, order_data, group_orders
 
@@ -1932,8 +2279,8 @@ def _send_order_payment_reminder(
 
     try:
         send_payment_reminder(order_data)
-    except Exception as exc:
-        print(f"[email] Failed to send payment reminder to {order.email}: {exc}")
+    except Exception:
+        logger.exception("Failed to send payment reminder")
         return _reminder_result(
             order,
             status="failed",
@@ -1961,8 +2308,12 @@ def _event_items_payload(items: list[Item]) -> list[dict[str, Any]]:
             "name": item.name,
             "description": item.description,
             "price": float(item.price),
-            "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
-            "minimum_order_quantity": max(1, int(getattr(item, "minimum_order_quantity", 1) or 1)),
+            "discounted_price": float(item.discounted_price)
+            if item.discounted_price is not None
+            else None,
+            "minimum_order_quantity": max(
+                1, int(getattr(item, "minimum_order_quantity", 1) or 1)
+            ),
             "image_key": getattr(item, "image_key", None),
             "image_path": resolve_event_image_path(getattr(item, "image_key", None)),
         }
@@ -1990,7 +2341,9 @@ def _validate_order_line_inputs(
         item = item_lookup.get(line.item_id)
         if item is None:
             raise HTTPException(status_code=400, detail="Invalid item_id for event")
-        minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+        minimum_order_quantity = max(
+            1, int(getattr(item, "minimum_order_quantity", 1) or 1)
+        )
         if line.quantity < minimum_order_quantity:
             raise HTTPException(
                 status_code=400,
@@ -2007,7 +2360,9 @@ def _validate_random_order_line_inputs(
 ) -> Item:
     item = db.query(Item).filter(Item.id == item_id).first()
     if item is None:
-        raise HTTPException(status_code=400, detail="Invalid item_id for random request")
+        raise HTTPException(
+            status_code=400, detail="Invalid item_id for random request"
+        )
     if quantity < 1:
         raise HTTPException(status_code=400, detail="Quantity must be at least 1")
     return item
@@ -2027,7 +2382,9 @@ def _validate_order_location(
     if location.id not in (event.location_ids or []):
         raise HTTPException(status_code=400, detail="Invalid pickup_location for event")
     if pickup_time_slot not in (location.time_slots or []):
-        raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
+        raise HTTPException(
+            status_code=400, detail="Invalid pickup_time_slot for location"
+        )
     return location
 
 
@@ -2052,7 +2409,12 @@ def _quote_event_lines(
 
 def _get_order_group_rows(db: Session, order: Order) -> list[Order]:
     if order.group_id:
-        return db.query(Order).filter(Order.group_id == order.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
+        return (
+            db.query(Order)
+            .filter(Order.group_id == order.group_id)
+            .order_by(Order.created_at.asc(), Order.id.asc())
+            .all()
+        )
     return [order]
 
 
@@ -2092,11 +2454,15 @@ def _reprice_order_group(
         db=db,
         event=event,
         lines=[
-            PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=int(order.quantity))
+            PricingLineInput(
+                line_id=order.id, item_id=order.item_id, quantity=int(order.quantity)
+            )
             for order in orders
         ],
     )
-    shared_meta = {"group_id": orders[0].group_id} if orders and orders[0].group_id else {}
+    shared_meta = (
+        {"group_id": orders[0].group_id} if orders and orders[0].group_id else {}
+    )
     _apply_pricing_to_orders(orders=orders, pricing=pricing, shared_meta=shared_meta)
     return pricing
 
@@ -2174,9 +2540,15 @@ def admin_create_order(
         if event is None:
             raise HTTPException(status_code=404, detail="Event not found")
         if _is_random_requests_event(event):
-            raise HTTPException(status_code=400, detail="Random Requests orders must use random mode")
+            raise HTTPException(
+                status_code=400, detail="Random Requests orders must use random mode"
+            )
     else:
-        event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+        event = (
+            db.query(Event)
+            .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+            .first()
+        )
         if event is None:
             raise HTTPException(status_code=400, detail="No active event")
 
@@ -2196,7 +2568,10 @@ def admin_create_order(
         )
 
     existing_group_orders = (
-        db.query(Order).filter(Order.group_id == body.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
+        db.query(Order)
+        .filter(Order.group_id == body.group_id)
+        .order_by(Order.created_at.asc(), Order.id.asc())
+        .all()
         if body.group_id
         else []
     )
@@ -2219,7 +2594,9 @@ def admin_create_order(
         pickup_location=body.pickup_location,
         pickup_time_slot=body.pickup_time_slot,
         pickup_address=body.pickup_address,
-        pickup_date=body.pickup_date if is_random_mode else getattr(event, "pickup_date", None),
+        pickup_date=body.pickup_date
+        if is_random_mode
+        else getattr(event, "pickup_date", None),
         base_total_price=0,
         discount_total=0,
         total_price=0,
@@ -2238,9 +2615,18 @@ def admin_create_order(
         _apply_manual_pricing(order=order, item=random_item, unit_price=body.unit_price)
 
     if order.group_id:
-        group_orders = db.query(Order).filter(Order.group_id == order.group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
-        if any(int(group_order.event_id) != int(event.id) for group_order in group_orders):
-            raise HTTPException(status_code=400, detail="group_id cannot span multiple events")
+        group_orders = (
+            db.query(Order)
+            .filter(Order.group_id == order.group_id)
+            .order_by(Order.created_at.asc(), Order.id.asc())
+            .all()
+        )
+        if any(
+            int(group_order.event_id) != int(event.id) for group_order in group_orders
+        ):
+            raise HTTPException(
+                status_code=400, detail="group_id cannot span multiple events"
+            )
         _reset_group_payment_state(group_orders)
         if is_random_mode:
             for group_order in group_orders:
@@ -2248,7 +2634,9 @@ def admin_create_order(
                     continue
                 group_order.event_id = int(event.id)
                 if random_item is not None:
-                    _apply_manual_pricing(order=group_order, item=random_item, unit_price=body.unit_price)
+                    _apply_manual_pricing(
+                        order=group_order, item=random_item, unit_price=body.unit_price
+                    )
         else:
             _reprice_order_group(db=db, event=event, orders=group_orders)
     else:
@@ -2259,7 +2647,11 @@ def admin_create_order(
             pricing = _quote_event_lines(
                 db=db,
                 event=event,
-                lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
+                lines=[
+                    PricingLineInput(
+                        line_id=order.id, item_id=order.item_id, quantity=order.quantity
+                    )
+                ],
             )
             _apply_pricing_to_orders(orders=[order], pricing=pricing)
 
@@ -2298,9 +2690,13 @@ def admin_list_orders(
             query.order_by(Order.created_at.asc(), Order.id.asc()).all()
         )
         if status:
-            bundle_rows = [row for row in bundle_rows if str(row.get("status") or "") == status]
+            bundle_rows = [
+                row for row in bundle_rows if str(row.get("status") or "") == status
+            ]
         if paid is not None:
-            bundle_rows = [row for row in bundle_rows if bool(row.get("paid")) == bool(paid)]
+            bundle_rows = [
+                row for row in bundle_rows if bool(row.get("paid")) == bool(paid)
+            ]
         return bundle_rows
 
     query = db.query(Order)
@@ -2366,12 +2762,12 @@ def admin_bulk_remind(
     unique_ids = list(dict.fromkeys(requested_ids))
 
     orders = (
-        db.query(Order).filter(Order.id.in_(unique_ids)).all()
-        if unique_ids
-        else []
+        db.query(Order).filter(Order.id.in_(unique_ids)).all() if unique_ids else []
     )
     orders_by_id: dict[str, Order] = {o.id: o for o in orders}
-    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, orders)
+    events_by_id, active_event_date, active_etransfer = _get_reminder_context(
+        db, orders
+    )
 
     reminded_count = 0
     failed_emails = 0
@@ -2428,7 +2824,9 @@ def admin_send_single_reminder(
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, [order])
+    events_by_id, active_event_date, active_etransfer = _get_reminder_context(
+        db, [order]
+    )
     result = _send_order_reminder(
         order,
         db,
@@ -2451,7 +2849,9 @@ def admin_send_single_payment_reminder(
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    events_by_id, active_event_date, active_etransfer = _get_reminder_context(db, [order])
+    events_by_id, active_event_date, active_etransfer = _get_reminder_context(
+        db, [order]
+    )
     return _send_order_payment_reminder(
         order,
         db,
@@ -2484,13 +2884,20 @@ def admin_update_order(
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
 
-    event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
+    event = (
+        db.query(Event).filter(Event.id == int(order.event_id)).first()
+        if getattr(order, "event_id", None) is not None
+        else None
+    )
     if event is None:
         raise HTTPException(status_code=400, detail="Order is missing event context")
 
     is_random_mode = _is_random_requests_event(event) or body.mode == "random"
     if body.mode == "random" and not _is_random_requests_event(event):
-        raise HTTPException(status_code=400, detail="Random Requests orders can only be edited in the random bucket")
+        raise HTTPException(
+            status_code=400,
+            detail="Random Requests orders can only be edited in the random bucket",
+        )
 
     preserved_manual_unit_price = _existing_manual_unit_price(order)
     random_item: Optional[Item] = None
@@ -2517,7 +2924,11 @@ def admin_update_order(
             group_order.pickup_location = body.pickup_location
             group_order.pickup_time_slot = body.pickup_time_slot
             group_order.pickup_address = body.pickup_address
-            group_order.pickup_date = body.pickup_date if is_random_mode else (getattr(event, "pickup_date", None) or body.pickup_date)
+            group_order.pickup_date = (
+                body.pickup_date
+                if is_random_mode
+                else (getattr(event, "pickup_date", None) or body.pickup_date)
+            )
             group_order.notes = body.notes
             group_order.exclude_email = body.exclude_email
             if group_order.id == order.id:
@@ -2527,7 +2938,9 @@ def admin_update_order(
                     _apply_manual_pricing(
                         order=group_order,
                         item=random_item,
-                        unit_price=body.unit_price if body.unit_price is not None else preserved_manual_unit_price,
+                        unit_price=body.unit_price
+                        if body.unit_price is not None
+                        else preserved_manual_unit_price,
                     )
         if is_random_mode:
             for group_order in group_orders:
@@ -2545,7 +2958,11 @@ def admin_update_order(
         order.pickup_location = body.pickup_location
         order.pickup_time_slot = body.pickup_time_slot
         order.pickup_address = body.pickup_address
-        order.pickup_date = body.pickup_date if is_random_mode else (getattr(event, "pickup_date", None) or body.pickup_date)
+        order.pickup_date = (
+            body.pickup_date
+            if is_random_mode
+            else (getattr(event, "pickup_date", None) or body.pickup_date)
+        )
         order.notes = body.notes
         order.exclude_email = body.exclude_email
         if is_random_mode:
@@ -2554,13 +2971,19 @@ def admin_update_order(
             _apply_manual_pricing(
                 order=order,
                 item=random_item,
-                unit_price=body.unit_price if body.unit_price is not None else preserved_manual_unit_price,
+                unit_price=body.unit_price
+                if body.unit_price is not None
+                else preserved_manual_unit_price,
             )
         else:
             pricing = _quote_event_lines(
                 db=db,
                 event=event,
-                lines=[PricingLineInput(line_id=order.id, item_id=order.item_id, quantity=order.quantity)],
+                lines=[
+                    PricingLineInput(
+                        line_id=order.id, item_id=order.item_id, quantity=order.quantity
+                    )
+                ],
             )
             _apply_pricing_to_orders(orders=[order], pricing=pricing)
 
@@ -2606,9 +3029,19 @@ def admin_confirm_order(
                 detail="Order email is missing. Set exclude_email=true to confirm without email.",
             )
 
-        event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
+        event = (
+            db.query(Event).filter(Event.id == int(order.event_id)).first()
+            if getattr(order, "event_id", None) is not None
+            else None
+        )
         if event is None:
-            event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+            event = (
+                db.query(Event)
+                .filter(
+                    Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND
+                )
+                .first()
+            )
         event_date = _resolve_order_email_date(order, event)
         etransfer = {
             "enabled": bool(event.etransfer_enabled) if event else False,
@@ -2617,7 +3050,9 @@ def admin_confirm_order(
 
         address = _resolve_order_pickup_address(db, order)
 
-        order_data = _group_email_order_data(orders=group_orders, event=event, address=address)
+        order_data = _group_email_order_data(
+            orders=group_orders, event=event, address=address
+        )
         order_data["event_date"] = event_date
         order_data["etransfer_enabled"] = etransfer["enabled"]
         order_data["etransfer_email"] = etransfer["email"]
@@ -2625,9 +3060,9 @@ def admin_confirm_order(
         email_sent = True
         try:
             send_confirmation(order_data)
-        except Exception as exc:
+        except Exception:
             email_sent = False
-            print(f"[email] Failed to send confirmation to {order.email}: {exc}")
+            logger.exception("Failed to send order confirmation")
 
     result = _apply_bundle_status(order, group_orders, OrderStatus.CONFIRMED, db)
     result["email_sent"] = email_sent
@@ -2693,8 +3128,12 @@ def admin_restore_order(
 
     group_orders = _get_order_group_rows(db, order)
     if any(group_order.status != OrderStatus.CANCELLED for group_order in group_orders):
-        raise HTTPException(status_code=409, detail="Only cancelled orders can be restored")
-    _validate_bundle_status_transition(group_orders, body.target_status, invalid_detail="Invalid restore target")
+        raise HTTPException(
+            status_code=409, detail="Only cancelled orders can be restored"
+        )
+    _validate_bundle_status_transition(
+        group_orders, body.target_status, invalid_detail="Invalid restore target"
+    )
     return _apply_bundle_status(order, group_orders, body.target_status, db)
 
 
@@ -2725,7 +3164,9 @@ def update_order_payment(
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
     if body.paid and order.status == OrderStatus.PENDING:
-        raise HTTPException(status_code=409, detail="Cannot mark as paid while status is pending")
+        raise HTTPException(
+            status_code=409, detail="Cannot mark as paid while status is pending"
+        )
 
     group_orders = _get_order_group_rows(db, order)
     for group_order in group_orders:
@@ -2750,12 +3191,21 @@ def delete_order(
     order = db.query(Order).filter(Order.id == order_id).first()
     if order is None:
         raise HTTPException(status_code=404, detail="Order not found")
-    event = db.query(Event).filter(Event.id == int(order.event_id)).first() if getattr(order, "event_id", None) is not None else None
+    event = (
+        db.query(Event).filter(Event.id == int(order.event_id)).first()
+        if getattr(order, "event_id", None) is not None
+        else None
+    )
     group_id = order.group_id
     db.delete(order)
     db.flush()
     if group_id and event is not None and not _is_random_requests_event(event):
-        remaining_orders = db.query(Order).filter(Order.group_id == group_id).order_by(Order.created_at.asc(), Order.id.asc()).all()
+        remaining_orders = (
+            db.query(Order)
+            .filter(Order.group_id == group_id)
+            .order_by(Order.created_at.asc(), Order.id.asc())
+            .all()
+        )
         if remaining_orders:
             _reprice_order_group(db=db, event=event, orders=remaining_orders)
     db.commit()
@@ -2784,9 +3234,13 @@ def admin_list_customers(
 
     trimmed_pickup_location = pickup_location.strip() if pickup_location else None
     if trimmed_pickup_location:
-        query = query.filter(Customer.pickup_locations.contains([trimmed_pickup_location]))
+        query = query.filter(
+            Customer.pickup_locations.contains([trimmed_pickup_location])
+        )
 
-    customers = query.order_by(Customer.updated_at.desc(), Customer.created_at.desc(), Customer.id.desc()).all()
+    customers = query.order_by(
+        Customer.updated_at.desc(), Customer.created_at.desc(), Customer.id.desc()
+    ).all()
     return [_customer_dict(customer) for customer in customers]
 
 
@@ -2854,13 +3308,24 @@ def admin_send_customer_event_reminder(
         if isinstance(item, dict) and str(item.get("id") or "").strip()
     }
 
-    invalid_location_ids = [location_id for location_id in body.location_ids if location_id not in locations_by_id]
+    invalid_location_ids = [
+        location_id
+        for location_id in body.location_ids
+        if location_id not in locations_by_id
+    ]
     if invalid_location_ids:
-        raise HTTPException(status_code=400, detail="Selected pickup locations are not part of the active event")
+        raise HTTPException(
+            status_code=400,
+            detail="Selected pickup locations are not part of the active event",
+        )
 
-    invalid_item_ids = [item_id for item_id in body.item_ids if item_id not in items_by_id]
+    invalid_item_ids = [
+        item_id for item_id in body.item_ids if item_id not in items_by_id
+    ]
     if invalid_item_ids:
-        raise HTTPException(status_code=400, detail="Selected items are not part of the active event")
+        raise HTTPException(
+            status_code=400, detail="Selected items are not part of the active event"
+        )
 
     frontend_base_url = settings.frontend_url.rstrip("/")
     event_id = active_config.get("event", {}).get("id")
@@ -2889,8 +3354,8 @@ def admin_send_customer_event_reminder(
 
     try:
         send_event_reminder_email(email_data)
-    except Exception as exc:
-        print(f"[email] Failed to send event reminder to {email}: {exc}")
+    except Exception:
+        logger.exception("Failed to send customer event reminder")
         return {
             "status": "failed",
             "message": "Failed to send event reminder",
@@ -2921,6 +3386,7 @@ def admin_bulk_delete_customers(
 # Catering request endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.get("/catering-requests")
 def admin_list_catering_requests(
     db: Session = Depends(get_db),
@@ -2939,7 +3405,9 @@ def admin_list_catering_requests(
             {
                 "id": comment.id,
                 "body": comment.body,
-                "created_at": comment.created_at.isoformat() if comment.created_at else None,
+                "created_at": comment.created_at.isoformat()
+                if comment.created_at
+                else None,
             }
         )
 
@@ -2997,8 +3465,10 @@ def bulk_delete_catering_requests(
         db.query(CateringRequestComment).filter(
             CateringRequestComment.catering_request_id.in_(body.ids)
         ).delete(synchronize_session=False)
-        deleted = db.query(CateringRequest).filter(CateringRequest.id.in_(body.ids)).delete(
-            synchronize_session=False
+        deleted = (
+            db.query(CateringRequest)
+            .filter(CateringRequest.id.in_(body.ids))
+            .delete(synchronize_session=False)
         )
         db.commit()
     return {"success": True, "deleted": deleted}
@@ -3027,7 +3497,9 @@ def delete_catering_request(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    catering_request = db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    catering_request = (
+        db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    )
     if catering_request is None:
         raise HTTPException(status_code=404, detail="Catering request not found")
     db.query(CateringRequestComment).filter(
@@ -3045,7 +3517,9 @@ def update_catering_request_status(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    catering_request = db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    catering_request = (
+        db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    )
     if catering_request is None:
         raise HTTPException(status_code=404, detail="Catering request not found")
     catering_request.status = body.status
@@ -3060,7 +3534,9 @@ def add_catering_request_comment(
     db: Session = Depends(get_db),
     _: dict = Depends(verify_admin_token),
 ):
-    catering_request = db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    catering_request = (
+        db.query(CateringRequest).filter(CateringRequest.id == request_id).first()
+    )
     if catering_request is None:
         raise HTTPException(status_code=404, detail="Catering request not found")
 
@@ -3077,7 +3553,9 @@ def add_catering_request_comment(
         "comment": {
             "id": comment.id,
             "body": comment.body,
-            "created_at": comment.created_at.isoformat() if comment.created_at else None,
+            "created_at": comment.created_at.isoformat()
+            if comment.created_at
+            else None,
         },
     }
 
@@ -3086,18 +3564,23 @@ def add_catering_request_comment(
 # Feedback endpoints
 # ---------------------------------------------------------------------------
 
+
 def _feedback_dict(row: Feedback) -> dict:
     return {
         "id": row.id,
         "origin": row.origin,
         "origin_label": FEEDBACK_ORIGIN_LABELS.get(row.origin, row.origin),
         "feedback_type": row.feedback_type,
-        "feedback_type_label": FEEDBACK_TYPE_LABELS.get(row.feedback_type, row.feedback_type),
+        "feedback_type_label": FEEDBACK_TYPE_LABELS.get(
+            row.feedback_type, row.feedback_type
+        ),
         "order_id": row.order_id,
         "name": row.name,
         "contact": row.contact,
         "reason": row.reason,
-        "reason_label": FEEDBACK_REASON_LABELS.get(row.reason, row.reason) if row.reason else None,
+        "reason_label": FEEDBACK_REASON_LABELS.get(row.reason, row.reason)
+        if row.reason
+        else None,
         "other_details": row.other_details,
         "message": row.message,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -3122,12 +3605,15 @@ def admin_create_feedback(
 
     feedback = Feedback(
         **normalized,
-        show_in_reviews=bool(body.show_in_reviews and normalized.get("rating") is not None),
+        show_in_reviews=bool(
+            body.show_in_reviews and normalized.get("rating") is not None
+        ),
     )
     db.add(feedback)
     db.commit()
     db.refresh(feedback)
     return _feedback_dict(feedback)
+
 
 @router.get("/feedback")
 def admin_list_feedback(
@@ -3168,13 +3654,18 @@ def admin_list_feedback(
         if row.reason:
             reason_counts[row.reason] = reason_counts.get(row.reason, 0) + 1
 
-    pre_order_count = origin_counts["events_page_non_customer"] + origin_counts["event_reminder_email"]
+    pre_order_count = (
+        origin_counts["events_page_non_customer"]
+        + origin_counts["event_reminder_email"]
+    )
     reason_metrics = [
         {
             "reason": r,
             "label": FEEDBACK_REASON_LABELS.get(r, r),
             "count": reason_counts.get(r, 0),
-            "pct": round(reason_counts.get(r, 0) / pre_order_count * 100) if pre_order_count else 0,
+            "pct": round(reason_counts.get(r, 0) / pre_order_count * 100)
+            if pre_order_count
+            else 0,
         }
         for r in FEEDBACK_REASON_LABELS
     ]
@@ -3196,7 +3687,11 @@ def bulk_delete_feedback(
 ):
     deleted = 0
     if body.ids:
-        deleted = db.query(Feedback).filter(Feedback.id.in_(body.ids)).delete(synchronize_session=False)
+        deleted = (
+            db.query(Feedback)
+            .filter(Feedback.id.in_(body.ids))
+            .delete(synchronize_session=False)
+        )
         db.commit()
     return {"success": True, "deleted": deleted}
 

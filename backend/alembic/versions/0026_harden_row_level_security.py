@@ -39,7 +39,9 @@ _POLICY_NAME = "deny_direct_api_access"
 
 def upgrade() -> None:
     for table in _TABLES:
-        op.execute(sa.text(f"ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY"))
+        op.execute(
+            sa.text(f"ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY")
+        )
         op.execute(
             # All interpolated identifiers come from fixed migration constants.
             sa.text(  # nosec B608

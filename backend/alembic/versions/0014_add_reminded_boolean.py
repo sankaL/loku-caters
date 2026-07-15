@@ -20,7 +20,9 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "orders",
-        sa.Column("reminded", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column(
+            "reminded", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
     )
 
     op.execute(

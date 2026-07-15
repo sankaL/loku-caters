@@ -15,7 +15,12 @@ from starlette.requests import Request as StarletteRequest
 from config import Settings, settings
 from routers import admin as admin_router
 from routers.admin import verify_admin_token
-from security import RateLimitMiddleware, RateLimitRule, RequestSecurityMiddleware, get_client_ip
+from security import (
+    RateLimitMiddleware,
+    RateLimitRule,
+    RequestSecurityMiddleware,
+    get_client_ip,
+)
 
 
 class SettingsSecurityTests(unittest.TestCase):
@@ -74,7 +79,9 @@ class AdminTokenSecurityTests(unittest.TestCase):
     def test_accepts_valid_token_from_pinned_issuer(self):
         with (
             patch.object(settings, "dev_mode", False),
-            patch.object(settings, "supabase_url", "https://trusted-project.supabase.co"),
+            patch.object(
+                settings, "supabase_url", "https://trusted-project.supabase.co"
+            ),
             patch.object(settings, "supabase_jwt_secret", self.JWT_SECRET),
             patch.object(settings, "admin_emails", "admin@example.com"),
         ):
@@ -84,7 +91,9 @@ class AdminTokenSecurityTests(unittest.TestCase):
     def test_rejects_token_from_another_issuer(self):
         with (
             patch.object(settings, "dev_mode", False),
-            patch.object(settings, "supabase_url", "https://trusted-project.supabase.co"),
+            patch.object(
+                settings, "supabase_url", "https://trusted-project.supabase.co"
+            ),
             patch.object(settings, "supabase_jwt_secret", self.JWT_SECRET),
             patch.object(settings, "admin_emails", "admin@example.com"),
         ):
@@ -97,7 +106,9 @@ class AdminTokenSecurityTests(unittest.TestCase):
     def test_rejects_authenticated_user_outside_admin_allowlist(self):
         with (
             patch.object(settings, "dev_mode", False),
-            patch.object(settings, "supabase_url", "https://trusted-project.supabase.co"),
+            patch.object(
+                settings, "supabase_url", "https://trusted-project.supabase.co"
+            ),
             patch.object(settings, "supabase_jwt_secret", self.JWT_SECRET),
             patch.object(settings, "admin_emails", "owner@example.com"),
         ):
@@ -109,14 +120,25 @@ class AdminTokenSecurityTests(unittest.TestCase):
         expected_issuer = "https://trusted-project.supabase.co/auth/v1"
         with (
             patch.object(settings, "dev_mode", False),
-            patch.object(settings, "supabase_url", "https://trusted-project.supabase.co"),
+            patch.object(
+                settings, "supabase_url", "https://trusted-project.supabase.co"
+            ),
             patch.object(settings, "admin_emails", ""),
-            patch("routers.admin.jwt.get_unverified_header", return_value={"alg": "RS256", "kid": "key-1"}),
-            patch("routers.admin._fetch_jwks", return_value={"keys": [{"kid": "key-1"}]}) as fetch_jwks,
+            patch(
+                "routers.admin.jwt.get_unverified_header",
+                return_value={"alg": "RS256", "kid": "key-1"},
+            ),
+            patch(
+                "routers.admin._fetch_jwks", return_value={"keys": [{"kid": "key-1"}]}
+            ) as fetch_jwks,
             patch("routers.admin.jwt.PyJWK.from_dict") as from_jwk,
             patch(
                 "routers.admin.jwt.decode",
-                return_value={"sub": "admin", "email": "admin@example.com", "role": "authenticated"},
+                return_value={
+                    "sub": "admin",
+                    "email": "admin@example.com",
+                    "role": "authenticated",
+                },
             ) as decode,
         ):
             verify_admin_token("Bearer header.payload.signature")
@@ -129,9 +151,17 @@ class AdminTokenSecurityTests(unittest.TestCase):
     def test_jwks_outage_returns_controlled_service_unavailable(self):
         with (
             patch.object(settings, "dev_mode", False),
-            patch.object(settings, "supabase_url", "https://trusted-project.supabase.co"),
-            patch("routers.admin.jwt.get_unverified_header", return_value={"alg": "RS256", "kid": "key-1"}),
-            patch("routers.admin._fetch_jwks", side_effect=admin_router.URLError("network unavailable")) as fetch,
+            patch.object(
+                settings, "supabase_url", "https://trusted-project.supabase.co"
+            ),
+            patch(
+                "routers.admin.jwt.get_unverified_header",
+                return_value={"alg": "RS256", "kid": "key-1"},
+            ),
+            patch(
+                "routers.admin._fetch_jwks",
+                side_effect=admin_router.URLError("network unavailable"),
+            ) as fetch,
         ):
             with self.assertRaises(HTTPException) as exc:
                 verify_admin_token("Bearer header.payload.signature")
@@ -139,7 +169,9 @@ class AdminTokenSecurityTests(unittest.TestCase):
                 verify_admin_token("Bearer header.payload.signature")
 
         self.assertEqual(exc.exception.status_code, 503)
-        self.assertEqual(exc.exception.detail, "Admin authentication is temporarily unavailable")
+        self.assertEqual(
+            exc.exception.detail, "Admin authentication is temporarily unavailable"
+        )
         fetch.assert_called_once_with("https://trusted-project.supabase.co/auth/v1")
 
     def test_unknown_jwt_kid_refresh_is_rate_bounded(self):
@@ -184,7 +216,11 @@ class RequestSecurityTests(unittest.TestCase):
             RateLimitMiddleware,
             enabled=True,
             trusted_proxy_hops=0,
-            rules=(RateLimitRule("test", re.compile(r"/api/admin/limited"), frozenset({"GET"}), 2, 60),),
+            rules=(
+                RateLimitRule(
+                    "test", re.compile(r"/api/admin/limited"), frozenset({"GET"}), 2, 60
+                ),
+            ),
         )
         client = TestClient(app)
         self.assertEqual(client.get("/api/admin/limited").status_code, 200)
@@ -226,12 +262,18 @@ class RequestSecurityTests(unittest.TestCase):
         async def limited(request: Request):
             return {"size": len(await request.body())}
 
-        app.add_middleware(CountingRequestSecurityMiddleware, max_request_body_bytes=1024)
+        app.add_middleware(
+            CountingRequestSecurityMiddleware, max_request_body_bytes=1024
+        )
         app.add_middleware(
             RateLimitMiddleware,
             enabled=True,
             trusted_proxy_hops=0,
-            rules=(RateLimitRule("test", re.compile(r"/limited"), frozenset({"POST"}), 1, 60),),
+            rules=(
+                RateLimitRule(
+                    "test", re.compile(r"/limited"), frozenset({"POST"}), 1, 60
+                ),
+            ),
         )
         client = TestClient(app)
         self.assertEqual(client.post("/limited", content=b"accepted").status_code, 200)

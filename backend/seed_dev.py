@@ -98,9 +98,15 @@ ORDERS = [
 def seed():
     db = SessionLocal()
     try:
-        active_event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+        active_event = (
+            db.query(Event)
+            .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+            .first()
+        )
         if active_event is None:
-            raise RuntimeError("No active event found. Create and activate an event before seeding orders.")
+            raise RuntimeError(
+                "No active event found. Create and activate an event before seeding orders."
+            )
 
         inserted = 0
         for data in ORDERS:

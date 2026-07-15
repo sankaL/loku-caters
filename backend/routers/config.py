@@ -4,7 +4,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
-from event_config import EventNotFoundError, NoActiveEventError, get_config_for_event_id_from_db, get_config_from_db
+from event_config import (
+    EventNotFoundError,
+    NoActiveEventError,
+    get_config_for_event_id_from_db,
+    get_config_from_db,
+)
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 

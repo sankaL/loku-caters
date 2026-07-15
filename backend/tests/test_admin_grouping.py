@@ -96,7 +96,9 @@ class FakeQuery:
         return getattr(row, key, None) == value
 
     def _matches(self, row) -> bool:
-        return all(self._criterion_matches(row, criterion) for criterion in self.criteria)
+        return all(
+            self._criterion_matches(row, criterion) for criterion in self.criteria
+        )
 
     def all(self):
         return [row for row in self.rows if self._matches(row)]
@@ -158,12 +160,19 @@ class AdminGroupingTests(unittest.TestCase):
             _validate_group_order_payload(existing, body)
 
         self.assertEqual(exc_context.exception.status_code, 409)
-        self.assertEqual(exc_context.exception.detail, "Cannot add items to a mixed-status bundle")
+        self.assertEqual(
+            exc_context.exception.detail, "Cannot add items to a mixed-status bundle"
+        )
 
     def test_reset_group_payment_state_clears_bundle_payment_flags(self):
         orders = [
             make_order(id="order-1", paid=True, payment_method="cash"),
-            make_order(id="order-2", paid=True, payment_method="etransfer", payment_method_other="memo"),
+            make_order(
+                id="order-2",
+                paid=True,
+                payment_method="etransfer",
+                payment_method_other="memo",
+            ),
         ]
 
         _reset_group_payment_state(orders)
@@ -293,7 +302,15 @@ class AdminGroupingTests(unittest.TestCase):
         )
         db = FakeSession([first, second, third])
 
-        rows = admin_list_orders(view="bundle", status=None, event_id=None, paid=None, email=None, db=db, _={})
+        rows = admin_list_orders(
+            view="bundle",
+            status=None,
+            event_id=None,
+            paid=None,
+            email=None,
+            db=db,
+            _={},
+        )
         self.assertEqual(len(rows), 2)
 
         grouped = next(row for row in rows if row["bundle_id"] == "bundle-1")
@@ -303,20 +320,36 @@ class AdminGroupingTests(unittest.TestCase):
         self.assertTrue(grouped["reminded"])
 
     def test_admin_list_orders_bundle_view_filters_by_aggregated_status(self):
-        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
-        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.PICKED_UP)
+        first = make_order(
+            id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED
+        )
+        second = make_order(
+            id="order-2", group_id="bundle-1", status=OrderStatus.PICKED_UP
+        )
         third = make_order(id="order-3", group_id=None, status=OrderStatus.PENDING)
         db = FakeSession([first, second, third])
 
-        rows = admin_list_orders(view="bundle", status="mixed", event_id=None, paid=None, email=None, db=db, _={})
+        rows = admin_list_orders(
+            view="bundle",
+            status="mixed",
+            event_id=None,
+            paid=None,
+            email=None,
+            db=db,
+            _={},
+        )
 
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["bundle_id"], "bundle-1")
         self.assertEqual(rows[0]["status"], "mixed")
 
     def test_mark_picked_up_action_updates_group(self):
-        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
-        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        first = make_order(
+            id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED
+        )
+        second = make_order(
+            id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED
+        )
         db = FakeSession([first, second])
 
         result = admin_mark_order_picked_up("order-1", db=db, _={})
@@ -326,8 +359,12 @@ class AdminGroupingTests(unittest.TestCase):
         self.assertEqual(second.status, OrderStatus.PICKED_UP)
 
     def test_mark_no_show_action_updates_group(self):
-        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
-        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        first = make_order(
+            id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED
+        )
+        second = make_order(
+            id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED
+        )
         db = FakeSession([first, second])
 
         result = admin_mark_order_no_show("order-1", db=db, _={})
@@ -337,8 +374,12 @@ class AdminGroupingTests(unittest.TestCase):
         self.assertEqual(second.status, OrderStatus.NO_SHOW)
 
     def test_cancel_action_allows_mixed_bundle_when_all_lines_can_cancel(self):
-        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED)
-        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.PICKED_UP)
+        first = make_order(
+            id="order-1", group_id="bundle-1", status=OrderStatus.CONFIRMED
+        )
+        second = make_order(
+            id="order-2", group_id="bundle-1", status=OrderStatus.PICKED_UP
+        )
         db = FakeSession([first, second])
 
         result = admin_cancel_order("order-1", db=db, _={})
@@ -348,22 +389,42 @@ class AdminGroupingTests(unittest.TestCase):
         self.assertEqual(second.status, OrderStatus.CANCELLED)
 
     def test_restore_action_requires_cancelled_bundle(self):
-        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CANCELLED)
-        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED)
+        first = make_order(
+            id="order-1", group_id="bundle-1", status=OrderStatus.CANCELLED
+        )
+        second = make_order(
+            id="order-2", group_id="bundle-1", status=OrderStatus.CONFIRMED
+        )
         db = FakeSession([first, second])
 
         with self.assertRaises(HTTPException) as exc_context:
-            admin_restore_order("order-1", RestoreStatusAction(target_status=OrderStatus.PICKED_UP), db=db, _={})
+            admin_restore_order(
+                "order-1",
+                RestoreStatusAction(target_status=OrderStatus.PICKED_UP),
+                db=db,
+                _={},
+            )
 
         self.assertEqual(exc_context.exception.status_code, 409)
-        self.assertEqual(exc_context.exception.detail, "Only cancelled orders can be restored")
+        self.assertEqual(
+            exc_context.exception.detail, "Only cancelled orders can be restored"
+        )
 
     def test_restore_action_reopens_cancelled_group(self):
-        first = make_order(id="order-1", group_id="bundle-1", status=OrderStatus.CANCELLED)
-        second = make_order(id="order-2", group_id="bundle-1", status=OrderStatus.CANCELLED)
+        first = make_order(
+            id="order-1", group_id="bundle-1", status=OrderStatus.CANCELLED
+        )
+        second = make_order(
+            id="order-2", group_id="bundle-1", status=OrderStatus.CANCELLED
+        )
         db = FakeSession([first, second])
 
-        result = admin_restore_order("order-1", RestoreStatusAction(target_status=OrderStatus.NO_SHOW), db=db, _={})
+        result = admin_restore_order(
+            "order-1",
+            RestoreStatusAction(target_status=OrderStatus.NO_SHOW),
+            db=db,
+            _={},
+        )
 
         self.assertEqual(result["status"], OrderStatus.NO_SHOW)
         self.assertEqual(first.status, OrderStatus.NO_SHOW)
