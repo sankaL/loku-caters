@@ -9,6 +9,16 @@ import { CSS } from "@dnd-kit/utilities";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
+import {
+  createEmptyComboDeal,
+  createEmptyRequirementGroup,
+  defaultGroupName,
+  normalizeComboDeals,
+  normalizeIncomingComboDeal,
+  validateEventForm,
+  type ComboDeal,
+  type ComboDiscount,
+} from "@/lib/eventComboDeals";
 
 type EventImageType = "tooltip" | "hero_side" | "menu_item";
 
@@ -40,29 +50,6 @@ interface EventImageCatalog {
     menu_item_target_dir?: string;
   };
   images: EventImage[];
-}
-
-interface ComboRequirementGroup {
-  id: string;
-  name: string;
-  item_ids: string[];
-  min_quantity: number;
-}
-
-interface ComboDiscount {
-  type: "fixed_amount" | "percentage";
-  amount: number;
-  applies_to: "combo_total" | "group";
-  target_group_id: string | null;
-}
-
-interface ComboDeal {
-  id: string;
-  name: string;
-  enabled: boolean;
-  sort_order: number;
-  requirement_groups: ComboRequirementGroup[];
-  discount: ComboDiscount;
 }
 
 interface EventRecord {
@@ -164,112 +151,6 @@ function normalizeImageCatalog(data: unknown): EventImageCatalog {
         alt: typeof entry.alt === "string" ? entry.alt : "",
       }))
       .filter((entry) => Boolean(entry.key) && Boolean(entry.path) && Boolean(entry.label)),
-  };
-}
-
-function createEmptyRequirementGroup(index: number): ComboRequirementGroup {
-  return {
-    id: crypto.randomUUID(),
-    name: index === 0 ? "Base group" : `Group ${index + 1}`,
-    item_ids: [],
-    min_quantity: 1,
-  };
-}
-
-function defaultGroupName(index: number): string {
-  return index === 0 ? "Base group" : `Group ${index + 1}`;
-}
-
-function createEmptyComboDeal(sortOrder: number): ComboDeal {
-  return {
-    id: crypto.randomUUID(),
-    name: "",
-    enabled: true,
-    sort_order: sortOrder,
-    requirement_groups: [createEmptyRequirementGroup(0)],
-    discount: {
-      type: "fixed_amount",
-      amount: 5,
-      applies_to: "combo_total",
-      target_group_id: null,
-    },
-  };
-}
-
-function normalizeComboDeals(comboDeals: ComboDeal[]): ComboDeal[] {
-  return comboDeals.map((combo, comboIndex) => ({
-    id: combo.id || crypto.randomUUID(),
-    name: combo.name ?? "",
-    enabled: combo.enabled ?? true,
-    sort_order: comboIndex,
-    requirement_groups: (combo.requirement_groups ?? []).map((group) => ({
-      id: group.id || crypto.randomUUID(),
-      name: group.name ?? "",
-      item_ids: Array.from(new Set(group.item_ids.filter(Boolean))),
-      min_quantity: Math.max(1, Number(group.min_quantity || 1)),
-    })),
-    discount: {
-      type: combo.discount.type,
-      amount: Number(combo.discount.amount || 0),
-      applies_to: combo.discount.applies_to,
-      target_group_id: combo.discount.applies_to === "group" ? combo.discount.target_group_id ?? null : null,
-    },
-  }));
-}
-
-function normalizeIncomingComboDeal(raw: unknown, index: number): ComboDeal {
-  const fallback = createEmptyComboDeal(index);
-  if (!raw || typeof raw !== "object") return fallback;
-  const entry = raw as {
-    id?: string;
-    name?: string;
-    enabled?: boolean;
-    sort_order?: number;
-    requirement_groups?: Array<Partial<ComboRequirementGroup>>;
-    requirements?: Array<{ item_id?: string; min_quantity?: number }>;
-    discount?: Partial<ComboDiscount> & { applies_to?: "combo_total" | "group" | "item"; target_item_id?: string | null };
-  };
-
-  const requirementGroups = Array.isArray(entry.requirement_groups) && entry.requirement_groups.length > 0
-    ? entry.requirement_groups.map((group) => ({
-      id: group.id || crypto.randomUUID(),
-      name: group.name ?? "",
-      item_ids: Array.from(new Set((group.item_ids ?? []).filter(Boolean))),
-      min_quantity: Math.max(1, Number(group.min_quantity || 1)),
-    }))
-    : (entry.requirements ?? []).map((requirement, requirementIndex) => ({
-      id: crypto.randomUUID(),
-      name: requirement.item_id || (requirementIndex === 0 ? "Base group" : `Group ${requirementIndex + 1}`),
-      item_ids: requirement.item_id ? [requirement.item_id] : [],
-      min_quantity: Math.max(1, Number(requirement.min_quantity || 1)),
-    }));
-
-  let targetGroupId: string | null = null;
-  const rawAppliesTo = entry.discount?.applies_to as string | undefined;
-  const appliesTo = rawAppliesTo === "item" || rawAppliesTo === "group"
-    ? "group"
-    : "combo_total";
-
-  if (appliesTo === "group") {
-    if (entry.discount?.target_group_id) {
-      targetGroupId = entry.discount.target_group_id;
-    } else if (entry.discount?.target_item_id) {
-      targetGroupId = requirementGroups.find((group) => group.item_ids.includes(entry.discount?.target_item_id || ""))?.id ?? null;
-    }
-  }
-
-  return {
-    id: entry.id || crypto.randomUUID(),
-    name: entry.name ?? "",
-    enabled: entry.enabled ?? true,
-    sort_order: Number(entry.sort_order ?? index),
-    requirement_groups: requirementGroups.length > 0 ? requirementGroups : [createEmptyRequirementGroup(0)],
-    discount: {
-      type: entry.discount?.type === "percentage" ? "percentage" : "fixed_amount",
-      amount: Number(entry.discount?.amount || 0),
-      applies_to: appliesTo,
-      target_group_id: targetGroupId,
-    },
   };
 }
 
@@ -757,58 +638,9 @@ export default function EventEditor({ mode }: { mode: "create" | "edit" }) {
     });
   }
 
-  function validateForm() {
-    if (!form.name.trim() || !form.event_date.trim() || !form.hero_header.trim()) {
-      throw new Error("Event name, event date, and hero header are required");
-    }
-    if (form.tooltip_enabled && (!form.tooltip_header.trim() || !form.tooltip_body.trim())) {
-      throw new Error("Tooltip header and body are required when tooltip is enabled");
-    }
-    if (form.etransfer_enabled && !form.etransfer_email.trim()) {
-      throw new Error("E-transfer email is required when e-transfer is enabled");
-    }
-
-    const selectedItemIds = new Set(form.item_ids);
-    for (const combo of form.combo_deals) {
-      if (!combo.name.trim()) {
-        throw new Error("Each combo needs a name");
-      }
-      if (combo.requirement_groups.length === 0) {
-        throw new Error(`Combo "${combo.name}" needs at least one requirement group`);
-      }
-      const itemIdsSeen = new Set<string>();
-      for (const group of combo.requirement_groups) {
-        if (group.item_ids.length === 0) {
-          throw new Error(`Combo "${combo.name}" has a group without any items`);
-        }
-        if (group.min_quantity < 1) {
-          throw new Error(`Combo "${combo.name}" has an invalid minimum quantity`);
-        }
-        for (const itemId of group.item_ids) {
-          if (!selectedItemIds.has(itemId)) {
-            throw new Error(`Combo "${combo.name}" references an item that is not selected for the event`);
-          }
-          if (itemIdsSeen.has(itemId)) {
-            throw new Error(`Combo "${combo.name}" repeats an item across multiple groups`);
-          }
-          itemIdsSeen.add(itemId);
-        }
-      }
-      if (combo.discount.amount <= 0) {
-        throw new Error(`Combo "${combo.name}" needs a discount greater than 0`);
-      }
-      if (combo.discount.type === "percentage" && combo.discount.amount > 100) {
-        throw new Error(`Combo "${combo.name}" percentage discounts cannot exceed 100`);
-      }
-      if (combo.discount.applies_to === "group" && !combo.discount.target_group_id) {
-        throw new Error(`Combo "${combo.name}" needs a target group`);
-      }
-    }
-  }
-
   async function handleSave() {
     try {
-      validateForm();
+      validateEventForm(form);
       setSaving(true);
       const token = await getAdminToken();
       if (!token) return;

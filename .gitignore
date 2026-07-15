@@ -30,6 +30,7 @@ Thumbs.db
 # Build outputs
 out/
 build/
+coverage/
 *.tsbuildinfo
 
 # Editor

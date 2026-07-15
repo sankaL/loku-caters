@@ -31,6 +31,70 @@ export function linesFromQuantities<TItem extends { id: string }>(
     .filter((line) => line.qty > 0);
 }
 
+interface QuantityUpdateOptions {
+  allowBelowMinimumOrder?: boolean;
+  allowPriceEdit?: boolean;
+  linePrices?: Record<string, number>;
+}
+
+export interface QuantityUpdateResult {
+  quantities: Record<string, number>;
+  linePrices?: Record<string, number>;
+}
+
+function increaseQuantity(
+  item: OrderLineItem,
+  currentQty: number,
+  delta: number,
+  quantities: Record<string, number>,
+  options: QuantityUpdateOptions,
+): QuantityUpdateResult {
+  const next = { ...quantities };
+  const minimum = options.allowBelowMinimumOrder ? 1 : getMinimumOrderQuantity(item);
+  next[item.id] = currentQty === 0 ? minimum : currentQty + delta;
+
+  if (!options.linePrices) return { quantities: next };
+  const linePrices = { ...options.linePrices };
+  if (options.allowPriceEdit && linePrices[item.id] === undefined) {
+    linePrices[item.id] = Number((item.discounted_price ?? item.price).toFixed(2));
+  }
+  return { quantities: next, linePrices };
+}
+
+function decreaseQuantity(
+  item: OrderLineItem,
+  currentQty: number,
+  delta: number,
+  quantities: Record<string, number>,
+  options: QuantityUpdateOptions,
+): QuantityUpdateResult {
+  const next = { ...quantities };
+  const minimum = options.allowBelowMinimumOrder ? 1 : getMinimumOrderQuantity(item);
+  if (currentQty > minimum) {
+    next[item.id] = Math.max(minimum, currentQty + delta);
+    return { quantities: next };
+  }
+
+  delete next[item.id];
+  if (!options.linePrices) return { quantities: next };
+  const linePrices = { ...options.linePrices };
+  delete linePrices[item.id];
+  return { quantities: next, linePrices };
+}
+
+export function updateOrderLineQuantity(
+  item: OrderLineItem | undefined,
+  quantities: Record<string, number>,
+  delta: number,
+  options: QuantityUpdateOptions = {},
+): QuantityUpdateResult | null {
+  if (!item || item.is_locked || delta === 0) return null;
+  const currentQty = quantities[item.id] ?? 0;
+  return delta > 0
+    ? increaseQuantity(item, currentQty, delta, quantities, options)
+    : decreaseQuantity(item, currentQty, delta, quantities, options);
+}
+
 export interface LegacyOrderLineSource {
   item_id: string;
   item_name: string;

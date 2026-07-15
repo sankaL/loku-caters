@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import {
   getMinimumOrderQuantity,
   linesFromQuantities,
+  updateOrderLineQuantity,
   type OrderLineItem,
 } from "@/lib/orderLineUtils";
 
@@ -18,6 +19,16 @@ interface ItemQuantityPickerProps {
   allowPriceEdit?: boolean;
   disabled?: boolean;
   error?: string | null;
+}
+
+function publishQuantityUpdate(
+  result: ReturnType<typeof updateOrderLineQuantity>,
+  onChange: ItemQuantityPickerProps["onChange"],
+  onLinePricesChange: ItemQuantityPickerProps["onLinePricesChange"],
+): void {
+  if (!result) return;
+  onChange(result.quantities);
+  if (result.linePrices) onLinePricesChange?.(result.linePrices);
 }
 
 export default function ItemQuantityPicker({
@@ -53,39 +64,13 @@ export default function ItemQuantityPicker({
 
   function updateQty(itemId: string, delta: number) {
     if (disabled) return;
-
     const item = items.find((entry) => entry.id === itemId);
-    if (!item || item.is_locked) return;
-
-    const currentQty = quantities[itemId] ?? 0;
-    const minimumOrderQuantity = getMinimumOrderQuantity(item);
-    const next = { ...quantities };
-    const nextPrices = linePrices ? { ...linePrices } : null;
-
-    if (delta > 0) {
-      next[itemId] = currentQty === 0
-        ? (allowBelowMinimumOrder ? 1 : minimumOrderQuantity)
-        : currentQty + delta;
-      if (allowPriceEdit && nextPrices && nextPrices[itemId] === undefined) {
-        nextPrices[itemId] = Number((item.discounted_price ?? item.price).toFixed(2));
-      }
-      onChange(next);
-      if (nextPrices && onLinePricesChange) onLinePricesChange(nextPrices);
-      return;
-    }
-
-    if (delta < 0) {
-      const minimumQty = allowBelowMinimumOrder ? 1 : minimumOrderQuantity;
-      if (currentQty <= minimumQty) {
-        delete next[itemId];
-        if (nextPrices) delete nextPrices[itemId];
-        onChange(next);
-        if (nextPrices && onLinePricesChange) onLinePricesChange(nextPrices);
-        return;
-      }
-      next[itemId] = Math.max(minimumQty, currentQty + delta);
-      onChange(next);
-    }
+    const result = updateOrderLineQuantity(item, quantities, delta, {
+      allowBelowMinimumOrder,
+      allowPriceEdit,
+      linePrices,
+    });
+    publishQuantityUpdate(result, onChange, onLinePricesChange);
   }
 
   return (
@@ -115,7 +100,7 @@ export default function ItemQuantityPicker({
               <div
                 key={item.id}
                 className="flex items-center gap-3 rounded-xl px-4 py-2.5"
-                style={{ border: "1px solid var(--color-sage)", background: "#f0fdf4" }}
+                style={{ border: "1px solid var(--color-sage)", background: "var(--color-success-bg)" }}
               >
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>
@@ -311,7 +296,7 @@ export default function ItemQuantityPicker({
                       className="flex items-center gap-3 rounded-2xl px-4 py-3 transition-all"
                       style={{
                         border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
-                        background: inCart ? "#f0fdf4" : "white",
+                        background: inCart ? "var(--color-success-bg)" : "white",
                         opacity: item.is_locked ? 0.9 : 1,
                       }}
                     >
@@ -325,7 +310,7 @@ export default function ItemQuantityPicker({
                             {currency} ${price.toFixed(2)}
                           </span>
                           {item.discounted_price != null && (
-                            <span className="text-xs line-through font-medium" style={{ color: "#e05252" }}>
+                            <span className="text-xs line-through font-medium" style={{ color: "var(--color-error-text)" }}>
                               {currency} ${item.price.toFixed(2)}
                             </span>
                           )}
