@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type RefObject } from "react";
 import ReactDOM from "react-dom";
 
 interface PopoverPosition {
@@ -39,6 +39,126 @@ function positionsMatch(a: PopoverPosition | null, b: PopoverPosition | null) {
   );
 }
 
+function DescriptionTrigger({
+  description,
+  open,
+  panelId,
+  className,
+  triggerRef,
+  onOpen,
+  onClose,
+  onScheduleClose,
+}: {
+  description: string;
+  open: boolean;
+  panelId: string;
+  className: string;
+  triggerRef: RefObject<HTMLButtonElement | null>;
+  onOpen: () => void;
+  onClose: () => void;
+  onScheduleClose: () => void;
+}) {
+  const lastPointerTypeRef = useRef<string | null>(null);
+  return (
+    <button
+      ref={triggerRef}
+      type="button"
+      onMouseEnter={onOpen}
+      onMouseLeave={onScheduleClose}
+      onFocus={() => {
+        if (!isTouchPointer(lastPointerTypeRef.current)) onOpen();
+      }}
+      onBlur={onClose}
+      onTouchStart={() => {
+        lastPointerTypeRef.current = "touch";
+      }}
+      onPointerDown={(event) => {
+        lastPointerTypeRef.current = event.pointerType;
+      }}
+      onClick={() => {
+        if (isTouchPointer(lastPointerTypeRef.current)) {
+          if (open) onClose();
+          else onOpen();
+        }
+        lastPointerTypeRef.current = null;
+      }}
+      aria-expanded={open}
+      aria-controls={open ? panelId : undefined}
+      className={`block w-full max-w-full truncate text-left ${className}`}
+      style={{
+        border: "none",
+        background: "transparent",
+        padding: 0,
+        margin: 0,
+        color: "var(--color-muted)",
+        cursor: "help",
+      }}
+    >
+      {description}
+    </button>
+  );
+}
+
+function isTouchPointer(pointerType: string | null): boolean {
+  return pointerType === "touch" || pointerType === "pen";
+}
+
+function DescriptionPanel({
+  description,
+  open,
+  panelId,
+  panelRef,
+  position,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  description: string;
+  open: boolean;
+  panelId: string;
+  panelRef: RefObject<HTMLDivElement | null>;
+  position: PopoverPosition | null;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+}) {
+  if (!open || !position || typeof document === "undefined") return null;
+  return ReactDOM.createPortal(
+    <div
+      ref={panelRef}
+      id={panelId}
+      role="tooltip"
+      className="animate-fade-in"
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      style={{
+        position: "fixed",
+        left: `${position.left}px`,
+        top: `${position.top}px`,
+        zIndex: 260,
+        width: "max-content",
+        maxWidth: `${position.maxWidth}px`,
+        maxHeight: `${position.maxHeight}px`,
+        overflowY: "auto",
+        padding: "12px 14px",
+        borderRadius: "16px",
+        border: "1px solid var(--color-border)",
+        background: "white",
+        boxShadow: "0 20px 48px rgba(18,39,15,0.16)",
+        transform: position.placement === "top" ? "translateY(-100%)" : "none",
+        transformOrigin: position.placement === "top" ? "bottom left" : "top left",
+        color: "var(--color-text)",
+        fontSize: "12px",
+        lineHeight: 1.55,
+        whiteSpace: "normal",
+        overflowWrap: "anywhere",
+        pointerEvents: "auto",
+      }}
+    >
+      {description}
+    </div>,
+    document.body,
+  );
+}
+
 export default function DescriptionPopover({
   description,
   open,
@@ -50,7 +170,6 @@ export default function DescriptionPopover({
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastPointerTypeRef = useRef<string | null>(null);
   const [position, setPosition] = useState<PopoverPosition | null>(null);
 
   const clearCloseTimer = useCallback(() => {
@@ -163,87 +282,25 @@ export default function DescriptionPopover({
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        onMouseEnter={openPopover}
+      <DescriptionTrigger
+        description={description}
+        open={open}
+        panelId={panelId}
+        className={className}
+        triggerRef={triggerRef}
+        onOpen={openPopover}
+        onClose={closePopover}
+        onScheduleClose={scheduleClose}
+      />
+      <DescriptionPanel
+        description={description}
+        open={open}
+        panelId={panelId}
+        panelRef={panelRef}
+        position={position}
+        onMouseEnter={clearCloseTimer}
         onMouseLeave={scheduleClose}
-        onFocus={() => {
-          if (lastPointerTypeRef.current === "touch" || lastPointerTypeRef.current === "pen") {
-            return;
-          }
-          openPopover();
-        }}
-        onBlur={closePopover}
-        onTouchStart={() => {
-          lastPointerTypeRef.current = "touch";
-        }}
-        onPointerDown={(event) => {
-          lastPointerTypeRef.current = event.pointerType;
-        }}
-        onClick={() => {
-          if (lastPointerTypeRef.current === "touch" || lastPointerTypeRef.current === "pen") {
-            if (open) {
-              closePopover();
-            } else {
-              openPopover();
-            }
-          }
-          lastPointerTypeRef.current = null;
-        }}
-        aria-expanded={open}
-        aria-controls={open ? panelId : undefined}
-        className={`block w-full max-w-full truncate text-left ${className}`}
-        style={{
-          border: "none",
-          background: "transparent",
-          padding: 0,
-          margin: 0,
-          color: "var(--color-muted)",
-          cursor: "help",
-        }}
-      >
-        {description}
-      </button>
-
-      {open && position && typeof document !== "undefined"
-        ? ReactDOM.createPortal(
-            <div
-              ref={panelRef}
-              id={panelId}
-              role="tooltip"
-              className="animate-fade-in"
-              onMouseEnter={clearCloseTimer}
-              onMouseLeave={scheduleClose}
-              style={{
-                position: "fixed",
-                left: `${position.left}px`,
-                top: `${position.top}px`,
-                zIndex: 260,
-                width: "max-content",
-                maxWidth: `${position.maxWidth}px`,
-                maxHeight: `${position.maxHeight}px`,
-                overflowY: "auto",
-                padding: "12px 14px",
-                borderRadius: "16px",
-                border: "1px solid var(--color-border)",
-                background: "white",
-                boxShadow: "0 20px 48px rgba(18,39,15,0.16)",
-                transform: position.placement === "top" ? "translateY(-100%)" : "none",
-                transformOrigin: position.placement === "top" ? "bottom left" : "top left",
-                color: "var(--color-text)",
-                fontSize: "12px",
-                lineHeight: 1.55,
-                whiteSpace: "normal",
-                overflowWrap: "anywhere",
-                pointerEvents: "auto",
-              }}
-            >
-              {description}
-            </div>,
-            document.body
-          )
-        : null}
+      />
     </>
   );
 }
