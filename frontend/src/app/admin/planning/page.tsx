@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from "@headlessui/react";
 import {
@@ -19,6 +19,8 @@ import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { loadAdminResource } from "@/lib/adminCrud";
+import AdminToast from "@/components/admin/AdminToast";
+import { useAdminToast } from "@/components/admin/useAdminToast";
 import Modal from "@/components/ui/Modal";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import {
@@ -74,6 +76,32 @@ const statusFilterOptions: Array<{ value: "all" | PlanStatus; label: string }> =
   { value: "archived", label: "Archived" },
 ];
 
+interface PlanningPageState {
+  plans: EventPlan[];
+  events: AdminEventSummary[];
+  loading: boolean;
+  creating: boolean;
+  modalOpen: boolean;
+  selectedEventId: string;
+  planName: string;
+  search: string;
+  statusFilter: "all" | PlanStatus;
+  includeArchived: boolean;
+}
+
+const INITIAL_STATE: PlanningPageState = {
+  plans: [],
+  events: [],
+  loading: true,
+  creating: false,
+  modalOpen: false,
+  selectedEventId: "",
+  planName: "",
+  search: "",
+  statusFilter: "all",
+  includeArchived: false,
+};
+
 function SkeletonRows() {
   return (
     <div className="space-y-3">
@@ -92,23 +120,191 @@ function SkeletonRows() {
   );
 }
 
+function PlanRow({
+  plan,
+  index,
+  onOpen,
+  onDuplicate,
+  onArchive,
+}: {
+  plan: EventPlan;
+  index: number;
+  onOpen: () => void;
+  onDuplicate: () => void;
+  onArchive: () => void;
+}) {
+  return (
+    <tr
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onOpen();
+        }
+      }}
+      className="cursor-pointer transition-colors hover:bg-[color:var(--color-cream)]/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[color:var(--color-sage)]"
+      style={{ animation: "planning-row-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both", animationDelay: `${index * 35}ms` }}
+    >
+      <td className="px-5 py-4">
+        <span className="font-semibold" style={{ color: "var(--color-forest)" }}>{plan.name}</span>
+        {plan.is_out_of_date && (
+          <div className="mt-1 inline-flex items-center gap-1 text-xs font-semibold" style={{ color: "var(--color-warning-text)" }}>
+            <ArrowsClockwise size={13} weight="bold" />
+            Refresh available
+          </div>
+        )}
+      </td>
+      <td className="px-5 py-4" style={{ color: "var(--color-text)" }}>
+        {plan.source_event?.name ?? `Event ${plan.source_event_id}`}
+      </td>
+      <td className="px-5 py-4"><StatusPill status={plan.status} /></td>
+      <td className="px-5 py-4" style={{ color: "var(--color-muted)" }}>{plan.source_event?.event_date ?? "-"}</td>
+      <td className="px-5 py-4 font-semibold tabular-nums" style={{ color: "var(--color-text)" }}>{plan.included_order_count}</td>
+      <td className="px-5 py-4 tabular-nums" style={{ color: "var(--color-text)" }}>
+        {plan.ordered_quantity} ordered / {plan.planned_quantity} planned
+      </td>
+      <td className="px-5 py-4">
+        <span
+          className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold"
+          style={{
+            background: plan.issue_count > 0 ? "var(--color-error-bg)" : "var(--color-cream)",
+            color: plan.issue_count > 0 ? "var(--color-error-text)" : "var(--color-muted)",
+            border: `1px solid ${plan.issue_count > 0 ? "var(--color-error-border)" : "var(--color-border)"}`,
+          }}
+        >
+          <WarningCircle size={14} weight="bold" />
+          {plan.issue_count} issues / {plan.warning_count} warnings
+        </span>
+      </td>
+      <td className="px-5 py-4" style={{ color: "var(--color-muted)" }}>{formatDateTime(plan.updated_at)}</td>
+      <td className="px-5 py-4">
+        <div className="flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onOpen(); }}
+            className="rounded-xl border px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-text)", background: "white" }}
+          >
+            Open
+          </button>
+          <button
+            type="button"
+            onClick={(event) => { event.stopPropagation(); onDuplicate(); }}
+            className="rounded-xl border p-2 transition-all active:scale-[0.98]"
+            title="Duplicate"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-muted)", background: "white" }}
+          >
+            <Copy size={16} />
+          </button>
+          {plan.status !== "archived" && (
+            <button
+              type="button"
+              onClick={(event) => { event.stopPropagation(); onArchive(); }}
+              className="rounded-xl border p-2 transition-all active:scale-[0.98]"
+              title="Archive"
+              style={{ borderColor: "var(--color-border)", color: "var(--color-muted)", background: "white" }}
+            >
+              <Archive size={16} />
+            </button>
+          )}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function PlansTable({ plans, onOpen }: { plans: EventPlan[]; onOpen: (plan: EventPlan, action?: "duplicate" | "archive") => void }) {
+  return (
+    <div className="overflow-hidden rounded-[1.5rem] border" style={{ background: "white", borderColor: "var(--color-border)" }}>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[980px] border-collapse text-left text-sm">
+          <thead style={{ background: "var(--color-cream)" }}>
+            <tr style={{ color: "var(--color-muted)" }}>
+              <th className="px-5 py-4 font-semibold">Plan Name</th>
+              <th className="px-5 py-4 font-semibold">Source</th>
+              <th className="px-5 py-4 font-semibold">Status</th>
+              <th className="px-5 py-4 font-semibold">Event Date</th>
+              <th className="px-5 py-4 font-semibold">Orders</th>
+              <th className="px-5 py-4 font-semibold">Qty</th>
+              <th className="px-5 py-4 font-semibold">Issues</th>
+              <th className="px-5 py-4 font-semibold">Updated</th>
+              <th className="px-5 py-4 text-right font-semibold">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y" style={{ borderColor: "var(--color-border)" }}>
+            {plans.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-5 py-10 text-center text-sm" style={{ color: "var(--color-muted)" }}>
+                  No plans match the current filters.
+                </td>
+              </tr>
+            ) : plans.map((plan, index) => (
+              <PlanRow
+                key={plan.id}
+                plan={plan}
+                index={index}
+                onOpen={() => onOpen(plan)}
+                onDuplicate={() => onOpen(plan, "duplicate")}
+                onArchive={() => onOpen(plan, "archive")}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function PlanningBody({ loading, hasPlans, onCreate, children }: { loading: boolean; hasPlans: boolean; onCreate: () => void; children: ReactNode }) {
+  if (loading) return <SkeletonRows />;
+  if (hasPlans) return <div className="space-y-4">{children}</div>;
+  return (
+    <div className="grid min-h-[58vh] place-items-center">
+      <div
+        className="w-full max-w-xl rounded-[2rem] border p-8 text-left shadow-[0_24px_60px_-42px_rgba(18,39,15,0.45)] md:p-10"
+        style={{ background: "white", borderColor: "var(--color-border)" }}
+      >
+        <div className="mb-7 inline-flex h-14 w-14 items-center justify-center rounded-2xl" style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}>
+          <CalendarCheck size={28} weight="duotone" />
+        </div>
+        <h2 className="text-2xl font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>No plans yet</h2>
+        <p className="mt-2 text-sm leading-6" style={{ color: "var(--color-muted)" }}>
+          Create the first saved snapshot from an event or Random Requests.
+        </p>
+        <button
+          type="button"
+          onClick={onCreate}
+          className="mt-7 inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition-all active:scale-[0.98]"
+          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+        >
+          <Plus size={18} weight="bold" />
+          Plan Event
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function EventPlanningPage() {
   const router = useRouter();
-  const [plans, setPlans] = useState<EventPlan[]>([]);
-  const [events, setEvents] = useState<AdminEventSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [creating, setCreating] = useState(false);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedEventId, setSelectedEventId] = useState("");
-  const [planName, setPlanName] = useState("");
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | PlanStatus>("all");
-  const [includeArchived, setIncludeArchived] = useState(false);
-  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
-
-  const showToast = useCallback((message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    window.setTimeout(() => setToast(null), 4200);
+  const [state, setState] = useState<PlanningPageState>(INITIAL_STATE);
+  const {
+    plans,
+    events,
+    loading,
+    creating,
+    modalOpen,
+    selectedEventId,
+    planName,
+    search,
+    statusFilter,
+    includeArchived,
+  } = state;
+  const { toast, showToast } = useAdminToast(4200);
+  const updateState = useCallback((patch: Partial<PlanningPageState>) => {
+    setState((current) => ({ ...current, ...patch }));
   }, []);
 
   const loadPlans = useCallback(async () => {
@@ -118,20 +314,18 @@ export default function EventPlanningPage() {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) throw new Error(await getApiErrorMessage(res, "Failed to load plans"));
-    setPlans((await res.json()) as EventPlan[]);
-  }, [includeArchived]);
-
-  const loadEvents = useCallback(async () => {
-    const events = await loadAdminResource<AdminEventSummary[]>("/api/admin/events", "Failed to load events");
-    if (events) setEvents(events);
-  }, []);
+    updateState({ plans: (await res.json()) as EventPlan[] });
+  }, [includeArchived, updateState]);
 
   useEffect(() => {
-    setLoading(true);
-    Promise.all([loadPlans(), loadEvents()])
+    updateState({ loading: true });
+    Promise.all([
+      loadPlans(),
+      loadAdminResource<AdminEventSummary[]>("/api/admin/events", "Failed to load events", (events) => updateState({ events })),
+    ])
       .catch((error) => showToast(error instanceof Error ? error.message : "Failed to load planning data", "error"))
-      .finally(() => setLoading(false));
-  }, [loadEvents, loadPlans, showToast]);
+      .finally(() => updateState({ loading: false }));
+  }, [loadPlans, showToast, updateState]);
 
   const selectedEvent = useMemo(
     () => events.find((event) => String(event.id) === selectedEventId) ?? null,
@@ -146,8 +340,8 @@ export default function EventPlanningPage() {
       hour: "numeric",
       minute: "2-digit",
     }).format(new Date());
-    setPlanName(`${selectedEvent.name} Plan - ${now}`);
-  }, [planName, selectedEvent]);
+    updateState({ planName: `${selectedEvent.name} Plan - ${now}` });
+  }, [planName, selectedEvent, updateState]);
 
   const eventOptions = useMemo(
     () =>
@@ -173,7 +367,7 @@ export default function EventPlanningPage() {
       showToast("Select an event first.", "error");
       return;
     }
-    setCreating(true);
+    updateState({ creating: true });
     try {
       const token = await getAdminToken();
       if (!token) return;
@@ -194,32 +388,19 @@ export default function EventPlanningPage() {
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Failed to create event plan", "error");
     } finally {
-      setCreating(false);
+      updateState({ creating: false });
     }
   }
 
   function openCreateModal() {
-    setSelectedEventId("");
-    setPlanName("");
-    setModalOpen(true);
+    updateState({ selectedEventId: "", planName: "", modalOpen: true });
   }
 
   const hasPlans = plans.length > 0;
 
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      {toast && (
-        <div
-          className="fixed right-6 top-6 rounded-2xl px-5 py-3 text-sm font-semibold shadow-[0_18px_40px_-20px_rgba(28,28,26,0.45)]"
-          style={{
-            background: toast.type === "success" ? "var(--color-success-bg)" : "var(--color-error-bg)",
-            border: `1px solid ${toast.type === "success" ? "var(--color-success-border)" : "var(--color-error-border)"}`,
-            color: toast.type === "success" ? "var(--color-success-text)" : "var(--color-error-text)",
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
 
       <div className="w-full">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -246,39 +427,7 @@ export default function EventPlanningPage() {
           )}
         </div>
 
-        {loading ? (
-          <SkeletonRows />
-        ) : !hasPlans ? (
-          <div className="grid min-h-[58vh] place-items-center">
-            <div
-              className="w-full max-w-xl rounded-[2rem] border p-8 text-left shadow-[0_24px_60px_-42px_rgba(18,39,15,0.45)] md:p-10"
-              style={{ background: "white", borderColor: "var(--color-border)" }}
-            >
-              <div
-                className="mb-7 inline-flex h-14 w-14 items-center justify-center rounded-2xl"
-                style={{ background: "var(--color-cream)", color: "var(--color-forest)", border: "1px solid var(--color-border)" }}
-              >
-                <CalendarCheck size={28} weight="duotone" />
-              </div>
-              <h2 className="text-2xl font-bold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
-                No plans yet
-              </h2>
-              <p className="mt-2 text-sm leading-6" style={{ color: "var(--color-muted)" }}>
-                Create the first saved snapshot from an event or Random Requests.
-              </p>
-              <button
-                type="button"
-                onClick={openCreateModal}
-                className="mt-7 inline-flex items-center gap-2 rounded-2xl px-5 py-3 text-sm font-semibold transition-all active:scale-[0.98]"
-                style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-              >
-                <Plus size={18} weight="bold" />
-                Plan Event
-              </button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
+        <PlanningBody loading={loading} hasPlans={hasPlans} onCreate={openCreateModal}>
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <label className="relative w-full sm:flex-1 sm:min-w-48">
                 <span className="sr-only">Search plans</span>
@@ -288,7 +437,7 @@ export default function EventPlanningPage() {
                 />
                 <input
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => updateState({ search: event.target.value })}
                   className="w-full rounded-xl border bg-white py-2 pl-9 pr-4 text-sm outline-none transition-all focus:border-[color:var(--color-sage)] focus:ring-2 focus:ring-[color:var(--color-sage)]"
                   placeholder="Search by plan or event"
                   style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
@@ -296,7 +445,7 @@ export default function EventPlanningPage() {
               </label>
               <div className="relative w-full sm:w-auto">
                 <span className="sr-only">Filter by status</span>
-                <Listbox value={statusFilter} onChange={setStatusFilter}>
+                <Listbox value={statusFilter} onChange={(value) => updateState({ statusFilter: value })}>
                   <ListboxButton
                     className="relative flex w-full items-center gap-3 rounded-xl border bg-white py-2 pl-9 pr-9 text-left text-sm outline-none transition-all data-[focus]:border-[color:var(--color-sage)] data-[focus]:ring-2 data-[focus]:ring-[color:var(--color-sage)] sm:w-48"
                     style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
@@ -339,159 +488,30 @@ export default function EventPlanningPage() {
                 <input
                   type="checkbox"
                   checked={includeArchived}
-                  onChange={(event) => setIncludeArchived(event.target.checked)}
+                  onChange={(event) => updateState({ includeArchived: event.target.checked })}
                   className="h-4 w-4 accent-[var(--color-forest)]"
                 />
                 Show archived
               </label>
             </div>
 
-            <div
-              className="overflow-hidden rounded-[1.5rem] border"
-              style={{ background: "white", borderColor: "var(--color-border)" }}
-            >
-              <div className="overflow-x-auto">
-                <table className="w-full min-w-[980px] border-collapse text-left text-sm">
-                  <thead style={{ background: "var(--color-cream)" }}>
-                    <tr style={{ color: "var(--color-muted)" }}>
-                      <th className="px-5 py-4 font-semibold">Plan Name</th>
-                      <th className="px-5 py-4 font-semibold">Source</th>
-                      <th className="px-5 py-4 font-semibold">Status</th>
-                      <th className="px-5 py-4 font-semibold">Event Date</th>
-                      <th className="px-5 py-4 font-semibold">Orders</th>
-                      <th className="px-5 py-4 font-semibold">Qty</th>
-                      <th className="px-5 py-4 font-semibold">Issues</th>
-                      <th className="px-5 py-4 font-semibold">Updated</th>
-                      <th className="px-5 py-4 text-right font-semibold">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y" style={{ borderColor: "var(--color-border)" }}>
-                    {filteredPlans.length === 0 ? (
-                      <tr>
-                        <td colSpan={9} className="px-5 py-10 text-center text-sm" style={{ color: "var(--color-muted)" }}>
-                          No plans match the current filters.
-                        </td>
-                      </tr>
-                    ) : (
-	                      filteredPlans.map((plan, index) => (
-	                        <tr
-	                          key={plan.id}
-	                          role="button"
-	                          tabIndex={0}
-	                          onClick={() => router.push(`/admin/planning/${plan.id}`)}
-	                          onKeyDown={(event) => {
-	                            if (event.key === "Enter" || event.key === " ") {
-	                              event.preventDefault();
-	                              router.push(`/admin/planning/${plan.id}`);
-	                            }
-	                          }}
-	                          className="cursor-pointer transition-colors hover:bg-[color:var(--color-cream)]/70 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[color:var(--color-sage)]"
-	                          style={{ animation: `planning-row-in 260ms cubic-bezier(0.16, 1, 0.3, 1) both`, animationDelay: `${index * 35}ms` }}
-	                        >
-	                          <td className="px-5 py-4">
-	                            <span className="font-semibold" style={{ color: "var(--color-forest)" }}>
-	                              {plan.name}
-	                            </span>
-	                            {plan.is_out_of_date && (
-	                              <div className="mt-1 inline-flex items-center gap-1 text-xs font-semibold" style={{ color: "var(--color-warning-text)" }}>
-	                                <ArrowsClockwise size={13} weight="bold" />
-                                Refresh available
-                              </div>
-                            )}
-                          </td>
-                          <td className="px-5 py-4" style={{ color: "var(--color-text)" }}>
-                            {plan.source_event?.name ?? `Event ${plan.source_event_id}`}
-                          </td>
-                          <td className="px-5 py-4">
-                            <StatusPill status={plan.status} />
-                          </td>
-                          <td className="px-5 py-4" style={{ color: "var(--color-muted)" }}>
-                            {plan.source_event?.event_date ?? "-"}
-                          </td>
-                          <td className="px-5 py-4 font-semibold tabular-nums" style={{ color: "var(--color-text)" }}>
-                            {plan.included_order_count}
-                          </td>
-                          <td className="px-5 py-4 tabular-nums" style={{ color: "var(--color-text)" }}>
-                            {plan.ordered_quantity} ordered / {plan.planned_quantity} planned
-                          </td>
-                          <td className="px-5 py-4">
-                            <span
-                              className="inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold"
-                              style={{
-                                background: plan.issue_count > 0 ? "var(--color-error-bg)" : "var(--color-cream)",
-                                color: plan.issue_count > 0 ? "var(--color-error-text)" : "var(--color-muted)",
-                                border: `1px solid ${plan.issue_count > 0 ? "var(--color-error-border)" : "var(--color-border)"}`,
-                              }}
-                            >
-                              <WarningCircle size={14} weight="bold" />
-                              {plan.issue_count} issues / {plan.warning_count} warnings
-                            </span>
-                          </td>
-                          <td className="px-5 py-4" style={{ color: "var(--color-muted)" }}>
-                            {formatDateTime(plan.updated_at)}
-                          </td>
-                          <td className="px-5 py-4">
-                            <div className="flex items-center justify-end gap-2">
-	                              <button
-	                                type="button"
-	                                onClick={(event) => {
-	                                  event.stopPropagation();
-	                                  router.push(`/admin/planning/${plan.id}`);
-	                                }}
-	                                className="rounded-xl border px-3 py-2 text-xs font-semibold transition-all active:scale-[0.98]"
-	                                style={{ borderColor: "var(--color-border)", color: "var(--color-text)", background: "white" }}
-	                              >
-                                Open
-                              </button>
-	                              <button
-	                                type="button"
-	                                onClick={(event) => {
-	                                  event.stopPropagation();
-	                                  router.push(`/admin/planning/${plan.id}?action=duplicate`);
-	                                }}
-	                                className="rounded-xl border p-2 transition-all active:scale-[0.98]"
-	                                title="Duplicate"
-	                                style={{ borderColor: "var(--color-border)", color: "var(--color-muted)", background: "white" }}
-                              >
-                                <Copy size={16} />
-                              </button>
-                              {plan.status !== "archived" && (
-	                                <button
-	                                  type="button"
-	                                  onClick={(event) => {
-	                                    event.stopPropagation();
-	                                    router.push(`/admin/planning/${plan.id}?action=archive`);
-	                                  }}
-	                                  className="rounded-xl border p-2 transition-all active:scale-[0.98]"
-	                                  title="Archive"
-	                                  style={{ borderColor: "var(--color-border)", color: "var(--color-muted)", background: "white" }}
-                                >
-                                  <Archive size={16} />
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
+            <PlansTable
+              plans={filteredPlans}
+              onOpen={(plan, action) => router.push(`/admin/planning/${plan.id}${action ? `?action=${action}` : ""}`)}
+            />
+        </PlanningBody>
       </div>
 
       <Modal
         isOpen={modalOpen}
-        onClose={() => !creating && setModalOpen(false)}
+        onClose={() => !creating && updateState({ modalOpen: false })}
         title="Plan Event"
         size="lg"
         actions={
           <>
             <button
               type="button"
-              onClick={() => setModalOpen(false)}
+              onClick={() => updateState({ modalOpen: false })}
               disabled={creating}
               className="rounded-2xl px-5 py-2.5 text-sm font-semibold transition-all active:scale-[0.98]"
               style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
@@ -521,8 +541,7 @@ export default function EventPlanningPage() {
               options={eventOptions}
               value={selectedEventId}
               onChange={(value) => {
-                setSelectedEventId(value);
-                setPlanName("");
+                updateState({ selectedEventId: value, planName: "" });
               }}
               placeholder="Select an active, inactive, or random event"
               searchPlaceholder="Search events"
@@ -539,7 +558,7 @@ export default function EventPlanningPage() {
             <input
               id="planning-plan-name"
               value={planName}
-              onChange={(event) => setPlanName(event.target.value)}
+              onChange={(event) => updateState({ planName: event.target.value })}
               className="rounded-2xl border px-4 py-3 text-sm outline-none transition-all focus:ring-2"
               style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
               placeholder="Auto-filled after selecting an event"

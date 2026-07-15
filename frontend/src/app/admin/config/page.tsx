@@ -425,8 +425,7 @@ export default function AdminEventsPage() {
     }));
   }, []);
   const loadEvents = useCallback(async () => {
-    const events = await loadAdminResource<EventItem[]>("/api/admin/events", "Failed to load events");
-    if (events) updateState({ events });
+    await loadAdminResource<EventItem[]>("/api/admin/events", "Failed to load events", (events) => updateState({ events }));
   }, [updateState]);
 
   useEffect(() => {
