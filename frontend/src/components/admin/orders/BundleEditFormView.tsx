@@ -86,7 +86,21 @@ function CustomerFields({
   );
 }
 
-function BundleItemsField(props: BundleEditFormViewProps) {
+type BundleItemsFieldProps = Pick<
+  BundleEditFormViewProps,
+  | "lineCount"
+  | "pickerItems"
+  | "quantities"
+  | "linePrices"
+  | "isRandomOrder"
+  | "eventConfig"
+  | "configUsesFallback"
+  | "itemsError"
+  | "onQuantitiesChange"
+  | "onLinePricesChange"
+>;
+
+function BundleItemsField(props: BundleItemsFieldProps) {
   return (
     <div>
       <label className="block text-xs font-semibold mb-1" style={{ color: "var(--color-muted)" }}>
