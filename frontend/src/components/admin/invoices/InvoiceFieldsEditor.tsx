@@ -2,36 +2,13 @@
 
 import { Plus, Trash } from "@phosphor-icons/react";
 import { formatInvoiceMoney } from "@/lib/invoices";
-
-export interface InvoiceFormLine {
-  id: string;
-  description: string;
-  quantity: number;
-  unit_price: number;
-}
-
-export interface InvoiceFormValues {
-  source_bundle_id: string;
-  customer_name: string;
-  customer_email: string;
-  customer_phone: string;
-  issue_date: string;
-  due_date: string;
-  memo: string;
-  line_items: InvoiceFormLine[];
-  discount_total: number;
-  paid: boolean;
-  payment_method: "etransfer" | "cash" | "other" | null;
-  payment_method_other: string;
-}
-
-export interface InvoiceOrderOption {
-  bundle_id: string;
-  primary_order_id: string;
-  name: string;
-  event_id: number | null;
-  event_name?: string | null;
-}
+import {
+  createInvoiceFormLine,
+  invoiceFormAmounts,
+  type InvoiceFormLine,
+  type InvoiceFormValues,
+  type InvoiceOrderOption,
+} from "@/lib/invoiceForm";
 
 interface Props {
   values: InvoiceFormValues;
@@ -41,19 +18,6 @@ interface Props {
   sourceHelp?: string;
   issueYear?: number;
   onSourceChange?: (bundleId: string) => void;
-}
-
-export function invoiceFormAmounts(values: InvoiceFormValues) {
-  const subtotal = values.line_items.reduce(
-    (sum, line) => sum + Math.max(0, Number(line.quantity) || 0) * Math.max(0, Number(line.unit_price) || 0),
-    0,
-  );
-  const discount = Math.max(0, Number(values.discount_total) || 0);
-  return { subtotal, discount, total: Math.max(0, subtotal - discount) };
-}
-
-export function createInvoiceFormLine(description = "", quantity = 1, unitPrice = 0): InvoiceFormLine {
-  return { id: crypto.randomUUID(), description, quantity, unit_price: unitPrice };
 }
 
 export default function InvoiceFieldsEditor({ values, onChange, currency, orders = [], sourceHelp, issueYear, onSourceChange }: Props) {
