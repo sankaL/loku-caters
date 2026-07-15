@@ -116,36 +116,22 @@ function statusTone(status: string) {
   return "muted";
 }
 
+const PILL_STYLES = {
+  success: { background: "var(--color-success-bg)", color: "var(--color-success-text)", border: "var(--color-success-border)" },
+  warning: { background: "var(--color-warning-bg)", color: "var(--color-warning-text)", border: "var(--color-warning-border)" },
+  error: { background: "var(--color-error-bg)", color: "var(--color-error-text)", border: "var(--color-error-border)" },
+  muted: { background: "var(--color-cream)", color: "var(--color-muted)", border: "var(--color-border)" },
+} as const;
+
 function Pill({ children, tone = "muted" }: { children: React.ReactNode; tone?: "success" | "warning" | "error" | "muted" }) {
+  const style = PILL_STYLES[tone];
   return (
     <span
       className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
       style={{
-        background:
-          tone === "success"
-            ? "var(--color-success-bg)"
-            : tone === "warning"
-              ? "var(--color-warning-bg)"
-              : tone === "error"
-                ? "var(--color-error-bg)"
-                : "var(--color-cream)",
-        color:
-          tone === "success"
-            ? "var(--color-success-text)"
-            : tone === "warning"
-              ? "var(--color-warning-text)"
-              : tone === "error"
-                ? "var(--color-error-text)"
-                : "var(--color-muted)",
-        border: `1px solid ${
-          tone === "success"
-            ? "var(--color-success-border)"
-            : tone === "warning"
-              ? "var(--color-warning-border)"
-              : tone === "error"
-                ? "var(--color-error-border)"
-                : "var(--color-border)"
-        }`,
+        background: style.background,
+        color: style.color,
+        border: `1px solid ${style.border}`,
       }}
     >
       {children}
@@ -160,6 +146,42 @@ function getSplitGroupKey(row: EventPlanRow) {
 
 function stopDrag(event: React.PointerEvent<HTMLElement>) {
   event.stopPropagation();
+}
+
+function PlanRowAction({
+  rowId,
+  hasSplitRows,
+  isExtra,
+  readOnly,
+  onOpenSplit,
+  onMergeSplit,
+}: {
+  rowId: string;
+  hasSplitRows: boolean;
+  isExtra: boolean;
+  readOnly: boolean;
+  onOpenSplit: (rowId: string) => void;
+  onMergeSplit: (rowId: string) => void;
+}) {
+  const action = hasSplitRows
+    ? { label: "Merge", title: "Merge split rows", icon: <GitMerge size={14} weight="bold" />, onClick: onMergeSplit }
+    : isExtra
+      ? { label: "Edit", title: "Edit extra row", icon: <NotePencil size={14} weight="bold" />, onClick: onOpenSplit }
+      : { label: "Split", title: "Split item", icon: <Scissors size={14} weight="bold" />, onClick: onOpenSplit };
+  return (
+    <button
+      type="button"
+      onPointerDown={stopDrag}
+      onClick={() => action.onClick(rowId)}
+      disabled={readOnly}
+      className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
+      style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
+      title={action.title}
+    >
+      {action.icon}
+      {action.label}
+    </button>
+  );
 }
 
 function DraggablePlanRow({
@@ -231,46 +253,14 @@ function DraggablePlanRow({
               {row.notes && <Pill><NotePencil size={12} weight="bold" /> Note</Pill>}
             </div>
             <div className="flex items-center gap-2">
-              {hasSplitRows ? (
-                <button
-                  type="button"
-                  onPointerDown={stopDrag}
-                  onClick={() => onMergeSplit(row.id)}
-                  disabled={readOnly}
-                  className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
-                  style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
-                  title="Merge split rows"
-                >
-                  <GitMerge size={14} weight="bold" />
-                  Merge
-                </button>
-              ) : isExtra ? (
-                <button
-                  type="button"
-                  onPointerDown={stopDrag}
-                  onClick={() => onOpenSplit(row.id)}
-                  disabled={readOnly}
-                  className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
-                  style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
-                  title="Edit extra row"
-                >
-                  <NotePencil size={14} weight="bold" />
-                  Edit
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onPointerDown={stopDrag}
-                  onClick={() => onOpenSplit(row.id)}
-                  disabled={readOnly}
-                  className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
-                  style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
-                  title="Split item"
-                >
-                  <Scissors size={14} weight="bold" />
-                  Split
-                </button>
-              )}
+              <PlanRowAction
+                rowId={row.id}
+                hasSplitRows={hasSplitRows}
+                isExtra={isExtra}
+                readOnly={readOnly}
+                onOpenSplit={onOpenSplit}
+                onMergeSplit={onMergeSplit}
+              />
               <button
                 type="button"
                 onPointerDown={stopDrag}
