@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ReactNode, RefObject } from "react";
 
 export const ADMIN_FORM_INPUT_CLASS = "w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]";
 export const ADMIN_FORM_LABEL_CLASS = "block text-sm font-medium mb-1.5";
@@ -26,6 +26,39 @@ export function AdminCrudContent({ loading, empty, emptyMessage, children }: { l
     return <div className="rounded-2xl p-10 text-center" style={{ background: "white", border: "1px solid var(--color-border)" }}><p className="text-sm" style={{ color: "var(--color-muted)" }}>{emptyMessage}</p></div>;
   }
   return children;
+}
+
+export function AdminSelectableTable({
+  headerCheckboxRef,
+  allSelected,
+  onToggleAll,
+  headers,
+  children,
+}: {
+  headerCheckboxRef: RefObject<HTMLInputElement | null>;
+  allSelected: boolean;
+  onToggleAll: () => void;
+  headers: string[];
+  children: ReactNode;
+}) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full border-collapse text-[13px]">
+        <thead>
+          <tr className="border-b bg-[var(--color-cream)]" style={{ borderColor: "var(--color-border)" }}>
+            <th className="w-9 py-[11px] pl-4 pr-3">
+              <input ref={headerCheckboxRef} type="checkbox" checked={allSelected} onChange={onToggleAll} className="cursor-pointer" />
+            </th>
+            {headers.map((label) => (
+              <th key={label} className="whitespace-nowrap px-4 py-[11px] text-left text-[11px] font-semibold uppercase tracking-[0.07em]" style={{ color: "var(--color-muted)" }}>{label}</th>
+            ))}
+            <th className="w-[92px] whitespace-nowrap px-4 py-[11px] text-center text-[11px] font-semibold uppercase tracking-[0.07em]" style={{ color: "var(--color-muted)" }}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
 }
 
 export function AdminModalActions({ saving, onCancel, onSave }: { saving: boolean; onCancel: () => void; onSave: () => void }) {

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type RefObject } from "react";
 import { useRouter } from "next/navigation";
 import Modal from "@/components/ui/Modal";
+import { AdminCrudContent, AdminSelectableTable } from "@/components/admin/AdminCrudParts";
 import { API_URL, fetchEventConfig, type EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
@@ -11,6 +12,7 @@ import type { Customer } from "@/lib/customers";
 
 const EVENT_REMINDER_SEND_INTERVAL_MS = 500;
 const EVENT_REMINDER_RETRY_BACKOFF_MS = [1000, 2000];
+const EVENT_REMINDER_MAX_ATTEMPTS = 3;
 const PAGE_SIZE = 10;
 
 type QueueItemStatus = "queued" | "sending" | "retrying" | "sent" | "skipped" | "failed";
@@ -19,6 +21,12 @@ type QueueOutcome = "sent" | "skipped" | "retryable_failed" | "failed" | "unauth
 interface EventReminderResponse {
   status: string;
   message?: string;
+}
+
+interface ReminderAttemptResult {
+  outcome: QueueOutcome;
+  message: string;
+  resultCode: string | null;
 }
 
 interface EventReminderQueueItem {
@@ -94,20 +102,83 @@ function buildRunState(
   };
 }
 
+function classifyReminderResponse(data: EventReminderResponse): ReminderAttemptResult {
+  if (data.status === "sent") return { outcome: "sent", message: data.message || "Event reminder sent", resultCode: data.status };
+  if (data.status === "skipped_missing_email") {
+    return { outcome: "skipped", message: data.message || "Customer is missing an email address", resultCode: data.status };
+  }
+  if (data.status === "failed") {
+    return { outcome: "retryable_failed", message: data.message || "Failed to send event reminder", resultCode: data.status };
+  }
+  return { outcome: "skipped", message: data.message || "Event reminder skipped", resultCode: data.status };
+}
+
+function updateQueueItem(
+  items: EventReminderQueueItem[],
+  itemIndex: number,
+  patch: Partial<EventReminderQueueItem>,
+): EventReminderQueueItem[] {
+  return items.map((item, index) => index === itemIndex ? { ...item, ...patch } : item);
+}
+
+function terminalQueueStatus(outcome: QueueOutcome): QueueItemStatus | null {
+  if (outcome === "sent" || outcome === "skipped" || outcome === "failed") return outcome;
+  return null;
+}
+
+async function runCustomerReminderAttempts(options: {
+  items: EventReminderQueueItem[];
+  itemIndex: number;
+  customerId: string;
+  token: string;
+  sendAttempt: (customerId: string, token: string) => Promise<ReminderAttemptResult>;
+  onProgress: (items: EventReminderQueueItem[], activeCustomerId: string | null) => void;
+}): Promise<{ items: EventReminderQueueItem[]; unauthorized: boolean }> {
+  let items = options.items;
+  for (let attempt = 1; attempt <= EVENT_REMINDER_MAX_ATTEMPTS; attempt += 1) {
+    items = updateQueueItem(items, options.itemIndex, { status: "sending", attempts: attempt, message: "" });
+    options.onProgress(items, options.customerId);
+    const result = await options.sendAttempt(options.customerId, options.token);
+    if (result.outcome === "unauthorized") {
+      items = updateQueueItem(items, options.itemIndex, { status: "failed", message: result.message, lastResultCode: result.resultCode });
+      return { items, unauthorized: true };
+    }
+    const terminalStatus = terminalQueueStatus(result.outcome);
+    if (terminalStatus) {
+      items = updateQueueItem(items, options.itemIndex, { status: terminalStatus, message: result.message, lastResultCode: result.resultCode });
+      options.onProgress(items, null);
+      return { items, unauthorized: false };
+    }
+    if (attempt < EVENT_REMINDER_MAX_ATTEMPTS) {
+      items = updateQueueItem(items, options.itemIndex, { status: "retrying", message: "Retrying after send failure", lastResultCode: result.resultCode });
+      options.onProgress(items, options.customerId);
+      await wait(Math.max(EVENT_REMINDER_SEND_INTERVAL_MS, EVENT_REMINDER_RETRY_BACKOFF_MS[attempt - 1]));
+      continue;
+    }
+    items = updateQueueItem(items, options.itemIndex, {
+      status: "failed",
+      message: `Send failed after ${EVENT_REMINDER_MAX_ATTEMPTS} attempts`,
+      lastResultCode: result.resultCode,
+    });
+    options.onProgress(items, null);
+  }
+  return { items, unauthorized: false };
+}
+
 function getStatusBadge(item: EventReminderQueueItem): { label: string; bg: string; color: string; border: string } {
   switch (item.status) {
     case "sending":
-      return { label: "Sending", bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" };
+      return { label: "Sending", bg: "var(--color-info-bg)", color: "var(--color-info-text)", border: "var(--color-info-border)" };
     case "retrying":
-      return { label: "Retrying", bg: "#fffbeb", color: "#92400e", border: "#fcd34d" };
+      return { label: "Retrying", bg: "var(--color-warning-bg)", color: "var(--color-warning-text)", border: "var(--color-warning-border)" };
     case "sent":
-      return { label: "Sent", bg: "#f0fdf4", color: "#166534", border: "#bbf7d0" };
+      return { label: "Sent", bg: "var(--color-success-bg)", color: "var(--color-success-text)", border: "var(--color-success-border)" };
     case "skipped":
       return { label: "Skipped", bg: "var(--color-cream)", color: "var(--color-muted)", border: "var(--color-border)" };
     case "failed":
-      return { label: "Failed", bg: "#fff1f2", color: "#be123c", border: "#fecdd3" };
+      return { label: "Failed", bg: "var(--color-error-bg)", color: "var(--color-error-text)", border: "var(--color-error-border)" };
     default:
-      return { label: "Queued", bg: "#f3f4f6", color: "#374151", border: "#d1d5db" };
+      return { label: "Queued", bg: "var(--color-cream)", color: "var(--color-text)", border: "var(--color-border)" };
   }
 }
 
@@ -117,6 +188,100 @@ function EditIcon() {
       <path d="M12 20h9" />
       <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
     </svg>
+  );
+}
+
+function CustomerTableRow({
+  customer,
+  selected,
+  isLast,
+  buttonStyle,
+  onToggle,
+  onEdit,
+}: {
+  customer: Customer;
+  selected: boolean;
+  isLast: boolean;
+  buttonStyle: CSSProperties;
+  onToggle: () => void;
+  onEdit: () => void;
+}) {
+  const pickupLocations = customer.pickup_locations || [];
+  return (
+    <tr style={{ borderBottom: isLast ? "none" : "1px solid var(--color-border)", background: "white" }}>
+      <td style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }}>
+        <input type="checkbox" checked={selected} onChange={onToggle} style={{ cursor: "pointer" }} />
+      </td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", fontWeight: 600 }}>{customer.name}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>{customer.email}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>{customer.phone_number || <span style={{ color: "var(--color-border)" }}>-</span>}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {pickupLocations.length > 0
+            ? pickupLocations.map((location) => (
+              <span key={location} style={{ display: "inline-flex", alignItems: "center", padding: "4px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: "var(--color-success-bg)", color: "var(--color-forest)", border: "1px solid var(--color-success-border)" }}>
+                {location}
+              </span>
+            ))
+            : <span style={{ color: "var(--color-border)" }}>-</span>}
+        </div>
+      </td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>{formatDateTime(customer.created_at)}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>{formatDateTime(customer.updated_at)}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", textAlign: "center" }}>
+        <button type="button" onClick={onEdit} aria-label={`Edit ${customer.name}`} title={`Edit ${customer.name}`} style={buttonStyle}><EditIcon /></button>
+      </td>
+    </tr>
+  );
+}
+
+function CustomersTable({
+  loading,
+  filteredCount,
+  visibleCustomers,
+  search,
+  pickupLocation,
+  selectedIds,
+  allVisibleSelected,
+  headerCheckboxRef,
+  buttonStyle,
+  onToggleAll,
+  onToggle,
+  onEdit,
+}: {
+  loading: boolean;
+  filteredCount: number;
+  visibleCustomers: Customer[];
+  search: string;
+  pickupLocation: string;
+  selectedIds: Set<string>;
+  allVisibleSelected: boolean;
+  headerCheckboxRef: RefObject<HTMLInputElement | null>;
+  buttonStyle: CSSProperties;
+  onToggleAll: () => void;
+  onToggle: (customerId: string) => void;
+  onEdit: (customer: Customer) => void;
+}) {
+  const headers = ["Name", "Email", "Phone", "Pickup Locations", "Created", "Updated"];
+  const emptyMessage = search.trim() || pickupLocation !== "all"
+    ? "No customers match the current filters."
+    : "Customers will appear here as orders are placed and backfilled.";
+  return (
+    <AdminCrudContent loading={loading} empty={filteredCount === 0} emptyMessage={emptyMessage}>
+      <AdminSelectableTable headerCheckboxRef={headerCheckboxRef} allSelected={allVisibleSelected} onToggleAll={onToggleAll} headers={headers}>
+        {visibleCustomers.map((customer, index) => (
+            <CustomerTableRow
+              key={customer.id}
+              customer={customer}
+              selected={selectedIds.has(customer.id)}
+              isLast={index === visibleCustomers.length - 1}
+              buttonStyle={buttonStyle}
+              onToggle={() => onToggle(customer.id)}
+              onEdit={() => onEdit(customer)}
+            />
+        ))}
+      </AdminSelectableTable>
+    </AdminCrudContent>
   );
 }
 
@@ -524,7 +689,7 @@ export default function AdminCustomersPage() {
   async function sendEventReminderAttempt(
     customerId: string,
     token: string
-  ): Promise<{ outcome: QueueOutcome; message: string; resultCode: string | null }> {
+  ): Promise<ReminderAttemptResult> {
     try {
       const res = await fetch(`${API_URL}/api/admin/customers/${customerId}/event-reminder`, {
         method: "POST",
@@ -547,16 +712,8 @@ export default function AdminCustomersPage() {
         };
       }
 
-      if (res.status === 404) {
-        return {
-          outcome: "failed",
-          message: await getApiErrorMessage(res, "Customer not found"),
-          resultCode: null,
-        };
-      }
-
       if (!res.ok) {
-        const message = await getApiErrorMessage(res, "Failed to send event reminder");
+        const message = await getApiErrorMessage(res, res.status === 404 ? "Customer not found" : "Failed to send event reminder");
         const retryable = res.status >= 500 || res.status === 429;
         return {
           outcome: retryable ? "retryable_failed" : "failed",
@@ -566,32 +723,7 @@ export default function AdminCustomersPage() {
       }
 
       const data = await res.json() as EventReminderResponse;
-      if (data.status === "sent") {
-        return {
-          outcome: "sent",
-          message: data.message || "Event reminder sent",
-          resultCode: data.status,
-        };
-      }
-      if (data.status === "skipped_missing_email") {
-        return {
-          outcome: "skipped",
-          message: data.message || "Customer is missing an email address",
-          resultCode: data.status,
-        };
-      }
-      if (data.status === "failed") {
-        return {
-          outcome: "retryable_failed",
-          message: data.message || "Failed to send event reminder",
-          resultCode: data.status,
-        };
-      }
-      return {
-        outcome: "skipped",
-        message: data.message || "Event reminder skipped",
-        resultCode: data.status,
-      };
+      return classifyReminderResponse(data);
     } catch (err) {
       return {
         outcome: "retryable_failed",
@@ -628,92 +760,21 @@ export default function AdminCustomersPage() {
       const itemIndex = items.findIndex((item) => item.customerId === customerId);
       if (itemIndex < 0) continue;
 
-      let itemCompleted = false;
-
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        items = items.map((item, idx) => (idx === itemIndex
-          ? { ...item, status: "sending", attempts: attempt, message: "" }
-          : item
-        ));
-        setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: customerId }));
-
-        const result = await sendEventReminderAttempt(customerId, token);
-
-        if (result.outcome === "sent") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "sent", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-          itemCompleted = true;
-          break;
-        }
-
-        if (result.outcome === "skipped") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "skipped", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-          itemCompleted = true;
-          break;
-        }
-
-        if (result.outcome === "failed") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "failed", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-          itemCompleted = true;
-          break;
-        }
-
-        if (result.outcome === "unauthorized") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "failed", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          const stoppedRun = buildRunState(items, { isRunning: false, isComplete: true, activeCustomerId: null });
-          setEventReminderRun(stoppedRun);
-          showToast("Admin session expired. Reminder queue stopped.", "error");
-          return;
-        }
-
-        if (attempt < 3) {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? {
-              ...item,
-              status: "retrying",
-              message: "Retrying after send failure",
-              lastResultCode: result.resultCode,
-            }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: customerId }));
-          await wait(Math.max(EVENT_REMINDER_SEND_INTERVAL_MS, EVENT_REMINDER_RETRY_BACKOFF_MS[attempt - 1]));
-          continue;
-        }
-
-        items = items.map((item, idx) => (idx === itemIndex
-          ? {
-            ...item,
-            status: "failed",
-            message: "Send failed after 3 attempts",
-            lastResultCode: result.resultCode,
-          }
-          : item
-        ));
-        setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-        itemCompleted = true;
-      }
-
-      if (!itemCompleted) {
-        items = items.map((item, idx) => (idx === itemIndex
-          ? { ...item, status: "failed", message: "Send failed after 3 attempts" }
-          : item
-        ));
-        setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
+      const attemptResult = await runCustomerReminderAttempts({
+        items,
+        itemIndex,
+        customerId,
+        token,
+        sendAttempt: sendEventReminderAttempt,
+        onProgress: (nextItems, activeCustomerId) => {
+          setEventReminderRun(buildRunState(nextItems, { isRunning: true, isComplete: false, activeCustomerId }));
+        },
+      });
+      items = attemptResult.items;
+      if (attemptResult.unauthorized) {
+        setEventReminderRun(buildRunState(items, { isRunning: false, isComplete: true, activeCustomerId: null }));
+        showToast("Admin session expired. Reminder queue stopped.", "error");
+        return;
       }
 
       if (customerIndex < customerIdsToProcess.length - 1) {
@@ -776,9 +837,9 @@ export default function AdminCustomersPage() {
 
   const btnDanger: CSSProperties = {
     ...btnBase,
-    background: "#fff1f2",
-    border: "1px solid #fecdd3",
-    color: "#be123c",
+    background: "var(--color-error-bg)",
+    border: "1px solid var(--color-error-border)",
+    color: "var(--color-error-text)",
   };
 
   const btnPrimary: CSSProperties = {
@@ -795,8 +856,8 @@ export default function AdminCustomersPage() {
     width: 34,
     height: 34,
     borderRadius: "999px",
-    border: "1px solid #d8e7cc",
-    background: "#f6faf2",
+    border: "1px solid var(--color-success-border)",
+    background: "var(--color-success-bg)",
     color: "var(--color-forest)",
     cursor: "pointer",
   };
@@ -816,9 +877,9 @@ export default function AdminCustomersPage() {
         <div
           className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
           style={{
-            background: toast.type === "success" ? "#d1fae5" : "#fee2e2",
-            color: toast.type === "success" ? "#065f46" : "#991b1b",
-            border: `1px solid ${toast.type === "success" ? "#6ee7b7" : "#fca5a5"}`,
+            background: toast.type === "success" ? "var(--color-success-bg)" : "var(--color-error-bg)",
+            color: toast.type === "success" ? "var(--color-success-text)" : "var(--color-error-text)",
+            border: `1px solid ${toast.type === "success" ? "var(--color-success-border)" : "var(--color-error-border)"}`,
           }}
         >
           {toast.message}
@@ -883,8 +944,8 @@ export default function AdminCustomersPage() {
             alignItems: "center",
             gap: 12,
             padding: "10px 16px",
-            background: "#f0f7eb",
-            border: "1px solid #c8ddb4",
+            background: "var(--color-success-bg)",
+            border: "1px solid var(--color-success-border)",
             borderRadius: 12,
             marginBottom: 12,
             flexWrap: "wrap",
@@ -893,7 +954,7 @@ export default function AdminCustomersPage() {
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-forest)" }}>
             {selectedIds.size} selected
           </span>
-          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
+          <div style={{ width: 1, height: 20, background: "var(--color-success-border)" }} />
           <button onClick={openEventReminderModal} style={btnBase} disabled={Boolean(eventReminderDisabledReason)}>
             Event Reminder
           </button>
@@ -910,157 +971,21 @@ export default function AdminCustomersPage() {
         Use the edit icon in the Actions column to update a customer&apos;s email or phone number.
       </p>
 
-      <div
-        style={{
-          background: "white",
-          border: "1px solid var(--color-border)",
-          borderRadius: 20,
-          overflow: "hidden",
-        }}
-      >
-        {loading ? (
-          <div className="flex justify-center py-16">
-            <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" opacity="0.3" />
-              <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
-            </svg>
-          </div>
-        ) : filteredCustomers.length === 0 ? (
-          <div style={{ padding: 48, textAlign: "center" }}>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--color-forest)", marginBottom: 4 }}>
-              No customers found
-            </p>
-            <p style={{ fontSize: 13, color: "var(--color-muted)" }}>
-              {search.trim() || pickupLocation !== "all"
-                ? "No customers match the current filters."
-                : "Customers will appear here as orders are placed and backfilled."}
-            </p>
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-cream)" }}>
-                  <th style={{ padding: "11px 12px 11px 16px", width: 36 }}>
-                    <input
-                      ref={headerCheckboxRef}
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={toggleSelectAll}
-                      style={{ cursor: "pointer" }}
-                    />
-                  </th>
-                  {["Name", "Email", "Phone", "Pickup Locations", "Created", "Updated"].map((label) => (
-                    <th
-                      key={label}
-                      style={{
-                        textAlign: "left",
-                        padding: "11px 16px",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "var(--color-muted)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.07em",
-                        whiteSpace: "nowrap",
-                      }}
-                      >
-                        {label}
-                      </th>
-                  ))}
-                  <th
-                    style={{
-                      textAlign: "center",
-                      padding: "11px 16px",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "var(--color-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.07em",
-                      whiteSpace: "nowrap",
-                      width: 92,
-                    }}
-                  >
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleCustomers.map((customer, idx) => (
-                  <tr
-                    key={customer.id}
-                    style={{
-                      borderBottom: idx < visibleCustomers.length - 1 ? "1px solid var(--color-border)" : "none",
-                      background: "white",
-                    }}
-                  >
-                    <td style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(customer.id)}
-                        onChange={() => toggleSelect(customer.id)}
-                        style={{ cursor: "pointer" }}
-                      />
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)" }}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <span style={{ fontWeight: 600 }}>{customer.name}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>
-                      {customer.email}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>
-                      {customer.phone_number || <span style={{ color: "var(--color-border)" }}>-</span>}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {(customer.pickup_locations || []).length > 0 ? (
-                          customer.pickup_locations.map((location) => (
-                            <span
-                              key={location}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                padding: "4px 9px",
-                                borderRadius: 999,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                background: "#edf5e7",
-                                color: "var(--color-forest)",
-                                border: "1px solid #d8e7cc",
-                              }}
-                            >
-                              {location}
-                            </span>
-                          ))
-                        ) : (
-                          <span style={{ color: "var(--color-border)" }}>-</span>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>
-                      {formatDateTime(customer.created_at)}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>
-                      {formatDateTime(customer.updated_at)}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", textAlign: "center" }}>
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(customer)}
-                        aria-label={`Edit ${customer.name}`}
-                        title={`Edit ${customer.name}`}
-                        style={btnIcon}
-                      >
-                        <EditIcon />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div style={{ background: "white", border: "1px solid var(--color-border)", borderRadius: 20, overflow: "hidden" }}>
+        <CustomersTable
+          loading={loading}
+          filteredCount={filteredCustomers.length}
+          visibleCustomers={visibleCustomers}
+          search={search}
+          pickupLocation={pickupLocation}
+          selectedIds={selectedIds}
+          allVisibleSelected={allVisibleSelected}
+          headerCheckboxRef={headerCheckboxRef}
+          buttonStyle={btnIcon}
+          onToggleAll={toggleSelectAll}
+          onToggle={toggleSelect}
+          onEdit={openEditModal}
+        />
       </div>
 
       {filteredCustomers.length > 0 && (
@@ -1147,9 +1072,9 @@ export default function AdminCustomersPage() {
                 style={{
                   padding: "12px 14px",
                   borderRadius: 12,
-                  background: "#fff1f2",
-                  border: "1px solid #fecdd3",
-                  color: "#9f1239",
+                  background: "var(--color-error-bg)",
+                  border: "1px solid var(--color-error-border)",
+                  color: "var(--color-error-text)",
                   fontSize: 13,
                 }}
               >
@@ -1225,9 +1150,9 @@ export default function AdminCustomersPage() {
                         borderRadius: 999,
                         fontSize: 12,
                         fontWeight: 600,
-                        background: "#edf5e7",
+                        background: "var(--color-success-bg)",
                         color: "var(--color-forest)",
-                        border: "1px solid #d8e7cc",
+                        border: "1px solid var(--color-success-border)",
                       }}
                     >
                       {location}
@@ -1518,9 +1443,9 @@ export default function AdminCustomersPage() {
                                       borderRadius: 999,
                                       fontSize: 12,
                                       fontWeight: 600,
-                                      background: "#edf5e7",
+                                      background: "var(--color-success-bg)",
                                       color: "var(--color-forest)",
-                                      border: "1px solid #d8e7cc",
+                                      border: "1px solid var(--color-success-border)",
                                     }}
                                   >
                                     {location}
