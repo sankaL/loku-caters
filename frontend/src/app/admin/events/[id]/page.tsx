@@ -24,6 +24,10 @@ import DashboardCard from "@/components/admin/dashboard/DashboardCard";
 
 type Range = "7d" | "30d" | "1y";
 
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(value);
+}
+
 // ---------------------------------------------------------------------------
 // Skeleton
 // ---------------------------------------------------------------------------
@@ -78,7 +82,7 @@ function StatusBreakdownCard({ orders }: { orders: Order[] }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {data.map(({ status, count }) => {
-            const style = STATUS_STYLES[status] ?? { bg: "#f3f4f6", color: "#374151", label: status };
+            const style = STATUS_STYLES[status] ?? { bg: "var(--color-cream)", color: "var(--color-text)", label: status };
             const pct = total > 0 ? Math.round((count / total) * 100) : 0;
             return (
               <div key={status}>
@@ -113,7 +117,6 @@ function StatusBreakdownCard({ orders }: { orders: Order[] }) {
 function PaymentMethodCard({ orders }: { orders: Order[] }) {
   const data = useMemo(() => computePaymentMethodBreakdown(orders), [orders]);
   const total = data.reduce((s, r) => s + r.count, 0);
-  const fmt = (n: number) => new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(n);
   return (
     <DashboardCard title="Payment Methods" subtitle="Active orders only">
       {data.length === 0 ? (
@@ -126,7 +129,7 @@ function PaymentMethodCard({ orders }: { orders: Order[] }) {
               <div key={method}>
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                   <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-text)" }}>{label}</span>
-                  <span style={{ fontSize: 12, color: "var(--color-muted)" }}>{count} ({pct}%) &middot; {fmt(revenue)}</span>
+                  <span style={{ fontSize: 12, color: "var(--color-muted)" }}>{count} ({pct}%) &middot; {formatCurrency(revenue)}</span>
                 </div>
                 <div style={{ height: 6, background: "var(--color-cream)", borderRadius: 3, overflow: "hidden" }}>
                   <div style={{ height: "100%", width: `${pct}%`, background: "var(--color-sage)", borderRadius: 3, transition: "width 0.4s" }} />
@@ -140,7 +143,7 @@ function PaymentMethodCard({ orders }: { orders: Order[] }) {
   );
 }
 
-function LocationSection({ row, fmt }: { row: ItemsPerLocationRow; fmt: (n: number) => string }) {
+function LocationSection({ row }: { row: ItemsPerLocationRow }) {
   const { location, items, paidRevenue, unpaidRevenue, byMethod } = row;
   const totalRevenue = paidRevenue + unpaidRevenue;
   const paidPct = totalRevenue > 0 ? Math.round((paidRevenue / totalRevenue) * 100) : 0;
@@ -166,7 +169,7 @@ function LocationSection({ row, fmt }: { row: ItemsPerLocationRow; fmt: (n: numb
                 <tr key={itemName} style={{ borderTop: "1px solid var(--color-border)" }}>
                   <td style={{ fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{itemName}</td>
                   <td style={{ textAlign: "right", fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{quantity}</td>
-                  <td style={{ textAlign: "right", fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{fmt(revenue)}</td>
+                  <td style={{ textAlign: "right", fontSize: 12, color: "var(--color-text)", paddingTop: 5, paddingBottom: 5 }}>{formatCurrency(revenue)}</td>
                 </tr>
               ))}
             </tbody>
@@ -184,12 +187,12 @@ function LocationSection({ row, fmt }: { row: ItemsPerLocationRow; fmt: (n: numb
                 <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--color-forest)", display: "inline-block" }} />
                   <span style={{ color: "var(--color-text)", fontWeight: 600 }}>Paid</span>
-                  <span style={{ color: "var(--color-muted)" }}>{fmt(paidRevenue)}</span>
+                  <span style={{ color: "var(--color-muted)" }}>{formatCurrency(paidRevenue)}</span>
                 </span>
                 <span style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 5 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: "var(--color-border)", display: "inline-block" }} />
                   <span style={{ color: "var(--color-text)", fontWeight: 600 }}>Unpaid</span>
-                  <span style={{ color: "var(--color-muted)" }}>{fmt(unpaidRevenue)}</span>
+                  <span style={{ color: "var(--color-muted)" }}>{formatCurrency(unpaidRevenue)}</span>
                 </span>
               </div>
               <span style={{ fontSize: 11, color: "var(--color-muted)" }}>{paidPct}%</span>
@@ -209,7 +212,7 @@ function LocationSection({ row, fmt }: { row: ItemsPerLocationRow; fmt: (n: numb
                     {label}
                     <span style={{ color: "var(--color-muted)", marginLeft: 4 }}>({count})</span>
                   </span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-forest)" }}>{fmt(revenue)}</span>
+                  <span style={{ fontSize: 12, fontWeight: 600, color: "var(--color-forest)" }}>{formatCurrency(revenue)}</span>
                 </div>
               ))}
             </div>
@@ -222,7 +225,6 @@ function LocationSection({ row, fmt }: { row: ItemsPerLocationRow; fmt: (n: numb
 
 function ItemsPerLocationCard({ orders }: { orders: Order[] }) {
   const data = useMemo(() => computeItemsPerLocation(orders), [orders]);
-  const fmt = (n: number) => new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(n);
   return (
     <DashboardCard title="Items by Location" subtitle="Active orders only">
       {data.length === 0 ? (
@@ -230,7 +232,7 @@ function ItemsPerLocationCard({ orders }: { orders: Order[] }) {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
           {data.map((row) => (
-            <LocationSection key={row.location} row={row} fmt={fmt} />
+            <LocationSection key={row.location} row={row} />
           ))}
         </div>
       )}
@@ -260,6 +262,155 @@ interface EventConfig {
   locations: { id: string; name: string }[];
 }
 
+interface EventDetailState {
+  loading: boolean;
+  error: string | null;
+  eventMeta: EventMeta | null;
+  eventConfig: EventConfig | null;
+  orders: Order[];
+  range: Range;
+}
+
+const INITIAL_STATE: EventDetailState = {
+  loading: true,
+  error: null,
+  eventMeta: null,
+  eventConfig: null,
+  orders: [],
+  range: "30d",
+};
+
+function computeEventMetrics(orders: Order[], range: Range) {
+  const activeOrders = orders.filter((order) => order.status !== "cancelled" && order.status !== "no_show");
+  const totalRevenue = activeOrders.reduce((sum, order) => sum + order.total_price, 0);
+  const totalItems = activeOrders.reduce((sum, order) => sum + order.quantity, 0);
+  const resolvedOrders = orders.filter((order) => order.status === "picked_up" || order.status === "no_show");
+  const pickedUpCount = orders.filter((order) => order.status === "picked_up").length;
+  return {
+    itemRevenue: computeItemRevenueBreakdown(orders),
+    locationBreakdown: computeLocationBreakdown(orders),
+    timeSlotBreakdown: computeTimeSlotBreakdown(orders),
+    revenueOverTime: computeRevenueOverTime(orders, range),
+    totalRevenue,
+    totalItems,
+    completionRate: resolvedOrders.length > 0 ? Math.round((pickedUpCount / resolvedOrders.length) * 100) : 0,
+    avgOrderValue: activeOrders.length > 0 ? totalRevenue / activeOrders.length : 0,
+  };
+}
+
+function EventConfigChips({ eventConfig }: { eventConfig: EventConfig | null }) {
+  if (!eventConfig || (eventConfig.items.length === 0 && eventConfig.locations.length === 0)) return null;
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
+      {eventConfig.items.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: "rgba(247,245,240,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Items:</span>
+          {eventConfig.items.map((item) => (
+            <span key={item.id} style={{ fontSize: 12, fontWeight: 500, background: "rgba(255,255,255,0.1)", color: "var(--color-cream)", borderRadius: 8, padding: "3px 9px" }}>
+              {item.name}
+            </span>
+          ))}
+        </div>
+      )}
+      {eventConfig.locations.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+          <span style={{ fontSize: 11, color: "rgba(247,245,240,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Locations:</span>
+          {eventConfig.locations.map((location) => (
+            <span key={location.id} style={{ fontSize: 12, fontWeight: 500, background: "rgba(114,145,82,0.25)", color: "var(--color-success-border)", borderRadius: 8, padding: "3px 9px" }}>
+              {location.name}
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EventHeader({
+  eventMeta,
+  eventConfig,
+  totalRevenue,
+  totalItems,
+  orderCount,
+  onBack,
+  onConfigure,
+}: {
+  eventMeta: EventMeta;
+  eventConfig: EventConfig | null;
+  totalRevenue: number;
+  totalItems: number;
+  orderCount: number;
+  onBack: () => void;
+  onConfigure: () => void;
+}) {
+  const isRandomRequests = eventMeta.kind === "random_requests";
+  return (
+    <div style={{ background: "var(--color-forest)", borderRadius: 24, padding: "20px 28px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+        <button
+          onClick={onBack}
+          style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "rgba(247,245,240,0.6)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M19 12H5M5 12l7 7M5 12l7-7" />
+          </svg>
+          Events
+        </button>
+        <button
+          onClick={onConfigure}
+          disabled={isRandomRequests}
+          style={{
+            fontSize: 13,
+            fontWeight: 600,
+            color: "var(--color-forest)",
+            background: isRandomRequests ? "rgba(247,245,240,0.7)" : "var(--color-cream)",
+            border: "none",
+            borderRadius: 12,
+            padding: "7px 16px",
+            cursor: isRandomRequests ? "not-allowed" : "pointer",
+            opacity: isRandomRequests ? 0.7 : 1,
+          }}
+          title={isRandomRequests ? "Random Requests is a reserved system event" : "Configure event"}
+        >
+          {isRandomRequests ? "System Event" : "Configure Event"}
+        </button>
+      </div>
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 700, color: "var(--color-cream)", margin: 0 }}>{eventMeta.name}</h1>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                borderRadius: 20,
+                padding: "3px 10px",
+                background: eventMeta.is_active ? "rgba(114,145,82,0.3)" : "rgba(255,255,255,0.12)",
+                color: eventMeta.is_active ? "var(--color-success-border)" : "rgba(247,245,240,0.5)",
+              }}
+            >
+              {eventMeta.is_active ? "ACTIVE" : "INACTIVE"}
+            </span>
+            {isRandomRequests && (
+              <span style={{ fontSize: 11, fontWeight: 700, borderRadius: 20, padding: "3px 10px", background: "rgba(247,245,240,0.16)", color: "rgba(247,245,240,0.75)" }}>
+                SYSTEM
+              </span>
+            )}
+          </div>
+          <p style={{ fontSize: 13, color: "rgba(247,245,240,0.6)", margin: 0 }}>{eventMeta.event_date}</p>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+          <StatChip label="Revenue" value={formatCurrency(totalRevenue)} />
+          <StatChip label="Orders" value={String(orderCount)} />
+          <StatChip label="Items Sold" value={String(totalItems)} />
+          <StatChip label="Locations" value={String(eventConfig?.locations.length ?? 0)} />
+        </div>
+      </div>
+      <EventConfigChips eventConfig={eventConfig} />
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
@@ -268,21 +419,17 @@ export default function EventDetailPage() {
   const params = useParams();
   const id = params?.id as string;
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [eventMeta, setEventMeta] = useState<EventMeta | null>(null);
-  const [eventConfig, setEventConfig] = useState<EventConfig | null>(null);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [range, setRange] = useState<Range>("30d");
+  const [state, setState] = useState<EventDetailState>(INITIAL_STATE);
+  const { loading, error, eventMeta, eventConfig, orders, range } = state;
 
   useEffect(() => {
     if (!id) return;
     async function load() {
       try {
-        setError(null);
+        setState((current) => ({ ...current, error: null }));
         const token = await getAdminToken();
         if (!token) {
-          setError("Not authenticated");
+          setState((current) => ({ ...current, error: "Not authenticated" }));
           return;
         }
         const headers = { Authorization: `Bearer ${token}` };
@@ -293,7 +440,10 @@ export default function EventDetailPage() {
         ]);
         if (metaRes.status === 404) return;
         if (!metaRes.ok || !configRes.ok || !ordersRes.ok) {
-          setError(metaRes.status === 401 || metaRes.status === 403 ? "Not authorized" : "Failed to load event data");
+          setState((current) => ({
+            ...current,
+            error: metaRes.status === 401 || metaRes.status === 403 ? "Not authorized" : "Failed to load event data",
+          }));
           return;
         }
         const [metaData, configData, ordersData] = await Promise.all([
@@ -301,55 +451,20 @@ export default function EventDetailPage() {
           configRes.json() as Promise<EventConfig>,
           ordersRes.json() as Promise<Order[]>,
         ]);
-        setEventMeta(metaData);
-        setEventConfig(configData);
-        setOrders(ordersData);
+        setState((current) => ({ ...current, eventMeta: metaData, eventConfig: configData, orders: ordersData }));
       } catch {
-        setError("Failed to load event data");
+        setState((current) => ({ ...current, error: "Failed to load event data" }));
       }
     }
-    setLoading(true);
-    setEventMeta(null);
-    setEventConfig(null);
-    setOrders([]);
-    load().finally(() => setLoading(false));
+    setState((current) => ({ ...current, loading: true, eventMeta: null, eventConfig: null, orders: [] }));
+    load().finally(() => setState((current) => ({ ...current, loading: false })));
   }, [id]);
 
   // ---------------------------------------------------------------------------
   // Computed metrics
   // ---------------------------------------------------------------------------
-  const itemRevenue = useMemo(() => computeItemRevenueBreakdown(orders), [orders]);
-  const locationBreakdown = useMemo(() => computeLocationBreakdown(orders), [orders]);
-  const timeSlotBreakdown = useMemo(() => computeTimeSlotBreakdown(orders), [orders]);
-  const revenueOverTime = useMemo(() => computeRevenueOverTime(orders, range), [orders, range]);
-
-  const totalRevenue = useMemo(
-    () => orders.filter((o) => o.status !== "cancelled" && o.status !== "no_show").reduce((s, o) => s + o.total_price, 0),
-    [orders]
-  );
-  const totalItems = useMemo(
-    () => orders.filter((o) => o.status !== "cancelled" && o.status !== "no_show").reduce((s, o) => s + o.quantity, 0),
-    [orders]
-  );
-  const activeOrders = useMemo(
-    () => orders.filter((o) => o.status !== "cancelled" && o.status !== "no_show"),
-    [orders]
-  );
-  const completionRate = useMemo(() => {
-    const resolved = orders.filter((o) => o.status === "picked_up" || o.status === "no_show");
-    const pickedUp = orders.filter((o) => o.status === "picked_up").length;
-    return resolved.length > 0 ? Math.round((pickedUp / resolved.length) * 100) : 0;
-  }, [orders]);
-  const avgOrderValue = useMemo(
-    () => (activeOrders.length > 0 ? totalRevenue / activeOrders.length : 0),
-    [activeOrders, totalRevenue]
-  );
-  const isRandomRequests = eventMeta?.kind === "random_requests";
-
-  const fmtCurrency = (n: number) =>
-    new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(n);
-
-  const locationCount = eventConfig?.locations.length ?? 0;
+  const metrics = useMemo(() => computeEventMetrics(orders, range), [orders, range]);
+  const { itemRevenue, locationBreakdown, timeSlotBreakdown, revenueOverTime, totalRevenue, totalItems, completionRate, avgOrderValue } = metrics;
 
   if (loading) {
     return (
@@ -378,120 +493,15 @@ export default function EventDetailPage() {
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8" style={{ display: "flex", flexDirection: "column", gap: 20 }}>
 
-      {/* Header card */}
-      <div style={{ background: "var(--color-forest)", borderRadius: 24, padding: "20px 28px" }}>
-        {/* Back link + configure button */}
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-          <button
-            onClick={() => router.push("/admin/config")}
-            style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "rgba(247,245,240,0.6)", background: "none", border: "none", cursor: "pointer", padding: 0 }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M19 12H5M5 12l7 7M5 12l7-7" />
-            </svg>
-            Events
-          </button>
-          <button
-            onClick={() => {
-              if (isRandomRequests) return;
-              router.push(`/admin/events/${id}/edit`);
-            }}
-            disabled={isRandomRequests}
-            style={{
-              fontSize: 13,
-              fontWeight: 600,
-              color: "var(--color-forest)",
-              background: isRandomRequests ? "rgba(247,245,240,0.7)" : "var(--color-cream)",
-              border: "none",
-              borderRadius: 12,
-              padding: "7px 16px",
-              cursor: isRandomRequests ? "not-allowed" : "pointer",
-              opacity: isRandomRequests ? 0.7 : 1,
-            }}
-            title={isRandomRequests ? "Random Requests is a reserved system event" : "Configure event"}
-          >
-            {isRandomRequests ? "System Event" : "Configure Event"}
-          </button>
-        </div>
-
-        {/* Top row: name/badge/date left, stat chips right */}
-        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-              <h1 style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 700, color: "var(--color-cream)", margin: 0 }}>
-                {eventMeta.name}
-              </h1>
-              <span
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  borderRadius: 20,
-                  padding: "3px 10px",
-                  background: eventMeta.is_active ? "rgba(114,145,82,0.3)" : "rgba(255,255,255,0.12)",
-                  color: eventMeta.is_active ? "#a8d87a" : "rgba(247,245,240,0.5)",
-                }}
-              >
-                {eventMeta.is_active ? "ACTIVE" : "INACTIVE"}
-              </span>
-              {isRandomRequests && (
-                <span
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 700,
-                    borderRadius: 20,
-                    padding: "3px 10px",
-                    background: "rgba(247,245,240,0.16)",
-                    color: "rgba(247,245,240,0.75)",
-                  }}
-                >
-                  SYSTEM
-                </span>
-              )}
-            </div>
-            <p style={{ fontSize: 13, color: "rgba(247,245,240,0.6)", margin: 0 }}>{eventMeta.event_date}</p>
-          </div>
-
-          {/* Stat chips inline */}
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-            <StatChip label="Revenue" value={fmtCurrency(totalRevenue)} />
-            <StatChip label="Orders" value={String(orders.length)} />
-            <StatChip label="Items Sold" value={String(totalItems)} />
-            <StatChip label="Locations" value={String(locationCount)} />
-          </div>
-        </div>
-
-        {/* Items + Locations chips */}
-        {eventConfig && (eventConfig.items.length > 0 || eventConfig.locations.length > 0) && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 16, marginTop: 14, paddingTop: 14, borderTop: "1px solid rgba(255,255,255,0.1)" }}>
-            {eventConfig.items.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11, color: "rgba(247,245,240,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Items:</span>
-                {eventConfig.items.map((item) => (
-                  <span
-                    key={item.id}
-                    style={{ fontSize: 12, fontWeight: 500, background: "rgba(255,255,255,0.1)", color: "var(--color-cream)", borderRadius: 8, padding: "3px 9px" }}
-                  >
-                    {item.name}
-                  </span>
-                ))}
-              </div>
-            )}
-            {eventConfig.locations.length > 0 && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                <span style={{ fontSize: 11, color: "rgba(247,245,240,0.45)", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Locations:</span>
-                {eventConfig.locations.map((loc) => (
-                  <span
-                    key={loc.id}
-                    style={{ fontSize: 12, fontWeight: 500, background: "rgba(114,145,82,0.25)", color: "#a8d87a", borderRadius: 8, padding: "3px 9px" }}
-                  >
-                    {loc.name}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </div>
+      <EventHeader
+        eventMeta={eventMeta}
+        eventConfig={eventConfig}
+        totalRevenue={totalRevenue}
+        totalItems={totalItems}
+        orderCount={orders.length}
+        onBack={() => router.push("/admin/config")}
+        onConfigure={() => router.push(`/admin/events/${id}/edit`)}
+      />
 
       {/* Row 1: Orders area chart (full width) */}
       <div>
@@ -499,7 +509,7 @@ export default function EventDetailPage() {
           data={revenueOverTime.data}
           topItems={revenueOverTime.topItems}
           range={range}
-          onRangeChange={setRange}
+          onRangeChange={(nextRange) => setState((current) => ({ ...current, range: nextRange }))}
           currency={CURRENCY}
         />
       </div>
@@ -526,7 +536,7 @@ export default function EventDetailPage() {
         </DashboardCard>
         <DashboardCard title="Avg Order Value" subtitle="Active orders only">
           <p style={{ fontFamily: "var(--font-serif)", fontSize: 36, fontWeight: 700, color: "var(--color-forest)", margin: 0 }}>
-            {fmtCurrency(avgOrderValue)}
+            {formatCurrency(avgOrderValue)}
           </p>
         </DashboardCard>
       </div>
