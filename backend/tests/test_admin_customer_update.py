@@ -26,7 +26,9 @@ class FakeQuery:
 
     def first(self):
         for item in self.items:
-            if all(getattr(item, key, None) == value for key, value in self.filters.items()):
+            if all(
+                getattr(item, key, None) == value for key, value in self.filters.items()
+            ):
                 return item
         return None
 
@@ -73,7 +75,9 @@ class AdminCustomerUpdateRouteTests(unittest.TestCase):
             yield self.session
 
         app.dependency_overrides[get_db] = override_get_db
-        app.dependency_overrides[admin.verify_admin_token] = lambda: {"sub": "dev-admin"}
+        app.dependency_overrides[admin.verify_admin_token] = lambda: {
+            "sub": "dev-admin"
+        }
 
     def tearDown(self):
         app.dependency_overrides.clear()

@@ -267,18 +267,24 @@ def _styles() -> dict[str, ParagraphStyle]:
 
 
 def _paragraph(value: Any, style: ParagraphStyle) -> Paragraph:
-    return Paragraph(_text(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"), style)
+    return Paragraph(
+        _text(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"),
+        style,
+    )
 
 
 def _active_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        row for row in snapshot.get("planned_rows", [])
+        row
+        for row in snapshot.get("planned_rows", [])
         if row.get("row_state", "active") == "active"
     ]
 
 
 def _quantity_breakdown(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
-    grouped: dict[str, dict[str, dict[str, int]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
+    grouped: dict[str, dict[str, dict[str, int]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(int))
+    )
     for row in _active_rows(snapshot):
         location = _text(row.get("pickup_location")) or "Unassigned"
         time_slot = _text(row.get("pickup_time_slot")) or "Unassigned"
@@ -291,7 +297,9 @@ def _quantity_breakdown(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
         for time_slot, items in time_slots.items():
             item_rows = [
                 {"item": item, "quantity": quantity}
-                for item, quantity in sorted(items.items(), key=lambda entry: (-entry[1], entry[0]))
+                for item, quantity in sorted(
+                    items.items(), key=lambda entry: (-entry[1], entry[0])
+                )
             ]
             next_time_slots.append(
                 {
@@ -323,7 +331,9 @@ def _item_type_totals(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             "quantity": quantity,
             "share": round((quantity / total_quantity) * 100) if total_quantity else 0,
         }
-        for item, quantity in sorted(grouped.items(), key=lambda entry: (-entry[1], entry[0]))
+        for item, quantity in sorted(
+            grouped.items(), key=lambda entry: (-entry[1], entry[0])
+        )
     ]
 
 
@@ -342,7 +352,9 @@ def _customer_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
             _status_label(_text(row.get("status")) or "extra"),
             _text(row.get("source_bundle_id")),
         )
-        grouped[key].append(f"{_text(row.get('planned_item_name'))} x{_quantity(row.get('quantity'))}")
+        grouped[key].append(
+            f"{_text(row.get('planned_item_name'))} x{_quantity(row.get('quantity'))}"
+        )
         note = _text(row.get("notes"))
         if note:
             row_notes[key].append(note)
@@ -367,18 +379,38 @@ def _customer_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
 def _status_rows(snapshot: dict[str, Any]) -> list[list[Any]]:
     rows = []
     for status, value in sorted((snapshot.get("status_breakdown") or {}).items()):
-        rows.append([_status_label(status), str(value.get("orders", 0)), str(value.get("quantity", 0))])
+        rows.append(
+            [
+                _status_label(status),
+                str(value.get("orders", 0)),
+                str(value.get("quantity", 0)),
+            ]
+        )
     return rows
 
 
-def _summary_table(snapshot: dict[str, Any], styles: dict[str, ParagraphStyle]) -> Table:
+def _summary_table(
+    snapshot: dict[str, Any], styles: dict[str, ParagraphStyle]
+) -> Table:
     totals = snapshot.get("totals") or {}
     warnings = snapshot.get("warnings") or []
     data = [
-        [_paragraph("Orders", styles["meta"]), _paragraph(str(totals.get("included_order_count", 0)), styles["center"])],
-        [_paragraph("Ordered Qty", styles["meta"]), _paragraph(str(totals.get("ordered_quantity", 0)), styles["center"])],
-        [_paragraph("Planned Qty", styles["meta"]), _paragraph(str(totals.get("planned_quantity", 0)), styles["center"])],
-        [_paragraph("Warnings", styles["meta"]), _paragraph(str(len(warnings)), styles["center"])],
+        [
+            _paragraph("Orders", styles["meta"]),
+            _paragraph(str(totals.get("included_order_count", 0)), styles["center"]),
+        ],
+        [
+            _paragraph("Ordered Qty", styles["meta"]),
+            _paragraph(str(totals.get("ordered_quantity", 0)), styles["center"]),
+        ],
+        [
+            _paragraph("Planned Qty", styles["meta"]),
+            _paragraph(str(totals.get("planned_quantity", 0)), styles["center"]),
+        ],
+        [
+            _paragraph("Warnings", styles["meta"]),
+            _paragraph(str(len(warnings)), styles["center"]),
+        ],
     ]
     table = Table(data, colWidths=[1.0 * inch, 0.55 * inch], hAlign="RIGHT")
     table.setStyle(
@@ -398,7 +430,12 @@ def _summary_table(snapshot: dict[str, Any], styles: dict[str, ParagraphStyle]) 
     return table
 
 
-def _build_table(headers: list[str], rows: list[list[Any]], widths: list[float], styles: dict[str, ParagraphStyle]) -> Table:
+def _build_table(
+    headers: list[str],
+    rows: list[list[Any]],
+    widths: list[float],
+    styles: dict[str, ParagraphStyle],
+) -> Table:
     data = [[_paragraph(header, styles["cell_bold"]) for header in headers]]
     for row in rows:
         data.append([_paragraph(value, styles["cell"]) for value in row])
@@ -424,7 +461,9 @@ def _build_table(headers: list[str], rows: list[list[Any]], widths: list[float],
 def _progress_bar(share: int, *, width: float = 1.65 * inch) -> Table:
     fill_width = max(0.06 * inch, width * min(max(share, 0), 100) / 100)
     rest_width = max(0.01 * inch, width - fill_width)
-    table = Table([["", ""]], colWidths=[fill_width, rest_width], rowHeights=[0.05 * inch])
+    table = Table(
+        [["", ""]], colWidths=[fill_width, rest_width], rowHeights=[0.05 * inch]
+    )
     table.setStyle(
         TableStyle(
             [
@@ -470,10 +509,14 @@ def _item_total_card(item: dict[str, Any], styles: dict[str, ParagraphStyle]) ->
     return table
 
 
-def _item_total_cards(snapshot: dict[str, Any], styles: dict[str, ParagraphStyle]) -> Table:
+def _item_total_cards(
+    snapshot: dict[str, Any], styles: dict[str, ParagraphStyle]
+) -> Table:
     totals = _item_type_totals(snapshot)
     if not totals:
-        return _build_table(["Item Totals"], [["No planned items"]], [9.35 * inch], styles)
+        return _build_table(
+            ["Item Totals"], [["No planned items"]], [9.35 * inch], styles
+        )
     cells: list[list[Any]] = []
     row: list[Any] = []
     for item in totals:
@@ -499,7 +542,9 @@ def _item_total_cards(snapshot: dict[str, Any], styles: dict[str, ParagraphStyle
     return table
 
 
-def _quantity_location_card(location: dict[str, Any], styles: dict[str, ParagraphStyle]) -> Table:
+def _quantity_location_card(
+    location: dict[str, Any], styles: dict[str, ParagraphStyle]
+) -> Table:
     palette = _location_palette(location["location"])
     data: list[list[Any]] = [
         [
@@ -518,7 +563,12 @@ def _quantity_location_card(location: dict[str, Any], styles: dict[str, Paragrap
     ]
     row_index = 1
     for time_slot in location.get("time_slots", []):
-        data.append([_paragraph(time_slot["time_slot"], styles["cell_bold_light"]), _paragraph(str(time_slot["quantity"]), styles["cell_right_light"])])
+        data.append(
+            [
+                _paragraph(time_slot["time_slot"], styles["cell_bold_light"]),
+                _paragraph(str(time_slot["quantity"]), styles["cell_right_light"]),
+            ]
+        )
         row_styles.extend(
             [
                 ("BACKGROUND", (0, row_index), (-1, row_index), palette["band"]),
@@ -527,8 +577,20 @@ def _quantity_location_card(location: dict[str, Any], styles: dict[str, Paragrap
         )
         row_index += 1
         for item in time_slot.get("items", []):
-            data.append([_paragraph(item["item"], styles["cell_bold"]), _paragraph(str(item["quantity"]), styles["cell_right"])])
-            row_styles.append(("BACKGROUND", (0, row_index), (-1, row_index), colors.white if row_index % 2 == 0 else CREAM))
+            data.append(
+                [
+                    _paragraph(item["item"], styles["cell_bold"]),
+                    _paragraph(str(item["quantity"]), styles["cell_right"]),
+                ]
+            )
+            row_styles.append(
+                (
+                    "BACKGROUND",
+                    (0, row_index),
+                    (-1, row_index),
+                    colors.white if row_index % 2 == 0 else CREAM,
+                )
+            )
             row_index += 1
     table = Table(data, colWidths=[1.92 * inch, 0.52 * inch], hAlign="LEFT")
     table.setStyle(
@@ -550,14 +612,28 @@ def _quantity_location_card(location: dict[str, Any], styles: dict[str, Paragrap
     return table
 
 
-def _quantity_cards(snapshot: dict[str, Any], styles: dict[str, ParagraphStyle]) -> list[Table]:
+def _quantity_cards(
+    snapshot: dict[str, Any], styles: dict[str, ParagraphStyle]
+) -> list[Table]:
     locations = _quantity_breakdown(snapshot)
     if not locations:
-        return [_build_table(["Order Quantity Breakdown"], [["No planned rows"]], [9.35 * inch], styles)]
+        return [
+            _build_table(
+                ["Order Quantity Breakdown"],
+                [["No planned rows"]],
+                [9.35 * inch],
+                styles,
+            )
+        ]
     split_locations = _split_quantity_graph_locations(locations, max_items_per_graph=9)
     tables: list[Table] = []
     for index in range(0, len(split_locations), 3):
-        cells = [[_quantity_location_card(location, styles) for location in split_locations[index:index + 3]]]
+        cells = [
+            [
+                _quantity_location_card(location, styles)
+                for location in split_locations[index : index + 3]
+            ]
+        ]
         cells[0].extend([""] * (3 - len(cells[0])))
         table = Table(cells, colWidths=[3.12 * inch] * 3, hAlign="LEFT")
         table.setStyle(
@@ -575,7 +651,9 @@ def _quantity_cards(snapshot: dict[str, Any], styles: dict[str, ParagraphStyle])
     return tables
 
 
-def _split_quantity_graph_locations(locations: list[dict[str, Any]], max_items_per_graph: int = 6) -> list[dict[str, Any]]:
+def _split_quantity_graph_locations(
+    locations: list[dict[str, Any]], max_items_per_graph: int = 6
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for location in locations:
         current_slots: list[dict[str, Any]] = []
@@ -609,7 +687,7 @@ def _split_quantity_graph_locations(locations: list[dict[str, Any]], max_items_p
                 continue
 
             for index in range(0, len(items), max_items_per_graph):
-                chunk = items[index:index + max_items_per_graph]
+                chunk = items[index : index + max_items_per_graph]
                 if current_items + len(chunk) > max_items_per_graph:
                     flush()
                 current_slots.append(
@@ -625,7 +703,9 @@ def _split_quantity_graph_locations(locations: list[dict[str, Any]], max_items_p
     return result
 
 
-def build_event_plan_pdf(*, plan_name: str, status: str, snapshot: dict[str, Any]) -> bytes:
+def build_event_plan_pdf(
+    *, plan_name: str, status: str, snapshot: dict[str, Any]
+) -> bytes:
     styles = _styles()
     source = snapshot.get("source_event") or {}
     buffer = BytesIO()
@@ -644,7 +724,10 @@ def build_event_plan_pdf(*, plan_name: str, status: str, snapshot: dict[str, Any
             [
                 [
                     _paragraph(plan_name, styles["title"]),
-                    _paragraph(f"{_text(source.get('name'))} | {_text(source.get('event_date'))} | {_status_label(status)}", styles["meta"]),
+                    _paragraph(
+                        f"{_text(source.get('name'))} | {_text(source.get('event_date'))} | {_status_label(status)}",
+                        styles["meta"],
+                    ),
                 ],
                 _summary_table(snapshot, styles),
             ]
@@ -678,7 +761,14 @@ def build_event_plan_pdf(*, plan_name: str, status: str, snapshot: dict[str, Any
         story.append(Spacer(1, 8))
 
     handoff_rows = [
-        [entry["location"], entry["time_slot"], entry["customer"], entry["status"], entry["items"], entry["notes"]]
+        [
+            entry["location"],
+            entry["time_slot"],
+            entry["customer"],
+            entry["status"],
+            entry["items"],
+            entry["notes"],
+        ]
         for entry in _customer_rows(snapshot)
     ]
     story.append(Spacer(1, 7))
@@ -687,7 +777,14 @@ def build_event_plan_pdf(*, plan_name: str, status: str, snapshot: dict[str, Any
         _build_table(
             ["Location", "Time", "Customer", "Status", "Items", "Notes"],
             handoff_rows or [["No handoff rows", "", "", "", "", ""]],
-            [1.45 * inch, 1.25 * inch, 1.45 * inch, 0.85 * inch, 2.8 * inch, 1.55 * inch],
+            [
+                1.45 * inch,
+                1.25 * inch,
+                1.45 * inch,
+                0.85 * inch,
+                2.8 * inch,
+                1.55 * inch,
+            ],
             styles,
         )
     )
@@ -696,7 +793,14 @@ def build_event_plan_pdf(*, plan_name: str, status: str, snapshot: dict[str, Any
     if status_rows:
         story.append(Spacer(1, 7))
         story.append(_paragraph("Status Breakdown", styles["section"]))
-        story.append(_build_table(["Status", "Orders", "Qty"], status_rows, [1.6 * inch, 0.6 * inch, 0.6 * inch], styles))
+        story.append(
+            _build_table(
+                ["Status", "Orders", "Qty"],
+                status_rows,
+                [1.6 * inch, 0.6 * inch, 0.6 * inch],
+                styles,
+            )
+        )
 
     doc.build(story)
     return buffer.getvalue()

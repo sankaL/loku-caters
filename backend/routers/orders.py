@@ -15,13 +15,22 @@ from schemas import (
     OrderResponse,
 )
 from services.customers import sync_customer_from_contact
-from services.pricing import PricingLineInput, effective_minimum_order_quantity, normalize_combo_deals, quote_cart
+from services.pricing import (
+    PricingLineInput,
+    effective_minimum_order_quantity,
+    normalize_combo_deals,
+    quote_cart,
+)
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
 def _get_active_event(db: Session) -> Event:
-    event = db.query(Event).filter(Event.is_active == True, Event.kind != "random_requests").first()
+    event = (
+        db.query(Event)
+        .filter(Event.is_active.is_(True), Event.kind != "random_requests")
+        .first()
+    )
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return event
@@ -38,7 +47,12 @@ def _get_event_locations(db: Session, event: Event) -> list[Location]:
     location_ids = event.location_ids or []
     if not location_ids:
         return []
-    return db.query(Location).filter(Location.id.in_(location_ids)).order_by(Location.sort_order).all()
+    return (
+        db.query(Location)
+        .filter(Location.id.in_(location_ids))
+        .order_by(Location.sort_order)
+        .all()
+    )
 
 
 def _event_items_as_dict(items: list[Item]) -> list[dict]:
@@ -48,8 +62,12 @@ def _event_items_as_dict(items: list[Item]) -> list[dict]:
             "name": item.name,
             "description": item.description,
             "price": float(item.price),
-            "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
-            "minimum_order_quantity": max(1, int(getattr(item, "minimum_order_quantity", 1) or 1)),
+            "discounted_price": float(item.discounted_price)
+            if item.discounted_price is not None
+            else None,
+            "minimum_order_quantity": max(
+                1, int(getattr(item, "minimum_order_quantity", 1) or 1)
+            ),
         }
         for item in items
     ]
@@ -57,7 +75,11 @@ def _event_items_as_dict(items: list[Item]) -> list[dict]:
 
 def _pricing_lines_from_cart_lines(lines) -> list[PricingLineInput]:
     return [
-        PricingLineInput(line_id=f"{line.item_id}:{index}", item_id=line.item_id, quantity=line.quantity)
+        PricingLineInput(
+            line_id=f"{line.item_id}:{index}",
+            item_id=line.item_id,
+            quantity=line.quantity,
+        )
         for index, line in enumerate(lines)
     ]
 
@@ -73,7 +95,9 @@ def _validate_cart_lines(
         item = item_lookup.get(line.item_id)
         if item is None:
             raise HTTPException(status_code=400, detail=f"Unknown item: {line.item_id}")
-        base_minimum_order_quantity = max(1, int(getattr(item, "minimum_order_quantity", 1) or 1))
+        base_minimum_order_quantity = max(
+            1, int(getattr(item, "minimum_order_quantity", 1) or 1)
+        )
         minimum_order_quantity = effective_minimum_order_quantity(
             item.id,
             base_minimum_order_quantity,
@@ -86,7 +110,9 @@ def _validate_cart_lines(
             )
 
 
-def _validate_location(event: Event, locations: list[Location], pickup_location: str, pickup_time_slot: str) -> Location:
+def _validate_location(
+    event: Event, locations: list[Location], pickup_location: str, pickup_time_slot: str
+) -> Location:
     location_lookup = {location.name: location for location in locations}
     location_lookup.update({location.id: location for location in locations})
     location = location_lookup.get(pickup_location)
@@ -95,7 +121,9 @@ def _validate_location(event: Event, locations: list[Location], pickup_location:
     if location.id not in (event.location_ids or []):
         raise HTTPException(status_code=400, detail="Invalid pickup_location for event")
     if pickup_time_slot not in (location.time_slots or []):
-        raise HTTPException(status_code=400, detail="Invalid pickup_time_slot for location")
+        raise HTTPException(
+            status_code=400, detail="Invalid pickup_time_slot for location"
+        )
     return location
 
 
@@ -134,9 +162,15 @@ def _build_checkout_response(
             "group_id": group_id,
             "name": persisted_orders[0].name if persisted_orders else "",
             "email": persisted_orders[0].email if persisted_orders else "",
-            "phone_number": persisted_orders[0].phone_number if persisted_orders else None,
-            "pickup_location": persisted_orders[0].pickup_location if persisted_orders else "",
-            "pickup_time_slot": persisted_orders[0].pickup_time_slot if persisted_orders else "",
+            "phone_number": persisted_orders[0].phone_number
+            if persisted_orders
+            else None,
+            "pickup_location": persisted_orders[0].pickup_location
+            if persisted_orders
+            else "",
+            "pickup_time_slot": persisted_orders[0].pickup_time_slot
+            if persisted_orders
+            else "",
             "currency": CURRENCY,
             "event_date": event.event_date,
             "etransfer_enabled": bool(event.etransfer_enabled),
@@ -152,7 +186,9 @@ def _build_checkout_response(
 
 
 def _legacy_order_response(order: Order, *, event: Event) -> OrderResponse:
-    effective_price = float(order.total_price) / order.quantity if order.quantity else 0.0
+    effective_price = (
+        float(order.total_price) / order.quantity if order.quantity else 0.0
+    )
     return OrderResponse(
         success=True,
         order_id=str(order.id),
@@ -194,7 +230,11 @@ def quote_order_cart(order_in: OrderQuoteRequest, db: Session = Depends(get_db))
             event.combo_deals or [],
             allowed_item_ids={item.id for item in event_items},
         )
-        _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items, combo_deals=normalized_combo_deals)
+        _validate_cart_lines(
+            requested_lines=pricing_lines,
+            event_items=event_items,
+            combo_deals=normalized_combo_deals,
+        )
         pricing = quote_cart(
             items=_event_items_as_dict(event_items),
             combo_deals=normalized_combo_deals,
@@ -218,14 +258,20 @@ def checkout_order(order_in: OrderCheckoutCreate, db: Session = Depends(get_db))
     pricing_lines = _pricing_lines_from_cart_lines(order_in.lines)
 
     event_locations = _get_event_locations(db, event)
-    location = _validate_location(event, event_locations, order_in.pickup_location, order_in.pickup_time_slot)
+    location = _validate_location(
+        event, event_locations, order_in.pickup_location, order_in.pickup_time_slot
+    )
 
     try:
         normalized_combo_deals = normalize_combo_deals(
             event.combo_deals or [],
             allowed_item_ids={item.id for item in event_items},
         )
-        _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items, combo_deals=normalized_combo_deals)
+        _validate_cart_lines(
+            requested_lines=pricing_lines,
+            event_items=event_items,
+            combo_deals=normalized_combo_deals,
+        )
         pricing = quote_cart(
             items=_event_items_as_dict(event_items),
             combo_deals=normalized_combo_deals,
@@ -298,11 +344,19 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="no_active_event")
 
     event_items = _get_event_items(db, event)
-    pricing_lines = [PricingLineInput(line_id=order_in.item_id, item_id=order_in.item_id, quantity=order_in.quantity)]
+    pricing_lines = [
+        PricingLineInput(
+            line_id=order_in.item_id,
+            item_id=order_in.item_id,
+            quantity=order_in.quantity,
+        )
+    ]
     _validate_cart_lines(requested_lines=pricing_lines, event_items=event_items)
 
     event_locations = _get_event_locations(db, event)
-    _validate_location(event, event_locations, order_in.pickup_location, order_in.pickup_time_slot)
+    _validate_location(
+        event, event_locations, order_in.pickup_location, order_in.pickup_time_slot
+    )
 
     try:
         pricing = quote_cart(

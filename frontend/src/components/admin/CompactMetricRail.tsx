@@ -2,9 +2,9 @@
 
 import type { CSSProperties, ReactNode } from "react";
 
-export const COMPACT_METRIC_MIN_WIDTH = 120;
-export const COMPACT_METRIC_GAP = 14;
-export const COMPACT_METRIC_RADIUS = 20;
+const COMPACT_METRIC_MIN_WIDTH = 120;
+const COMPACT_METRIC_GAP = 14;
+const COMPACT_METRIC_RADIUS = 24;
 
 interface CompactMetricRailProps {
   children: ReactNode;
@@ -76,7 +76,7 @@ export function CompactMetricCard({
       ...sharedStyle,
       background: "var(--color-forest)",
       color: "var(--color-cream)",
-      border: "1px solid rgba(255,255,255,0.08)",
+      border: "1px solid color-mix(in srgb, var(--color-cream) 8%, transparent)",
     };
 
     if (onClick) {
@@ -89,7 +89,7 @@ export function CompactMetricCard({
             ...darkStyle,
             cursor: "pointer",
             appearance: "none",
-            border: "1px solid rgba(255,255,255,0.08)",
+            border: "1px solid color-mix(in srgb, var(--color-cream) 8%, transparent)",
             ...style,
           }}
         >
@@ -105,7 +105,8 @@ export function CompactMetricCard({
     ...sharedStyle,
     background: "white",
     color: "var(--color-text)",
-    border: `2px solid ${selected ? "var(--color-sage)" : "var(--color-border)"}`,
+    border: "1px solid var(--color-border)",
+    boxShadow: selected ? "0 0 0 1px var(--color-sage)" : "none",
   };
 
   if (onClick) {
@@ -127,4 +128,26 @@ export function CompactMetricCard({
   }
 
   return <div style={{ ...lightStyle, ...style }}>{children}</div>;
+}
+
+export function CompactMetricTotalCard({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <CompactMetricCard variant="dark">
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--color-sage)" }}>{label}</p>
+      <p className="font-bold leading-none" style={{ fontSize: "clamp(24px, 2vw, 28px)", color: "var(--color-cream)", fontFamily: "var(--font-serif)" }}>{value}</p>
+    </CompactMetricCard>
+  );
+}
+
+export function CompactMetricSkeletonRail({ count }: { count: number }) {
+  return (
+    <CompactMetricRail>
+      {Array.from({ length: count }, (_, index) => (
+        <CompactMetricCard key={index} variant={index === 0 ? "dark" : "light"}>
+          <div className="h-2.5 w-3/5 animate-pulse rounded-full" style={{ background: "var(--color-border)" }} />
+          <div className="mt-3 h-6 w-2/5 animate-pulse rounded-full" style={{ background: "var(--color-border)" }} />
+        </CompactMetricCard>
+      ))}
+    </CompactMetricRail>
+  );
 }

@@ -72,7 +72,9 @@ class EventPlanningServiceTests(unittest.TestCase):
         self.assertEqual(totals["ordered_quantity"], 10)
         self.assertEqual(totals["planned_quantity"], 10)
         self.assertEqual(totals["issue_count"], 0)
-        self.assertEqual(snapshot["status_breakdown"][OrderStatus.PENDING]["quantity"], 1)
+        self.assertEqual(
+            snapshot["status_breakdown"][OrderStatus.PENDING]["quantity"], 1
+        )
         self.assertNotIn(OrderStatus.CANCELLED, snapshot["status_breakdown"])
 
     def test_over_planning_warns_without_blocking_ready(self):
@@ -98,7 +100,9 @@ class EventPlanningServiceTests(unittest.TestCase):
             assert_plan_can_mark_ready(snapshot)
 
     def test_refresh_preserves_split_rows_and_adds_new_quantity(self):
-        original = build_event_plan_snapshot(make_event(), [make_order(id="order-1", quantity=4)])
+        original = build_event_plan_snapshot(
+            make_event(), [make_order(id="order-1", quantity=4)]
+        )
         original["planned_rows"] = [
             {
                 **original["planned_rows"][0],
@@ -117,11 +121,20 @@ class EventPlanningServiceTests(unittest.TestCase):
 
         refreshed = build_event_plan_snapshot(
             make_event(),
-            [make_order(id="order-1", quantity=6, updated_at=datetime(2026, 2, 21, 12, 0, tzinfo=timezone.utc))],
+            [
+                make_order(
+                    id="order-1",
+                    quantity=6,
+                    updated_at=datetime(2026, 2, 21, 12, 0, tzinfo=timezone.utc),
+                )
+            ],
             previous_snapshot=original,
         )
 
-        quantities = {row["planned_item_name"]: row["quantity"] for row in refreshed["planned_rows"]}
+        quantities = {
+            row["planned_item_name"]: row["quantity"]
+            for row in refreshed["planned_rows"]
+        }
 
         self.assertEqual(quantities["Lamprais"], 3)
         self.assertEqual(quantities["Vegetarian Lamprais"], 1)
@@ -130,7 +143,9 @@ class EventPlanningServiceTests(unittest.TestCase):
         self.assertEqual(refreshed["totals"]["issue_count"], 0)
 
     def test_refresh_flags_conflict_when_order_quantity_decreases(self):
-        original = build_event_plan_snapshot(make_event(), [make_order(id="order-1", quantity=4)])
+        original = build_event_plan_snapshot(
+            make_event(), [make_order(id="order-1", quantity=4)]
+        )
         original["planned_rows"][0]["quantity"] = 4
 
         refreshed = build_event_plan_snapshot(
@@ -157,7 +172,11 @@ class EventPlanningServiceTests(unittest.TestCase):
             previous_snapshot=original,
         )
 
-        removed_rows = [row for row in refreshed["planned_rows"] if row.get("row_state") == "removed"]
+        removed_rows = [
+            row
+            for row in refreshed["planned_rows"]
+            if row.get("row_state") == "removed"
+        ]
 
         self.assertEqual(len(removed_rows), 1)
         self.assertEqual(removed_rows[0]["source_order_id"], "removed")
@@ -165,7 +184,9 @@ class EventPlanningServiceTests(unittest.TestCase):
         self.assertEqual(refreshed["totals"]["ordered_quantity"], 2)
 
     def test_refresh_preserves_user_removed_rows(self):
-        original = build_event_plan_snapshot(make_event(), [make_order(id="order-1", quantity=2)])
+        original = build_event_plan_snapshot(
+            make_event(), [make_order(id="order-1", quantity=2)]
+        )
         original["planned_rows"][0]["row_state"] = "removed"
         original["planned_rows"][0]["flags"] = ["user_removed"]
 
@@ -175,8 +196,16 @@ class EventPlanningServiceTests(unittest.TestCase):
             previous_snapshot=original,
         )
 
-        active_rows = [row for row in refreshed["planned_rows"] if row.get("row_state") != "removed"]
-        removed_rows = [row for row in refreshed["planned_rows"] if row.get("row_state") == "removed"]
+        active_rows = [
+            row
+            for row in refreshed["planned_rows"]
+            if row.get("row_state") != "removed"
+        ]
+        removed_rows = [
+            row
+            for row in refreshed["planned_rows"]
+            if row.get("row_state") == "removed"
+        ]
 
         self.assertEqual(active_rows, [])
         self.assertEqual(len(removed_rows), 1)
@@ -192,7 +221,9 @@ class EventPlanningServiceTests(unittest.TestCase):
                 make_order(id="removed", quantity=3),
             ],
         )
-        current_fingerprint = build_source_order_fingerprint([snapshot["order_lines"][0]])
+        current_fingerprint = build_source_order_fingerprint(
+            [snapshot["order_lines"][0]]
+        )
 
         self.assertNotEqual(snapshot["source_fingerprint"], current_fingerprint)
 
@@ -202,13 +233,19 @@ class EventPlanningServiceTests(unittest.TestCase):
 
         self.assertEqual(duplicate["source_event"], snapshot["source_event"])
         self.assertEqual(duplicate["refreshed_at"], snapshot["refreshed_at"])
-        self.assertEqual(duplicate["source_fingerprint"], snapshot["source_fingerprint"])
+        self.assertEqual(
+            duplicate["source_fingerprint"], snapshot["source_fingerprint"]
+        )
 
     def test_build_event_plan_pdf_returns_pdf_bytes_without_contact_fields(self):
-        snapshot = build_event_plan_snapshot(make_event(), [make_order(name="Anura Perera")])
+        snapshot = build_event_plan_snapshot(
+            make_event(), [make_order(name="Anura Perera")]
+        )
         snapshot["plan_notes"] = "Pack Markham trays first."
 
-        pdf = build_event_plan_pdf(plan_name="Kitchen Plan", status="ready", snapshot=snapshot)
+        pdf = build_event_plan_pdf(
+            plan_name="Kitchen Plan", status="ready", snapshot=snapshot
+        )
 
         self.assertTrue(pdf.startswith(b"%PDF"))
         self.assertGreater(len(pdf), 1000)
@@ -227,7 +264,9 @@ class EventPlanningServiceTests(unittest.TestCase):
         ]
         summarize_snapshot(snapshot)
 
-        pdf = build_event_plan_pdf(plan_name="Dense Plan", status="ready", snapshot=snapshot)
+        pdf = build_event_plan_pdf(
+            plan_name="Dense Plan", status="ready", snapshot=snapshot
+        )
 
         self.assertTrue(pdf.startswith(b"%PDF"))
 

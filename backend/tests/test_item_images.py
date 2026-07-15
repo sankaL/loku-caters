@@ -44,7 +44,9 @@ class FakeSession:
 
 class ItemImageTests(unittest.TestCase):
     def test_menu_item_image_key_validation(self):
-        self.assertEqual(_validate_menu_item_image_key(" menu-item-lamprais "), "menu-item-lamprais")
+        self.assertEqual(
+            _validate_menu_item_image_key(" menu-item-lamprais "), "menu-item-lamprais"
+        )
         self.assertIsNone(_validate_menu_item_image_key(""))
         with self.assertRaises(HTTPException) as exc:
             _validate_menu_item_image_key("tooltip-lamprais-how-its-made")
@@ -65,7 +67,9 @@ class ItemImageTests(unittest.TestCase):
         payload = _item_dict(item)
 
         self.assertEqual(payload["image_key"], "menu-item-lamprais")
-        self.assertEqual(payload["image_path"], "/assets/food/client-menu/lamprais.webp")
+        self.assertEqual(
+            payload["image_path"], "/assets/food/client-menu/lamprais.webp"
+        )
 
     def test_public_config_items_include_image_key_and_path(self):
         item = SimpleNamespace(
@@ -106,10 +110,15 @@ class ItemImageTests(unittest.TestCase):
             is_active=True,
         )
 
-        payload = _build_config_from_event(FakeSession(items=[item], locations=[location]), event)
+        payload = _build_config_from_event(
+            FakeSession(items=[item], locations=[location]), event
+        )
 
         self.assertEqual(payload["items"][0]["image_key"], "menu-item-lamprais")
-        self.assertEqual(payload["items"][0]["image_path"], resolve_event_image_path("menu-item-lamprais"))
+        self.assertEqual(
+            payload["items"][0]["image_path"],
+            resolve_event_image_path("menu-item-lamprais"),
+        )
 
     def test_public_config_items_follow_event_item_id_order(self):
         first = SimpleNamespace(
@@ -163,9 +172,13 @@ class ItemImageTests(unittest.TestCase):
             is_active=True,
         )
 
-        payload = _build_config_from_event(FakeSession(items=[first, second, third]), event)
+        payload = _build_config_from_event(
+            FakeSession(items=[first, second, third]), event
+        )
 
-        self.assertEqual([item["id"] for item in payload["items"]], ["item-3", "item-1", "item-2"])
+        self.assertEqual(
+            [item["id"] for item in payload["items"]], ["item-3", "item-1", "item-2"]
+        )
 
     def test_random_requests_items_keep_global_sort_order(self):
         first = SimpleNamespace(
@@ -211,7 +224,9 @@ class ItemImageTests(unittest.TestCase):
 
         payload = _build_config_from_event(FakeSession(items=[second, first]), event)
 
-        self.assertEqual([item["id"] for item in payload["items"]], ["item-1", "item-2"])
+        self.assertEqual(
+            [item["id"] for item in payload["items"]], ["item-1", "item-2"]
+        )
 
     def test_public_config_duplicate_item_ids_use_first_position(self):
         first = SimpleNamespace(
@@ -257,7 +272,9 @@ class ItemImageTests(unittest.TestCase):
 
         payload = _build_config_from_event(FakeSession(items=[first, second]), event)
 
-        self.assertEqual([item["id"] for item in payload["items"]], ["item-2", "item-1"])
+        self.assertEqual(
+            [item["id"] for item in payload["items"]], ["item-2", "item-1"]
+        )
 
 
 if __name__ == "__main__":

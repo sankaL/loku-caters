@@ -41,7 +41,11 @@ class FakeQuery:
         return getattr(row, key, None) == expected
 
     def _filtered(self):
-        return [row for row in self.rows if all(self._matches(row, criterion) for criterion in self.criteria)]
+        return [
+            row
+            for row in self.rows
+            if all(self._matches(row, criterion) for criterion in self.criteria)
+        ]
 
     def first(self):
         rows = self._filtered()
@@ -110,7 +114,9 @@ class RacingSettingsSession(FakeSession):
 
     def commit(self):
         self.commit_count += 1
-        raise IntegrityError("insert invoice settings", {}, Exception("duplicate singleton"))
+        raise IntegrityError(
+            "insert invoice settings", {}, Exception("duplicate singleton")
+        )
 
     def rollback(self):
         self.rollback_count += 1
@@ -172,7 +178,9 @@ class InvoiceRouteTests(unittest.TestCase):
             yield self.session
 
         app.dependency_overrides[get_db] = override_get_db
-        app.dependency_overrides[invoices.verify_admin_token] = lambda: {"sub": "dev-admin"}
+        app.dependency_overrides[invoices.verify_admin_token] = lambda: {
+            "sub": "dev-admin"
+        }
 
     def tearDown(self):
         app.dependency_overrides.clear()
@@ -208,7 +216,9 @@ class InvoiceRouteTests(unittest.TestCase):
         )
         self.assertEqual(rejected.status_code, 422)
 
-        with patch("routers.invoices.next_invoice_number", return_value=("INV-2026-0001", 1)):
+        with patch(
+            "routers.invoices.next_invoice_number", return_value=("INV-2026-0001", 1)
+        ):
             created = self.client.post(
                 "/api/admin/invoices",
                 json={
@@ -226,7 +236,9 @@ class InvoiceRouteTests(unittest.TestCase):
         self.assertFalse(invoice["payment"]["paid"])
         self.assertEqual(invoice["line_items"][0]["subtotal"], 32.0)
 
-        with patch("routers.invoices.next_invoice_number", return_value=("INV-2026-0002", 2)):
+        with patch(
+            "routers.invoices.next_invoice_number", return_value=("INV-2026-0002", 2)
+        ):
             second = self.client.post(
                 "/api/admin/invoices",
                 json={"source_bundle_id": self.order.id, "issue_date": "2026-06-30"},
@@ -238,7 +250,9 @@ class InvoiceRouteTests(unittest.TestCase):
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 2)
 
-        filtered = self.client.get("/api/admin/invoices", params={"source_bundle_id": self.order.id})
+        filtered = self.client.get(
+            "/api/admin/invoices", params={"source_bundle_id": self.order.id}
+        )
         self.assertEqual(filtered.status_code, 200)
         self.assertEqual(len(filtered.json()), 2)
 
@@ -283,7 +297,9 @@ class InvoiceRouteTests(unittest.TestCase):
         deleted = self.client.delete(f"/api/admin/invoices/{invoice['id']}")
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(deleted.json(), {"success": True})
-        self.assertEqual(self.client.get(f"/api/admin/invoices/{invoice['id']}").status_code, 404)
+        self.assertEqual(
+            self.client.get(f"/api/admin/invoices/{invoice['id']}").status_code, 404
+        )
 
     def test_standalone_invoice_requires_lines_and_recalculates_totals(self):
         missing_lines = self.client.post(
@@ -292,13 +308,21 @@ class InvoiceRouteTests(unittest.TestCase):
         )
         self.assertEqual(missing_lines.status_code, 422)
 
-        with patch("routers.invoices.next_invoice_number", return_value=("INV-2026-0003", 3)):
+        with patch(
+            "routers.invoices.next_invoice_number", return_value=("INV-2026-0003", 3)
+        ):
             created = self.client.post(
                 "/api/admin/invoices",
                 json={
                     "issue_date": "2026-06-30",
                     "customer_name": "Standalone Customer",
-                    "line_items": [{"description": "Catering service", "quantity": 4, "unit_price": 9.99}],
+                    "line_items": [
+                        {
+                            "description": "Catering service",
+                            "quantity": 4,
+                            "unit_price": 9.99,
+                        }
+                    ],
                     "discount_total": 4.96,
                     "paid": True,
                     "payment_method": "etransfer",

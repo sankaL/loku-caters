@@ -24,7 +24,9 @@ def iso_now() -> str:
 
 
 def make_default_plan_name(event: Any, created_at: Optional[datetime] = None) -> str:
-    timestamp = (created_at or utc_now()).astimezone(timezone.utc).strftime("%b %d %H:%M UTC")
+    timestamp = (
+        (created_at or utc_now()).astimezone(timezone.utc).strftime("%b %d %H:%M UTC")
+    )
     return f"{getattr(event, 'name', 'Event')} Plan - {timestamp}"
 
 
@@ -59,7 +61,11 @@ def _order_sort_key(order: Any) -> tuple[str, str]:
 
 def _included_orders(orders: Iterable[Any]) -> list[Any]:
     return sorted(
-        [order for order in orders if getattr(order, "status", None) != OrderStatus.CANCELLED],
+        [
+            order
+            for order in orders
+            if getattr(order, "status", None) != OrderStatus.CANCELLED
+        ],
         key=_order_sort_key,
     )
 
@@ -90,11 +96,15 @@ def _order_line_snapshot(order: Any) -> dict[str, Any]:
         "pickup_date": _iso(getattr(order, "pickup_date", None)),
         "status": getattr(order, "status", OrderStatus.PENDING),
         "created_at": _iso(getattr(order, "created_at", None)),
-        "updated_at": _iso(getattr(order, "updated_at", None) or getattr(order, "created_at", None)),
+        "updated_at": _iso(
+            getattr(order, "updated_at", None) or getattr(order, "created_at", None)
+        ),
     }
 
 
-def build_source_order_fingerprint(order_lines: Iterable[dict[str, Any]]) -> dict[str, Any]:
+def build_source_order_fingerprint(
+    order_lines: Iterable[dict[str, Any]],
+) -> dict[str, Any]:
     rows = []
     for line in order_lines:
         rows.append(
@@ -152,10 +162,16 @@ def _unassigned_planned_row(line: dict[str, Any], quantity: int) -> dict[str, An
     return row
 
 
-def _normalize_preserved_row(row: dict[str, Any], line: dict[str, Any]) -> dict[str, Any]:
+def _normalize_preserved_row(
+    row: dict[str, Any], line: dict[str, Any]
+) -> dict[str, Any]:
     next_row = deepcopy(row)
     flags = set(next_row.get("flags", []))
-    next_row["row_state"] = "removed" if row.get("row_state") == "removed" and "user_removed" in flags else "active"
+    next_row["row_state"] = (
+        "removed"
+        if row.get("row_state") == "removed" and "user_removed" in flags
+        else "active"
+    )
     next_row["source_order_id"] = line["id"]
     next_row["source_bundle_id"] = line["bundle_id"]
     next_row["customer_name"] = line["customer_name"]
@@ -173,14 +189,18 @@ def _normalize_preserved_row(row: dict[str, Any], line: dict[str, Any]) -> dict[
     return next_row
 
 
-def _group_preserved_rows(previous_snapshot: Optional[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+def _group_preserved_rows(
+    previous_snapshot: Optional[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
     grouped: dict[str, list[dict[str, Any]]] = {}
     if not previous_snapshot:
         return grouped
     for row in previous_snapshot.get("planned_rows", []):
         if row.get("row_type") == "extra":
             continue
-        if row.get("row_state") == "removed" and "user_removed" not in set(row.get("flags", [])):
+        if row.get("row_state") == "removed" and "user_removed" not in set(
+            row.get("flags", [])
+        ):
             continue
         source_order_id = row.get("source_order_id")
         if source_order_id:
@@ -188,7 +208,9 @@ def _group_preserved_rows(previous_snapshot: Optional[dict[str, Any]]) -> dict[s
     return grouped
 
 
-def _preserve_extra_rows(previous_snapshot: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
+def _preserve_extra_rows(
+    previous_snapshot: Optional[dict[str, Any]],
+) -> list[dict[str, Any]]:
     if not previous_snapshot:
         return []
     rows: list[dict[str, Any]] = []
@@ -204,7 +226,9 @@ def _preserve_extra_rows(previous_snapshot: Optional[dict[str, Any]]) -> list[di
     return rows
 
 
-def _removed_rows(previous_snapshot: Optional[dict[str, Any]], active_order_ids: set[str]) -> list[dict[str, Any]]:
+def _removed_rows(
+    previous_snapshot: Optional[dict[str, Any]], active_order_ids: set[str]
+) -> list[dict[str, Any]]:
     if not previous_snapshot:
         return []
     rows: list[dict[str, Any]] = []
@@ -223,11 +247,15 @@ def _removed_rows(previous_snapshot: Optional[dict[str, Any]], active_order_ids:
     return rows
 
 
-def _build_bundles(order_lines: list[dict[str, Any]], previous_snapshot: Optional[dict[str, Any]]) -> list[dict[str, Any]]:
+def _build_bundles(
+    order_lines: list[dict[str, Any]], previous_snapshot: Optional[dict[str, Any]]
+) -> list[dict[str, Any]]:
     order_notes: dict[str, str] = {}
     if previous_snapshot:
         for bundle in previous_snapshot.get("bundles", []):
-            order_notes[str(bundle.get("bundle_id"))] = str(bundle.get("order_notes") or "")
+            order_notes[str(bundle.get("bundle_id"))] = str(
+                bundle.get("order_notes") or ""
+            )
 
     grouped: dict[str, list[dict[str, Any]]] = {}
     for line in order_lines:
@@ -269,12 +297,17 @@ def build_event_plan_snapshot(
     planned_rows: list[dict[str, Any]] = []
 
     for line in order_lines:
-        preserved = [_normalize_preserved_row(row, line) for row in previous_rows.get(line["id"], [])]
+        preserved = [
+            _normalize_preserved_row(row, line)
+            for row in previous_rows.get(line["id"], [])
+        ]
         if not preserved:
             planned_rows.append(_default_planned_row(line))
             continue
 
-        active_preserved = [row for row in preserved if row.get("row_state") != "removed"]
+        active_preserved = [
+            row for row in preserved if row.get("row_state") != "removed"
+        ]
         planned_total = sum(_quantity(row.get("quantity")) for row in active_preserved)
         if active_preserved and planned_total > line["quantity"]:
             flags = set(active_preserved[0].get("flags", []))
@@ -282,7 +315,9 @@ def build_event_plan_snapshot(
             active_preserved[0]["flags"] = sorted(flags)
         planned_rows.extend(preserved)
         if active_preserved and planned_total < line["quantity"]:
-            planned_rows.append(_unassigned_planned_row(line, line["quantity"] - planned_total))
+            planned_rows.append(
+                _unassigned_planned_row(line, line["quantity"] - planned_total)
+            )
 
     planned_rows.extend(_preserve_extra_rows(previous_snapshot))
     removed = _removed_rows(previous_snapshot, active_order_ids)
@@ -310,12 +345,19 @@ def build_event_plan_snapshot(
 
 def _active_planned_rows(snapshot: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        row for row in snapshot.get("planned_rows", [])
+        row
+        for row in snapshot.get("planned_rows", [])
         if row.get("row_state", "active") == "active"
     ]
 
 
-def _issue(code: str, message: str, *, source_order_id: Optional[str] = None, row_id: Optional[str] = None) -> dict[str, Any]:
+def _issue(
+    code: str,
+    message: str,
+    *,
+    source_order_id: Optional[str] = None,
+    row_id: Optional[str] = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {"code": code, "message": message}
     if source_order_id is not None:
         result["source_order_id"] = source_order_id
@@ -339,27 +381,79 @@ def apply_plan_metrics(snapshot: dict[str, Any]) -> dict[str, int]:
         row["quantity"] = quantity
         row_id = str(row.get("id") or "")
         if quantity <= 0:
-            issues.append(_issue("invalid_quantity", "Planned row quantity must be greater than zero.", row_id=row_id))
+            issues.append(
+                _issue(
+                    "invalid_quantity",
+                    "Planned row quantity must be greater than zero.",
+                    row_id=row_id,
+                )
+            )
         if not str(row.get("planned_item_name") or "").strip():
-            issues.append(_issue("missing_item", "Planned row is missing an item name.", row_id=row_id))
+            issues.append(
+                _issue(
+                    "missing_item",
+                    "Planned row is missing an item name.",
+                    row_id=row_id,
+                )
+            )
         if not str(row.get("pickup_location") or "").strip():
-            issues.append(_issue("missing_pickup_location", "Planned row is missing a pickup location.", row_id=row_id))
+            issues.append(
+                _issue(
+                    "missing_pickup_location",
+                    "Planned row is missing a pickup location.",
+                    row_id=row_id,
+                )
+            )
         if not str(row.get("pickup_time_slot") or "").strip():
-            issues.append(_issue("missing_pickup_time_slot", "Planned row is missing a time slot.", row_id=row_id))
+            issues.append(
+                _issue(
+                    "missing_pickup_time_slot",
+                    "Planned row is missing a time slot.",
+                    row_id=row_id,
+                )
+            )
         if "refresh_conflict" in set(row.get("flags", [])):
-            issues.append(_issue("refresh_conflict", "A refreshed order quantity is lower than the preserved planned rows.", row_id=row_id))
+            issues.append(
+                _issue(
+                    "refresh_conflict",
+                    "A refreshed order quantity is lower than the preserved planned rows.",
+                    row_id=row_id,
+                )
+            )
         source_order_id = row.get("source_order_id")
         if source_order_id:
-            planned_by_order[str(source_order_id)] = planned_by_order.get(str(source_order_id), 0) + quantity
+            planned_by_order[str(source_order_id)] = (
+                planned_by_order.get(str(source_order_id), 0) + quantity
+            )
         if row.get("row_type") == "extra":
-            warnings.append(_issue("extra_row", "Extra planned row is not tied to a source order.", row_id=row_id))
+            warnings.append(
+                _issue(
+                    "extra_row",
+                    "Extra planned row is not tied to a source order.",
+                    row_id=row_id,
+                )
+            )
         if not row.get("planned_item_id"):
-            warnings.append(_issue("custom_item", "Planned row uses a custom or unassigned item name.", row_id=row_id))
+            warnings.append(
+                _issue(
+                    "custom_item",
+                    "Planned row uses a custom or unassigned item name.",
+                    row_id=row_id,
+                )
+            )
         if "refresh_new_quantity" in set(row.get("flags", [])):
-            warnings.append(_issue("refresh_new_quantity", "Refresh added new quantity that needs review.", row_id=row_id))
+            warnings.append(
+                _issue(
+                    "refresh_new_quantity",
+                    "Refresh added new quantity that needs review.",
+                    row_id=row_id,
+                )
+            )
 
     if not order_lines:
-        issues.append(_issue("empty_source", "The source event has no non-cancelled orders."))
+        issues.append(
+            _issue("empty_source", "The source event has no non-cancelled orders.")
+        )
 
     for line in order_lines:
         source_order_id = str(line.get("id"))

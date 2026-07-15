@@ -122,7 +122,7 @@ export const PLAN_STATUS_LABELS: Record<string, string> = {
   archived: "Archived",
 };
 
-export const ORDER_STATUS_LABELS: Record<string, string> = {
+const ORDER_STATUS_LABELS: Record<string, string> = {
   pending: "Pending",
   confirmed: "Confirmed",
   picked_up: "Picked Up",

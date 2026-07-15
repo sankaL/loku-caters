@@ -152,7 +152,9 @@ class ComboDealModel(BaseModel):
         for group in normalized_groups:
             for item_id in group.item_ids:
                 if item_id in requirement_item_ids:
-                    raise ValueError("Combo deal cannot include the same item in multiple groups")
+                    raise ValueError(
+                        "Combo deal cannot include the same item in multiple groups"
+                    )
                 requirement_item_ids.append(item_id)
 
         if self.discount.applies_to == "item":
@@ -161,15 +163,23 @@ class ComboDealModel(BaseModel):
             if self.discount.target_item_id not in requirement_item_ids:
                 raise ValueError("target_item_id must be one of the combo requirements")
             target_group = next(
-                (group for group in normalized_groups if self.discount.target_item_id in group.item_ids),
+                (
+                    group
+                    for group in normalized_groups
+                    if self.discount.target_item_id in group.item_ids
+                ),
                 None,
             )
-            self.discount.target_group_id = target_group.id if target_group is not None else None
+            self.discount.target_group_id = (
+                target_group.id if target_group is not None else None
+            )
         elif self.discount.applies_to == "group":
             if not self.discount.target_group_id:
                 raise ValueError("target_group_id is required when applies_to is group")
             if self.discount.target_group_id not in group_ids:
-                raise ValueError("target_group_id must be one of the combo requirement groups")
+                raise ValueError(
+                    "target_group_id must be one of the combo requirement groups"
+                )
             self.discount.target_item_id = None
         else:
             self.discount.target_item_id = None
@@ -179,9 +189,12 @@ class ComboDealModel(BaseModel):
         return self
 
 
+MAX_CART_TOTAL_QUANTITY = 250
+
+
 class CartLine(BaseModel):
-    item_id: str
-    quantity: int
+    item_id: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(ge=1, le=MAX_CART_TOTAL_QUANTITY)
 
     @field_validator("item_id")
     @classmethod
@@ -210,16 +223,18 @@ def _validate_unique_cart_line_items(lines: list[CartLine]) -> list[CartLine]:
     if duplicate_item_ids:
         duplicates = ", ".join(sorted(duplicate_item_ids))
         raise ValueError(f"Duplicate cart lines are not allowed: {duplicates}")
+    if sum(line.quantity for line in lines) > MAX_CART_TOTAL_QUANTITY:
+        raise ValueError(f"Cart quantity cannot exceed {MAX_CART_TOTAL_QUANTITY}")
     return lines
 
 
 class OrderCreate(BaseModel):
-    name: str
-    item_id: str
-    quantity: int
-    pickup_location: str
-    pickup_time_slot: str
-    phone_number: Optional[str] = None
+    name: str = Field(min_length=1, max_length=200)
+    item_id: str = Field(min_length=1, max_length=100)
+    quantity: int = Field(ge=1, le=MAX_CART_TOTAL_QUANTITY)
+    pickup_location: str = Field(min_length=1, max_length=200)
+    pickup_time_slot: str = Field(min_length=1, max_length=100)
+    phone_number: Optional[str] = Field(default=None, max_length=50)
     email: EmailStr
 
     @field_validator("quantity")
@@ -253,7 +268,7 @@ class OrderResponse(BaseModel):
 
 
 class OrderQuoteRequest(BaseModel):
-    lines: list[CartLine] = Field(default_factory=list)
+    lines: list[CartLine] = Field(default_factory=list, max_length=50)
 
     @model_validator(mode="after")
     def validate_quote_lines(self) -> "OrderQuoteRequest":
@@ -262,12 +277,12 @@ class OrderQuoteRequest(BaseModel):
 
 
 class OrderCheckoutCreate(BaseModel):
-    name: str
-    pickup_location: str
-    pickup_time_slot: str
-    phone_number: Optional[str] = None
+    name: str = Field(min_length=1, max_length=200)
+    pickup_location: str = Field(min_length=1, max_length=200)
+    pickup_time_slot: str = Field(min_length=1, max_length=100)
+    phone_number: Optional[str] = Field(default=None, max_length=50)
     email: EmailStr
-    lines: list[CartLine] = Field(default_factory=list)
+    lines: list[CartLine] = Field(default_factory=list, max_length=50)
 
     @field_validator("name", "pickup_location", "pickup_time_slot")
     @classmethod
@@ -505,7 +520,13 @@ class EventBase(BaseModel):
         stripped = str(v).strip()
         return stripped or None
 
-    @field_validator("promo_details", "tooltip_header", "tooltip_body", "tooltip_image_key", "hero_side_image_key")
+    @field_validator(
+        "promo_details",
+        "tooltip_header",
+        "tooltip_body",
+        "tooltip_image_key",
+        "hero_side_image_key",
+    )
     @classmethod
     def optional_nullable_fields(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
@@ -527,7 +548,9 @@ class EventBase(BaseModel):
 
         if self.etransfer_enabled:
             if not self.etransfer_email:
-                raise ValueError("etransfer_email is required when e-transfer is enabled")
+                raise ValueError(
+                    "etransfer_email is required when e-transfer is enabled"
+                )
         else:
             self.etransfer_email = None
         return self
@@ -616,14 +639,14 @@ LEGACY_CONTACT_SUBJECT_TO_TYPE = {
 
 
 class FeedbackCreate(BaseModel):
-    origin: Optional[str] = None
-    feedback_type: Optional[str] = None
-    order_id: Optional[str] = None
-    name: Optional[str] = None
-    contact: Optional[str] = None
-    reason: Optional[str] = None
-    other_details: Optional[str] = None
-    message: Optional[str] = None
+    origin: Optional[str] = Field(default=None, max_length=50)
+    feedback_type: Optional[str] = Field(default=None, max_length=50)
+    order_id: Optional[str] = Field(default=None, max_length=100)
+    name: Optional[str] = Field(default=None, max_length=200)
+    contact: Optional[str] = Field(default=None, max_length=320)
+    reason: Optional[str] = Field(default=None, max_length=100)
+    other_details: Optional[str] = Field(default=None, max_length=2000)
+    message: Optional[str] = Field(default=None, max_length=5000)
     rating: Optional[int] = None
 
     @field_validator("origin", "feedback_type", mode="before")
@@ -634,7 +657,9 @@ class FeedbackCreate(BaseModel):
         stripped = str(v).strip().lower()
         return stripped or None
 
-    @field_validator("order_id", "name", "contact", "other_details", "message", mode="before")
+    @field_validator(
+        "order_id", "name", "contact", "other_details", "message", mode="before"
+    )
     @classmethod
     def normalize_optional_text_fields(cls, v: Optional[str]) -> Optional[str]:
         if v is None:
@@ -659,7 +684,11 @@ class FeedbackCreate(BaseModel):
     @field_validator("reason")
     @classmethod
     def reason_must_be_valid(cls, v: Optional[str]) -> Optional[str]:
-        if v is not None and v not in FEEDBACK_REASONS and v not in LEGACY_CONTACT_REASONS:
+        if (
+            v is not None
+            and v not in FEEDBACK_REASONS
+            and v not in LEGACY_CONTACT_REASONS
+        ):
             raise ValueError("Invalid feedback reason")
         return v
 
@@ -703,8 +732,8 @@ class FeedbackReviewVisibilityUpdate(BaseModel):
 
 
 class CustomerEventReminderRequest(BaseModel):
-    location_ids: list[str]
-    item_ids: list[str]
+    location_ids: list[str] = Field(max_length=500)
+    item_ids: list[str] = Field(max_length=500)
 
     @field_validator("location_ids", "item_ids")
     @classmethod
@@ -715,7 +744,9 @@ class CustomerEventReminderRequest(BaseModel):
         return list(dict.fromkeys(cleaned))
 
 
-def parse_legacy_contact_subject(message: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+def parse_legacy_contact_subject(
+    message: Optional[str],
+) -> tuple[Optional[str], Optional[str]]:
     if not message:
         return None, message
 
@@ -727,7 +758,7 @@ def parse_legacy_contact_subject(message: Optional[str]) -> tuple[Optional[str],
     if not first_line.startswith("Subject:"):
         return None, message
 
-    subject = first_line[len("Subject:"):].strip().lower()
+    subject = first_line[len("Subject:") :].strip().lower()
     feedback_type = LEGACY_CONTACT_SUBJECT_TO_TYPE.get(subject, "other")
 
     remaining_lines = lines[1:]
@@ -828,15 +859,15 @@ def normalize_feedback_create(
 
 
 class CateringRequestCreate(BaseModel):
-    first_name: str
-    last_name: str
+    first_name: str = Field(min_length=1, max_length=100)
+    last_name: str = Field(min_length=1, max_length=100)
     email: EmailStr
-    phone_number: Optional[str] = None
-    event_date: str
-    guest_count: int
-    event_type: str
-    budget_range: Optional[str] = None
-    special_requests: Optional[str] = None
+    phone_number: Optional[str] = Field(default=None, max_length=50)
+    event_date: str = Field(min_length=1, max_length=50)
+    guest_count: int = Field(ge=1, le=100_000)
+    event_type: str = Field(min_length=1, max_length=100)
+    budget_range: Optional[str] = Field(default=None, max_length=100)
+    special_requests: Optional[str] = Field(default=None, max_length=5000)
 
     @field_validator("guest_count")
     @classmethod
@@ -873,7 +904,7 @@ class CateringRequestStatusUpdate(BaseModel):
 
 
 class CateringRequestCommentCreate(BaseModel):
-    comment: str
+    comment: str = Field(min_length=1, max_length=5000)
 
     @field_validator("comment")
     @classmethod

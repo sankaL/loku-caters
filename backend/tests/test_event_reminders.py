@@ -11,7 +11,11 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from event_config import NoActiveEventError  # noqa: E402
 from routers.admin import admin_send_customer_event_reminder  # noqa: E402
-from schemas import CustomerEventReminderRequest, FeedbackCreate, normalize_feedback_create  # noqa: E402
+from schemas import (
+    CustomerEventReminderRequest,
+    FeedbackCreate,
+    normalize_feedback_create,
+)  # noqa: E402
 from services.email import send_event_reminder_email  # noqa: E402
 
 
@@ -87,10 +91,15 @@ class EventReminderTests(unittest.TestCase):
         self.assertEqual(normalized["rating"], 5)
 
     def test_event_reminder_endpoint_rejects_when_no_active_event(self):
-        db = FakeSession(SimpleNamespace(id="customer-1", name="A", email="a@example.com"))
+        db = FakeSession(
+            SimpleNamespace(id="customer-1", name="A", email="a@example.com")
+        )
         body = CustomerEventReminderRequest(location_ids=["loc-1"], item_ids=["item-1"])
 
-        with patch("routers.admin.get_config_from_db", side_effect=NoActiveEventError("No active event")):
+        with patch(
+            "routers.admin.get_config_from_db",
+            side_effect=NoActiveEventError("No active event"),
+        ):
             with self.assertRaises(Exception) as exc_context:
                 admin_send_customer_event_reminder("customer-1", body, db, {})
 
@@ -111,8 +120,12 @@ class EventReminderTests(unittest.TestCase):
         )
 
     def test_event_reminder_endpoint_validates_selected_ids_against_active_event(self):
-        db = FakeSession(SimpleNamespace(id="customer-1", name="A", email="a@example.com"))
-        body = CustomerEventReminderRequest(location_ids=["missing-loc"], item_ids=["item-1"])
+        db = FakeSession(
+            SimpleNamespace(id="customer-1", name="A", email="a@example.com")
+        )
+        body = CustomerEventReminderRequest(
+            location_ids=["missing-loc"], item_ids=["item-1"]
+        )
         active_config = {
             "event": {"date": "April 2, 2026"},
             "locations": [{"id": "loc-1", "name": "Markham"}],
@@ -126,7 +139,9 @@ class EventReminderTests(unittest.TestCase):
         self.assertEqual(getattr(exc_context.exception, "status_code", None), 400)
 
     def test_event_reminder_endpoint_sends_expected_payload(self):
-        db = FakeSession(SimpleNamespace(id="customer-1", name="A", email="a@example.com"))
+        db = FakeSession(
+            SimpleNamespace(id="customer-1", name="A", email="a@example.com")
+        )
         body = CustomerEventReminderRequest(location_ids=["loc-1"], item_ids=["item-1"])
         active_config = {
             "event": {"id": 42, "date": "April 2, 2026"},

@@ -17,15 +17,25 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("events", sa.Column("etransfer_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+    op.add_column(
+        "events",
+        sa.Column(
+            "etransfer_enabled",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("false"),
+        ),
+    )
     op.add_column("events", sa.Column("etransfer_email", sa.Text(), nullable=True))
 
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         UPDATE events
         SET
             etransfer_enabled = true,
             etransfer_email = 'jlokuliyana@yahoo.com'
-    """))
+    """)
+    )
 
 
 def downgrade() -> None:

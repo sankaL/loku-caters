@@ -19,7 +19,8 @@ depends_on = None
 def upgrade() -> None:
     # For each item with a non-UUID id, generate a new UUID and cascade
     # the change to events.item_ids and orders.item_id.
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         DO $$
         DECLARE
             r RECORD;
@@ -48,10 +49,12 @@ def upgrade() -> None:
                 UPDATE items SET id = new_id WHERE id = r.id;
             END LOOP;
         END $$;
-    """))
+    """)
+    )
 
     # Same for locations
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         DO $$
         DECLARE
             r RECORD;
@@ -78,7 +81,8 @@ def upgrade() -> None:
                 UPDATE locations SET id = new_id WHERE id = r.id;
             END LOOP;
         END $$;
-    """))
+    """)
+    )
 
 
 def downgrade() -> None:

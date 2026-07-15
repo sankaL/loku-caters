@@ -33,11 +33,7 @@ def upgrade() -> None:
     )
 
     op.execute(
-        sa.text(
-            "UPDATE events "
-            "SET kind = 'event' "
-            "WHERE kind IS NULL OR kind = ''"
-        )
+        sa.text("UPDATE events SET kind = 'event' WHERE kind IS NULL OR kind = ''")
     )
 
     op.execute(
@@ -79,11 +75,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_constraint("ck_events_kind", "events", type_="check")
     op.execute(
-        sa.text(
-            "UPDATE events "
-            "SET kind = 'event' "
-            "WHERE kind = 'random_requests'"
-        )
+        sa.text("UPDATE events SET kind = 'event' WHERE kind = 'random_requests'")
     )
     op.drop_column("orders", "pickup_address")
     op.drop_column("events", "kind")

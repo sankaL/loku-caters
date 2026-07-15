@@ -1,11 +1,31 @@
 "use client";
 
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
-import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
+import { CompactMetricCard, CompactMetricRail, CompactMetricSkeletonRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
+import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDateCell, AdminDeleteIconButton, AdminPagination, AdminRowCheckboxCell, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
 import Modal from "@/components/ui/Modal";
+import { usePendingStatusChange } from "@/hooks/usePendingStatusChange";
+import { useObjectState } from "@/hooks/useObjectState";
+import { usePageSelection } from "@/hooks/usePageSelection";
+import { useAdminToast } from "@/hooks/useAdminToast";
+import { loadAuthenticatedAdminResource } from "@/lib/adminCrud";
+import { filterAdminItemsBySearch } from "@/lib/adminSearch";
 import { getAdminToken } from "@/lib/auth";
+import {
+  postAdminBulkDelete,
+  postAdminBulkStatus,
+  removeItemsByIds,
+  removeSelectedIds,
+  runAdminBulkAction,
+  updateItemStatuses,
+} from "@/lib/adminBulk";
+import {
+  ADMIN_BUTTON_BASE_STYLE,
+  ADMIN_BUTTON_DANGER_STYLE,
+  ADMIN_BUTTON_PRIMARY_STYLE,
+} from "@/lib/adminStyles";
 import {
   CATERING_BUDGET_RANGES,
   CATERING_EVENT_TYPES,
@@ -54,6 +74,43 @@ const STATUS_OPTIONS: Array<{ value: CateringRequestStatus; label: string }> = [
 
 const PAGE_SIZE = 15;
 const COL_COUNT = 11;
+type SetCateringData = Dispatch<SetStateAction<CateringRequestsResponse | null>>;
+
+function useCateringResource() {
+  const router = useRouter();
+  const [resource, setResource] = useObjectState({ data: null as CateringRequestsResponse | null, loading: true, error: "" });
+  const setData: SetCateringData = useCallback((value) => setResource("data", value), [setResource]);
+  useEffect(() => {
+    void loadAuthenticatedAdminResource<CateringRequestsResponse>({ resourcePath: "/api/admin/catering-requests", failureMessage: "Could not load catering requests. Please refresh.", setLoading: (value) => setResource("loading", value), setError: (value) => setResource("error", value), onLoaded: setData, onUnauthorized: () => router.push("/admin/login") });
+  }, [router, setData, setResource]);
+  return { ...resource, setData };
+}
+
+function useCateringFilters(data: CateringRequestsResponse | null) {
+  const [filters, setFilter] = useObjectState({ searchQuery: "", eventTypeFilter: "all", budgetFilter: "all", statusFilter: "all", page: 1 });
+  const filtered = useMemo(() => filterCateringRequests(data, filters.eventTypeFilter, filters.budgetFilter, filters.statusFilter, filters.searchQuery), [data, filters.budgetFilter, filters.eventTypeFilter, filters.searchQuery, filters.statusFilter]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const paginated = filtered.slice((filters.page - 1) * PAGE_SIZE, filters.page * PAGE_SIZE);
+  const averageGuests = useMemo(() => {
+    if (!data?.items.length) return 0;
+    return Math.round(data.items.reduce((sum, item) => sum + item.guest_count, 0) / data.items.length);
+  }, [data]);
+  useEffect(() => setFilter("page", 1), [filters.searchQuery, filters.eventTypeFilter, filters.budgetFilter, filters.statusFilter, setFilter]);
+  useEffect(() => setFilter("page", (previous) => Math.min(previous, totalPages)), [setFilter, totalPages]);
+  const hasFilters = filters.eventTypeFilter !== "all" || filters.budgetFilter !== "all" || filters.statusFilter !== "all" || Boolean(filters.searchQuery.trim());
+  return { filters, setFilter, filtered, paginated, totalPages, averageGuests, hasFilters };
+}
+
+function useCateringSelection(paginated: CateringRequestItem[]) {
+  const selection = usePageSelection(paginated, null as string | null);
+  return { selectedIds: selection.selectedIds, setSelectedIds: selection.setSelectedIds, expandedId: selection.detail, setExpandedId: selection.setDetail, headerCheckboxRef: selection.headerCheckboxRef, allOnPageSelected: selection.allOnPageSelected, toggleSelectAll: selection.toggleAll, toggleSelect: selection.toggleOne };
+}
+
+function useCateringOverlays() {
+  const [overlays, setOverlay] = useObjectState({ deleteTarget: null as string | null, showBulkDeleteModal: false, showBulkStatusModal: false, bulkStatusTarget: "in_review" as CateringRequestStatus });
+  const { toast, showToast } = useAdminToast();
+  return { overlays, setOverlay, toast, showToast };
+}
 
 function formatCreatedDate(iso: string | null): string {
   if (!iso) return "-";
@@ -89,6 +146,110 @@ function formatEventDate(value: string): string {
   });
 }
 
+function rebuildCateringData(previous: CateringRequestsResponse, items: CateringRequestItem[]): CateringRequestsResponse {
+  return { ...previous, total: items.length, status_counts: buildStatusCounts(items), items };
+}
+
+function filterCateringRequests(data: CateringRequestsResponse | null, eventType: string, budget: string, status: string, search: string): CateringRequestItem[] {
+  if (!data) return [];
+  let items = data.items;
+  if (eventType !== "all") items = items.filter((item) => item.event_type === eventType);
+  if (budget !== "all") items = items.filter((item) => item.budget_range === budget);
+  if (status !== "all") items = items.filter((item) => item.status === status);
+  return filterAdminItemsBySearch(items, search, (item) => {
+    const searchableText = [
+      item.full_name,
+      item.email,
+      item.phone_number ?? "",
+      getCateringEventTypeLabel(item.event_type),
+      getCateringBudgetRangeLabel(item.budget_range),
+      item.special_requests ?? "",
+      ...item.comments.map((comment) => comment.body),
+    ].join(" ");
+    return searchableText;
+  });
+}
+
+async function getAuthHeader(): Promise<Record<string, string>> {
+  const token = await getAdminToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+type CateringNotify = (message: string, type: "success" | "error") => void;
+
+async function updateCateringStatus(id: string, status: CateringRequestStatus, data: CateringRequestsResponse | null, setData: SetCateringData, notify: CateringNotify) {
+  const headers = await getAuthHeader();
+  const previousStatus = data?.items.find((item) => item.id === id)?.status;
+  setData((previous) => previous ? rebuildCateringData(previous, previous.items.map((item) => item.id === id ? { ...item, status } : item)) : previous);
+  try {
+    const response = await fetch(`${API_URL}/api/admin/catering-requests/${id}/status`, { method: "PATCH", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify({ status }) });
+    if (!response.ok) throw new Error("Failed to update status");
+    notify("Status updated", "success");
+  } catch {
+    if (previousStatus) {
+      setData((previous) => previous ? rebuildCateringData(previous, previous.items.map((item) => item.id === id ? { ...item, status: previousStatus } : item)) : previous);
+    }
+    notify("Failed to update status", "error");
+  }
+}
+
+async function addCateringComment(id: string, comment: string, setData: SetCateringData, notify: CateringNotify) {
+  try {
+    const response = await fetch(`${API_URL}/api/admin/catering-requests/${id}/comments`, { method: "POST", headers: { ...await getAuthHeader(), "Content-Type": "application/json" }, body: JSON.stringify({ comment }) });
+    if (!response.ok) throw new Error("Failed to post comment");
+    const result = await response.json() as { success: boolean; comment: CateringRequestComment };
+    setData((previous) => previous ? rebuildCateringData(previous, previous.items.map((item) => item.id === id ? { ...item, comments: [result.comment, ...item.comments] } : item)) : previous);
+    notify("Comment posted", "success");
+  } catch {
+    notify("Failed to post comment", "error");
+    throw new Error("Failed to post comment");
+  }
+}
+
+async function deleteCateringRequest(id: string, setData: SetCateringData, setSelectedIds: Dispatch<SetStateAction<Set<string>>>, expandedId: string | null, setExpandedId: Dispatch<SetStateAction<string | null>>, setDeleteTarget: Dispatch<SetStateAction<string | null>>, notify: CateringNotify) {
+  try {
+    const response = await fetch(`${API_URL}/api/admin/catering-requests/${id}`, { method: "DELETE", headers: await getAuthHeader() });
+    if (!response.ok) throw new Error("Failed to delete request");
+    setData((previous) => previous ? rebuildCateringData(previous, previous.items.filter((item) => item.id !== id)) : previous);
+    setSelectedIds((previous) => removeSelectedIds(previous, [id]));
+    if (expandedId === id) setExpandedId(null);
+    setDeleteTarget(null);
+    notify("Request deleted", "success");
+  } catch {
+    notify("Failed to delete request", "error");
+  }
+}
+
+async function deleteCateringRequests(ids: string[], setData: SetCateringData, setSelectedIds: Dispatch<SetStateAction<Set<string>>>, expandedId: string | null, setExpandedId: Dispatch<SetStateAction<string | null>>, closeModal: () => void, notify: CateringNotify) {
+  await runAdminBulkAction({
+    ids,
+    request: async () => postAdminBulkDelete(`${API_URL}/api/admin/catering-requests/bulk-delete`, ids, await getAuthHeader()),
+    applyCompleted: (completedIds) => {
+      setData((previous) => previous ? rebuildCateringData(previous, removeItemsByIds(previous.items, completedIds)) : previous);
+      setSelectedIds((previous) => removeSelectedIds(previous, completedIds));
+      if (expandedId && completedIds.includes(expandedId)) setExpandedId(null);
+    },
+    closeModal,
+    notify,
+    successMessage: `${ids.length} request${ids.length === 1 ? "" : "s"} deleted`,
+    failureAction: "Deleted",
+    failureMessage: "Failed to delete requests",
+  });
+}
+
+async function updateCateringRequestStatuses(ids: string[], status: CateringRequestStatus, setData: SetCateringData, closeModal: () => void, notify: CateringNotify) {
+  await runAdminBulkAction({
+    ids,
+    request: async () => postAdminBulkStatus(`${API_URL}/api/admin/catering-requests/bulk-status`, ids, await getAuthHeader(), status),
+    applyCompleted: (completedIds) => setData((previous) => previous ? rebuildCateringData(previous, updateItemStatuses(previous.items, completedIds, status)) : previous),
+    closeModal,
+    notify,
+    successMessage: `${ids.length} request${ids.length === 1 ? "" : "s"} updated`,
+    failureAction: "Updated",
+    failureMessage: "Failed to update requests",
+  });
+}
+
 function buildStatusCounts(items: CateringRequestItem[]): Record<CateringRequestStatus, number> {
   return {
     new: items.filter((item) => item.status === "new").length,
@@ -105,11 +266,11 @@ function getStatusLabel(status: CateringRequestStatus): string {
 
 function StatusBadge({ status }: { status: CateringRequestStatus }) {
   const styles: Record<CateringRequestStatus, { bg: string; text: string; border: string }> = {
-    new: { bg: "#f3f4f6", text: "#374151", border: "1px solid #e5e7eb" },
-    in_review: { bg: "#eff6ff", text: "#1d4ed8", border: "1px solid #bfdbfe" },
-    in_progress: { bg: "#fffbeb", text: "#92400e", border: "1px solid #fde68a" },
-    rejected: { bg: "#fef2f2", text: "#b91c1c", border: "1px solid #fecaca" },
-    done: { bg: "#f0fdf4", text: "#166534", border: "1px solid #bbf7d0" },
+    new: { bg: "var(--color-cream)", text: "var(--color-text)", border: "1px solid var(--color-border)" },
+    in_review: { bg: "var(--color-info-bg)", text: "var(--color-info-text)", border: "1px solid var(--color-info-border)" },
+    in_progress: { bg: "var(--color-warning-bg)", text: "var(--color-warning-text)", border: "1px solid var(--color-warning-border)" },
+    rejected: { bg: "var(--color-error-bg)", text: "var(--color-error-text)", border: "1px solid var(--color-error-border)" },
+    done: { bg: "var(--color-success-bg)", text: "var(--color-success-text)", border: "1px solid var(--color-success-border)" },
   };
   const style = styles[status];
 
@@ -141,9 +302,9 @@ function EventTypeBadge({ eventType }: { eventType: string }) {
         borderRadius: "999px",
         fontSize: "12px",
         fontWeight: 600,
-        background: "#eff6ff",
-        color: "#1d4ed8",
-        border: "1px solid #bfdbfe",
+        background: "var(--color-info-bg)",
+        color: "var(--color-info-text)",
+        border: "1px solid var(--color-info-border)",
         whiteSpace: "nowrap",
       }}
     >
@@ -152,17 +313,69 @@ function EventTypeBadge({ eventType }: { eventType: string }) {
   );
 }
 
-function Skeleton({ w = "100%", h = 16 }: { w?: string | number; h?: number }) {
+function CateringStatusControl({ item, onStatusChange }: { item: CateringRequestItem; onStatusChange: (id: string, status: CateringRequestStatus) => Promise<void> }) {
+  const { updating, pendingStatus, setPendingStatus, confirmStatusChange, cancelStatusChange } = usePendingStatusChange(item.id, onStatusChange);
+
   return (
-    <div
-      style={{
-        width: w,
-        height: h,
-        borderRadius: 8,
-        background: "var(--color-cream)",
-        animation: "pulse 1.5s ease-in-out infinite",
-      }}
-    />
+    <div>
+      <label style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", display: "block", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>Status</label>
+      <select value={item.status} onChange={(event) => setPendingStatus(event.target.value as CateringRequestStatus)} disabled={updating} style={{ padding: "7px 12px", borderRadius: 10, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: updating ? "not-allowed" : "pointer", outline: "none" }}>
+        {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      {pendingStatus && (
+        <div style={{ marginTop: 12, padding: "12px 14px", background: "var(--color-warning-bg)", border: "1px solid var(--color-warning-border)", borderRadius: 12 }}>
+          <p style={{ fontSize: 13, color: "var(--color-text)", marginBottom: 10 }}>Change status from <strong>{item.status}</strong> to <strong>{pendingStatus}</strong>?</p>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={cancelStatusChange} disabled={updating} style={{ padding: "6px 12px", borderRadius: 8, border: "1px solid var(--color-border)", background: "white", color: "var(--color-text)", fontSize: 12, fontWeight: 600, cursor: updating ? "not-allowed" : "pointer" }}>Cancel</button>
+            <button onClick={confirmStatusChange} disabled={updating} style={{ padding: "6px 12px", borderRadius: 8, border: "none", background: "var(--color-forest)", color: "var(--color-cream)", fontSize: 12, fontWeight: 600, cursor: updating ? "not-allowed" : "pointer" }}>{updating ? "Updating..." : "Confirm"}</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CateringCommentsControl({ item, onCommentAdd }: { item: CateringRequestItem; onCommentAdd: (id: string, comment: string) => Promise<void> }) {
+  const [commentText, setCommentText] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  async function addComment() {
+    const comment = commentText.trim();
+    if (!comment) return;
+    setSaving(true);
+    try {
+      await onCommentAdd(item.id, comment);
+      setCommentText("");
+    } catch {
+      // Parent handler shows the failure toast.
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <div style={{ gridColumn: "1 / -1" }}>
+        <p style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.06em", marginBottom: 8 }}>Posted Comments</p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 14, borderRadius: 12, border: "1px solid var(--color-border)", background: "white" }}>
+          {item.comments.length === 0
+            ? <span style={{ fontSize: 13, color: "var(--color-muted)" }}>No comments posted yet.</span>
+            : item.comments.map((comment) => (
+              <div key={comment.id} style={{ paddingBottom: 10, borderBottom: "1px solid var(--color-cream)" }}>
+                <div style={{ fontSize: 11, color: "var(--color-muted)", marginBottom: 4 }}>{formatCreatedDate(comment.created_at)} {formatCreatedTime(comment.created_at)}</div>
+                <div style={{ fontSize: 13, color: "var(--color-text)", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{comment.body}</div>
+              </div>
+            ))}
+        </div>
+      </div>
+      <div style={{ gridColumn: "1 / -1" }}>
+        <label style={{ fontSize: 11, fontWeight: 600, color: "var(--color-muted)", display: "block", marginBottom: 8, textTransform: "uppercase", letterSpacing: "0.06em" }}>Add New Comment</label>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+          <textarea value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Add an internal comment..." rows={3} style={{ flex: 1, padding: "10px 12px", borderRadius: 10, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", resize: "vertical", fontFamily: "inherit", outline: "none" }} />
+          <button onClick={addComment} disabled={saving || !commentText.trim()} style={{ padding: "10px 14px", borderRadius: 10, border: "none", background: "var(--color-forest)", color: "white", fontSize: 13, fontWeight: 600, cursor: saving || !commentText.trim() ? "not-allowed" : "pointer", whiteSpace: "nowrap", opacity: saving || !commentText.trim() ? 0.7 : 1 }}>{saving ? "Posting..." : "Post comment"}</button>
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -177,49 +390,13 @@ function ExpandedRow({
   onStatusChange: (id: string, status: CateringRequestStatus) => Promise<void>;
   onCommentAdd: (id: string, comment: string) => Promise<void>;
 }) {
-  const [updatingStatus, setUpdatingStatus] = useState(false);
-  const [commentText, setCommentText] = useState("");
-  const [savingComment, setSavingComment] = useState(false);
-  const [pendingStatusChange, setPendingStatusChange] = useState<CateringRequestStatus | null>(null);
-
-  async function handleStatusChange(status: CateringRequestStatus) {
-    setPendingStatusChange(status);
-  }
-
-  async function confirmStatusChange() {
-    if (!pendingStatusChange) return;
-    const nextStatus = pendingStatusChange;
-    setPendingStatusChange(null);
-    setUpdatingStatus(true);
-    try {
-      await onStatusChange(item.id, nextStatus);
-    } finally {
-      setUpdatingStatus(false);
-    }
-  }
-
-  async function handleAddComment() {
-    const trimmed = commentText.trim();
-    if (!trimmed) return;
-
-    setSavingComment(true);
-    try {
-      await onCommentAdd(item.id, trimmed);
-      setCommentText("");
-    } catch {
-      // Parent handler already shows the failure toast.
-    } finally {
-      setSavingComment(false);
-    }
-  }
-
   return (
     <tr>
       <td
         colSpan={colSpan}
         style={{
           padding: "18px 20px",
-          background: "#fafaf9",
+          background: "var(--color-cream)",
           borderBottom: "1px solid var(--color-border)",
         }}
       >
@@ -306,93 +483,7 @@ function ExpandedRow({
             </div>
           </div>
 
-          <div>
-            <label
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--color-muted)",
-                display: "block",
-                marginBottom: 8,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              Status
-            </label>
-            <select
-              value={item.status}
-              onChange={(e) => handleStatusChange(e.target.value as CateringRequestStatus)}
-              disabled={updatingStatus}
-              style={{
-                padding: "7px 12px",
-                borderRadius: 10,
-                border: "1px solid var(--color-border)",
-                fontSize: 13,
-                color: "var(--color-text)",
-                background: "white",
-                cursor: updatingStatus ? "not-allowed" : "pointer",
-                outline: "none",
-              }}
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-
-            {/* Status Change Confirmation */}
-            {pendingStatusChange && (
-              <div
-                style={{
-                  marginTop: 12,
-                  padding: "12px 14px",
-                  background: "#fff7ed",
-                  border: "1px solid #fed7aa",
-                  borderRadius: 12,
-                }}
-              >
-                <p style={{ fontSize: 13, color: "var(--color-text)", marginBottom: 10 }}>
-                  Change status from <strong>{item.status}</strong> to <strong>{pendingStatusChange}</strong>?
-                </p>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    onClick={() => setPendingStatusChange(null)}
-                    disabled={updatingStatus}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 8,
-                      border: "1px solid var(--color-border)",
-                      background: "white",
-                      color: "var(--color-text)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: updatingStatus ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    onClick={confirmStatusChange}
-                    disabled={updatingStatus}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: 8,
-                      border: "none",
-                      background: "var(--color-forest)",
-                      color: "var(--color-cream)",
-                      fontSize: 12,
-                      fontWeight: 600,
-                      cursor: updatingStatus ? "not-allowed" : "pointer",
-                    }}
-                  >
-                    {updatingStatus ? "Updating..." : "Confirm"}
-                  </button>
-                </div>
-              </div>
-            )}
-          </div>
+          <CateringStatusControl item={item} onStatusChange={onStatusChange} />
 
           <div style={{ gridColumn: "1 / -1" }}>
             <p
@@ -423,454 +514,176 @@ function ExpandedRow({
             </div>
           </div>
 
-          <div style={{ gridColumn: "1 / -1" }}>
-            <p
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--color-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                marginBottom: 8,
-              }}
-            >
-              Posted Comments
-            </p>
-            <div
-              style={{
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
-                padding: 14,
-                borderRadius: 12,
-                border: "1px solid var(--color-border)",
-                background: "white",
-              }}
-            >
-              {item.comments.length === 0 ? (
-                <span style={{ fontSize: 13, color: "var(--color-muted)" }}>No comments posted yet.</span>
-              ) : (
-                item.comments.map((comment) => (
-                  <div
-                    key={comment.id}
-                    style={{
-                      paddingBottom: 10,
-                      borderBottom: "1px solid var(--color-cream)",
-                    }}
-                  >
-                    <div style={{ fontSize: 11, color: "var(--color-muted)", marginBottom: 4 }}>
-                      {formatCreatedDate(comment.created_at)} {formatCreatedTime(comment.created_at)}
-                    </div>
-                    <div style={{ fontSize: 13, color: "var(--color-text)", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
-                      {comment.body}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div style={{ gridColumn: "1 / -1" }}>
-            <label
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: "var(--color-muted)",
-                display: "block",
-                marginBottom: 8,
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-              }}
-            >
-              Add New Comment
-            </label>
-            <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
-              <textarea
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-                placeholder="Add an internal comment..."
-                rows={3}
-                style={{
-                  flex: 1,
-                  padding: "10px 12px",
-                  borderRadius: 10,
-                  border: "1px solid var(--color-border)",
-                  fontSize: 13,
-                  color: "var(--color-text)",
-                  background: "white",
-                  resize: "vertical",
-                  fontFamily: "inherit",
-                  outline: "none",
-                }}
-              />
-              <button
-                onClick={handleAddComment}
-                disabled={savingComment || !commentText.trim()}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 10,
-                  border: "none",
-                  background: "var(--color-forest)",
-                  color: "white",
-                  fontSize: 13,
-                  fontWeight: 600,
-                  cursor: savingComment || !commentText.trim() ? "not-allowed" : "pointer",
-                  whiteSpace: "nowrap",
-                  opacity: savingComment || !commentText.trim() ? 0.7 : 1,
-                }}
-              >
-                {savingComment ? "Posting..." : "Post comment"}
-              </button>
-            </div>
-          </div>
+          <CateringCommentsControl item={item} onCommentAdd={onCommentAdd} />
         </div>
       </td>
     </tr>
   );
 }
 
-export default function AdminCateringRequestsPage() {
-  const router = useRouter();
+function CateringRequestRow({ item, selected, expanded, last, onToggleSelected, onToggleExpanded, onDelete, onStatusChange, onCommentAdd }: {
+  item: CateringRequestItem;
+  selected: boolean;
+  expanded: boolean;
+  last: boolean;
+  onToggleSelected: () => void;
+  onToggleExpanded: () => void;
+  onDelete: () => void;
+  onStatusChange: (id: string, status: CateringRequestStatus) => Promise<void>;
+  onCommentAdd: (id: string, comment: string) => Promise<void>;
+}) {
+  return (
+    <Fragment>
+      <tr onClick={onToggleExpanded} style={{ borderBottom: !expanded && !last ? "1px solid var(--color-border)" : "none", background: expanded ? "var(--color-cream)" : "white", cursor: "pointer", transition: "background 0.1s" }}>
+        <AdminRowCheckboxCell checked={selected} onChange={onToggleSelected} />
+        <AdminDateCell date={formatCreatedDate(item.created_at)} time={formatCreatedTime(item.created_at)} />
+        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><span style={{ fontWeight: 500, color: "var(--color-text)" }}>{item.full_name}</span></td>
+        <td style={{ padding: "13px 16px", verticalAlign: "top", minWidth: 220 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ color: "var(--color-text)" }}>{item.email}</span>
+            <span style={{ color: item.phone_number ? "var(--color-muted)" : "var(--color-border)" }}>{item.phone_number || "No phone"}</span>
+          </div>
+        </td>
+        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><span style={{ color: "var(--color-text)" }}>{formatEventDate(item.event_date)}</span></td>
+        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><EventTypeBadge eventType={item.event_type} /></td>
+        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}><span style={{ color: "var(--color-text)", fontWeight: 500 }}>{item.guest_count}</span></td>
+        <td style={{ padding: "13px 16px", verticalAlign: "top", minWidth: 150 }}><span style={{ color: item.budget_range ? "var(--color-text)" : "var(--color-muted)" }}>{getCateringBudgetRangeLabel(item.budget_range)}</span></td>
+        <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}><StatusBadge status={item.status} /></td>
+        <td style={{ padding: "13px 16px", color: "var(--color-text)", maxWidth: 280, verticalAlign: "top" }}>
+          {item.special_requests
+            ? <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{item.special_requests}</span>
+            : <span style={{ color: "var(--color-border)" }}>No special requests</span>}
+        </td>
+        <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }} onClick={(event) => event.stopPropagation()}>
+          <AdminDeleteIconButton onClick={onDelete} />
+        </td>
+      </tr>
+      {expanded && <ExpandedRow item={item} colSpan={COL_COUNT} onStatusChange={onStatusChange} onCommentAdd={onCommentAdd} />}
+      {expanded && !last && <tr><td colSpan={COL_COUNT} style={{ padding: 0, borderBottom: "1px solid var(--color-border)" }} /></tr>}
+    </Fragment>
+  );
+}
 
-  const [data, setData] = useState<CateringRequestsResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-
-  const [searchQuery, setSearchQuery] = useState("");
-  const [eventTypeFilter, setEventTypeFilter] = useState("all");
-  const [budgetFilter, setBudgetFilter] = useState("all");
-  const [statusFilter, setStatusFilter] = useState("all");
-
-  const [page, setPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
-  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
-  const [showBulkStatusModal, setShowBulkStatusModal] = useState(false);
-  const [bulkStatusTarget, setBulkStatusTarget] = useState<CateringRequestStatus>("in_review");
-
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-
-  const headerCheckboxRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError("");
-      const token = await getAdminToken();
-      if (!token) {
-        router.push("/admin/login");
-        return;
-      }
-
-      try {
-        const res = await fetch(`${API_URL}/api/admin/catering-requests`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.status === 401) {
-          router.push("/admin/login");
-          return;
-        }
-        if (!res.ok) throw new Error("Failed to load catering requests");
-        const json: CateringRequestsResponse = await res.json();
-        setData(json);
-      } catch {
-        setError("Could not load catering requests. Please refresh.");
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    load();
-  }, [router]);
-
-  function showToast(message: string, type: "success" | "error") {
-    setToast({ message, type });
+function CateringMetrics({ loading, data, averageGuests, statusFilter, onStatusFilterChange }: {
+  loading: boolean;
+  data: CateringRequestsResponse | null;
+  averageGuests: number;
+  statusFilter: string;
+  onStatusFilterChange: (status: string) => void;
+}) {
+  if (loading) {
+    return <CompactMetricSkeletonRail count={7} />;
   }
-
-  useEffect(() => {
-    if (!toast) return;
-    const timeoutId = setTimeout(() => setToast(null), 3500);
-    return () => clearTimeout(timeoutId);
-  }, [toast]);
-
-  const filtered = useMemo(() => {
-    if (!data) return [];
-
-    let items = data.items;
-
-    if (eventTypeFilter !== "all") {
-      items = items.filter((item) => item.event_type === eventTypeFilter);
-    }
-    if (budgetFilter !== "all") {
-      items = items.filter((item) => item.budget_range === budgetFilter);
-    }
-    if (statusFilter !== "all") {
-      items = items.filter((item) => item.status === statusFilter);
-    }
-    if (searchQuery.trim()) {
-      const query = searchQuery.trim().toLowerCase();
-      items = items.filter((item) => {
-        const eventTypeLabel = getCateringEventTypeLabel(item.event_type).toLowerCase();
-        const budgetLabel = getCateringBudgetRangeLabel(item.budget_range).toLowerCase();
-        const commentText = item.comments.map((comment) => comment.body).join(" ").toLowerCase();
+  if (!data) return null;
+  return (
+    <CompactMetricRail>
+      <CompactMetricTotalCard label="Total Requests" value={data.total} />
+      {STATUS_OPTIONS.map((option) => {
+        const selected = statusFilter === option.value;
         return (
-          item.full_name.toLowerCase().includes(query) ||
-          item.email.toLowerCase().includes(query) ||
-          (item.phone_number ?? "").toLowerCase().includes(query) ||
-          eventTypeLabel.includes(query) ||
-          budgetLabel.includes(query) ||
-          (item.special_requests ?? "").toLowerCase().includes(query) ||
-          commentText.includes(query)
+          <CompactMetricCard key={option.value} onClick={() => onStatusFilterChange(selected ? "all" : option.value)} selected={selected}>
+            <p style={{ fontSize: 10, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>{option.label}</p>
+            <p style={{ fontSize: "clamp(24px, 2vw, 28px)", fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>{data.status_counts[option.value]}</p>
+            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>Click to filter</p>
+          </CompactMetricCard>
         );
-      });
-    }
+      })}
+      <CompactMetricCard>
+        <p style={{ fontSize: 10, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Average Guests</p>
+        <p style={{ fontSize: "clamp(24px, 2vw, 28px)", fontWeight: 700, color: "var(--color-forest)", fontFamily: "var(--font-serif)", lineHeight: 1 }}>{averageGuests}</p>
+        <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>Rounded across all requests</p>
+      </CompactMetricCard>
+    </CompactMetricRail>
+  );
+}
 
-    return items;
-  }, [budgetFilter, data, eventTypeFilter, searchQuery, statusFilter]);
+function CateringFilters({ searchQuery, eventTypeFilter, budgetFilter, statusFilter, resultCount, loading, onSearchChange, onEventTypeChange, onBudgetChange, onStatusChange, onClear }: {
+  searchQuery: string;
+  eventTypeFilter: string;
+  budgetFilter: string;
+  statusFilter: string;
+  resultCount: number;
+  loading: boolean;
+  onSearchChange: (value: string) => void;
+  onEventTypeChange: (value: string) => void;
+  onBudgetChange: (value: string) => void;
+  onStatusChange: (value: string) => void;
+  onClear: () => void;
+}) {
+  const hasFilters = eventTypeFilter !== "all" || budgetFilter !== "all" || statusFilter !== "all" || Boolean(searchQuery.trim());
+  const selectStyle = { padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" };
+  return (
+    <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+      <AdminSearchInput value={searchQuery} onChange={onSearchChange} placeholder="Search name, contact, type, budget, requests, comments..." />
+      <select value={eventTypeFilter} onChange={(event) => onEventTypeChange(event.target.value)} style={selectStyle}>
+        <option value="all">All event types</option>
+        {CATERING_EVENT_TYPES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+      </select>
+      <select value={budgetFilter} onChange={(event) => onBudgetChange(event.target.value)} style={selectStyle}>
+        <option value="all">All budgets</option>
+        {CATERING_BUDGET_RANGES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
+      </select>
+      <select value={statusFilter} onChange={(event) => onStatusChange(event.target.value)} style={selectStyle}>
+        <option value="all">All statuses</option>
+        {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+      {hasFilters && <AdminClearFiltersButton onClick={onClear} />}
+      {!loading && <span style={{ fontSize: 13, color: "var(--color-muted)", marginLeft: "auto" }}>{resultCount} result{resultCount === 1 ? "" : "s"}</span>}
+    </div>
+  );
+}
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
-  const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+function CateringEmptyState({ hasFilters }: { hasFilters: boolean }) {
+  return (
+    <AdminTableEmptyState
+      icon={<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3v9" /><path d="M12 3v9" /><path d="M10 12v9" /><path d="M17 3v18" /><path d="M17 8a4 4 0 0 0 0-5" /><path d="M6 3v5a2 2 0 0 0 4 0V3" /></svg>}
+      title="No catering requests yet"
+      description={hasFilters ? "No results match your filters." : "New catering inquiries will appear here."}
+    />
+  );
+}
 
-  useEffect(() => {
-    setPage(1);
-  }, [searchQuery, eventTypeFilter, budgetFilter, statusFilter]);
+export default function AdminCateringRequestsPage() {
+  const { data, loading, error, setData } = useCateringResource();
+  const { filters, setFilter, filtered, paginated, totalPages, averageGuests, hasFilters } = useCateringFilters(data);
+  const { selectedIds, setSelectedIds, expandedId, setExpandedId, headerCheckboxRef, allOnPageSelected, toggleSelectAll, toggleSelect } = useCateringSelection(paginated);
+  const { overlays, setOverlay, toast, showToast } = useCateringOverlays();
 
-  useEffect(() => {
-    setPage((prev) => Math.min(prev, totalPages));
-  }, [totalPages]);
+  const { searchQuery, eventTypeFilter, budgetFilter, statusFilter, page } = filters;
+  const { deleteTarget, showBulkDeleteModal, showBulkStatusModal, bulkStatusTarget } = overlays;
+  const setSearchQuery = (value: string) => setFilter("searchQuery", value);
+  const setEventTypeFilter = (value: string) => setFilter("eventTypeFilter", value);
+  const setBudgetFilter = (value: string) => setFilter("budgetFilter", value);
+  const setStatusFilter = (value: string) => setFilter("statusFilter", value);
+  const setPage = (value: number) => setFilter("page", value);
+  const setDeleteTarget: Dispatch<SetStateAction<string | null>> = (value) => setOverlay("deleteTarget", value);
+  const setShowBulkDeleteModal = (value: boolean) => setOverlay("showBulkDeleteModal", value);
+  const setShowBulkStatusModal = (value: boolean) => setOverlay("showBulkStatusModal", value);
+  const setBulkStatusTarget = (value: CateringRequestStatus) => setOverlay("bulkStatusTarget", value);
 
-  const averageGuests = useMemo(() => {
-    if (!data || data.items.length === 0) return 0;
-    const totalGuests = data.items.reduce((sum, item) => sum + item.guest_count, 0);
-    return Math.round(totalGuests / data.items.length);
-  }, [data]);
-
-  const hasFilters =
-    eventTypeFilter !== "all" ||
-    budgetFilter !== "all" ||
-    statusFilter !== "all" ||
-    !!searchQuery.trim();
-
-  const allOnPageSelected = paginated.length > 0 && paginated.every((item) => selectedIds.has(item.id));
-  const someOnPageSelected = paginated.some((item) => selectedIds.has(item.id));
-
-  useEffect(() => {
-    if (headerCheckboxRef.current) {
-      headerCheckboxRef.current.indeterminate = someOnPageSelected && !allOnPageSelected;
-    }
-  }, [allOnPageSelected, someOnPageSelected]);
-
-  function toggleSelectAll() {
-    if (allOnPageSelected) {
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        paginated.forEach((item) => next.delete(item.id));
-        return next;
-      });
-      return;
-    }
-
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      paginated.forEach((item) => next.add(item.id));
-      return next;
-    });
+  function handleStatusChange(id: string, status: CateringRequestStatus) {
+    return updateCateringStatus(id, status, data, setData, showToast);
   }
 
-  function toggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  function handleCommentAdd(id: string, comment: string) {
+    return addCateringComment(id, comment, setData, showToast);
   }
 
-  function rebuildData(previous: CateringRequestsResponse, items: CateringRequestItem[]): CateringRequestsResponse {
-    return {
-      ...previous,
-      total: items.length,
-      status_counts: buildStatusCounts(items),
-      items,
-    };
+  function handleDelete(id: string) {
+    return deleteCateringRequest(id, setData, setSelectedIds, expandedId, setExpandedId, setDeleteTarget, showToast);
   }
 
-  async function getAuthHeader(): Promise<Record<string, string>> {
-    const token = await getAdminToken();
-    return token ? { Authorization: `Bearer ${token}` } : {};
+  function handleBulkDelete() {
+    return deleteCateringRequests(Array.from(selectedIds), setData, setSelectedIds, expandedId, setExpandedId, () => setShowBulkDeleteModal(false), showToast);
   }
 
-  async function handleStatusChange(id: string, status: CateringRequestStatus): Promise<void> {
-    const headers = await getAuthHeader();
-    const previousStatus = data?.items.find((item) => item.id === id)?.status;
-
-    setData((prev) => {
-      if (!prev) return prev;
-      const nextItems = prev.items.map((item) => (item.id === id ? { ...item, status } : item));
-      return rebuildData(prev, nextItems);
-    });
-
-    try {
-      const res = await fetch(`${API_URL}/api/admin/catering-requests/${id}/status`, {
-        method: "PATCH",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
-      });
-      if (!res.ok) throw new Error("Failed");
-      showToast("Status updated", "success");
-    } catch {
-      if (previousStatus) {
-        setData((prev) => {
-          if (!prev) return prev;
-          const nextItems = prev.items.map((item) => (
-            item.id === id ? { ...item, status: previousStatus } : item
-          ));
-          return rebuildData(prev, nextItems);
-        });
-      }
-      showToast("Failed to update status", "error");
-    }
+  function handleBulkStatus() {
+    return updateCateringRequestStatuses(Array.from(selectedIds), bulkStatusTarget, setData, () => setShowBulkStatusModal(false), showToast);
   }
 
-  async function handleCommentAdd(id: string, comment: string): Promise<void> {
-    const headers = await getAuthHeader();
-
-    try {
-      const res = await fetch(`${API_URL}/api/admin/catering-requests/${id}/comments`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ comment }),
-      });
-      if (!res.ok) throw new Error("Failed");
-
-      const json: { success: boolean; comment: CateringRequestComment } = await res.json();
-      setData((prev) => {
-        if (!prev) return prev;
-        const nextItems = prev.items.map((item) => (
-          item.id === id
-            ? { ...item, comments: [json.comment, ...item.comments] }
-            : item
-        ));
-        return rebuildData(prev, nextItems);
-      });
-      showToast("Comment posted", "success");
-    } catch {
-      showToast("Failed to post comment", "error");
-      throw new Error("Failed to post comment");
-    }
-  }
-
-  async function handleDelete(id: string) {
-    const headers = await getAuthHeader();
-
-    try {
-      const res = await fetch(`${API_URL}/api/admin/catering-requests/${id}`, {
-        method: "DELETE",
-        headers,
-      });
-      if (!res.ok) throw new Error("Failed");
-
-      setData((prev) => {
-        if (!prev) return prev;
-        const nextItems = prev.items.filter((item) => item.id !== id);
-        return rebuildData(prev, nextItems);
-      });
-      setSelectedIds((prev) => {
-        const next = new Set(prev);
-        next.delete(id);
-        return next;
-      });
-      if (expandedId === id) setExpandedId(null);
-      setDeleteTarget(null);
-      showToast("Request deleted", "success");
-    } catch {
-      showToast("Failed to delete request", "error");
-    }
-  }
-
-  async function handleBulkDelete() {
-    const ids = Array.from(selectedIds);
-    const headers = await getAuthHeader();
-
-    try {
-      const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-delete`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ ids }),
-      });
-      if (!res.ok) throw new Error("Failed");
-
-      const idSet = new Set(ids);
-      setData((prev) => {
-        if (!prev) return prev;
-        const nextItems = prev.items.filter((item) => !idSet.has(item.id));
-        return rebuildData(prev, nextItems);
-      });
-      setSelectedIds(new Set());
-      if (expandedId && idSet.has(expandedId)) setExpandedId(null);
-      setShowBulkDeleteModal(false);
-      showToast(`${ids.length} request${ids.length === 1 ? "" : "s"} deleted`, "success");
-    } catch {
-      showToast("Failed to delete requests", "error");
-    }
-  }
-
-  async function handleBulkStatus() {
-    const ids = Array.from(selectedIds);
-    const headers = await getAuthHeader();
-
-    try {
-      const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-status`, {
-        method: "POST",
-        headers: { ...headers, "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, status: bulkStatusTarget }),
-      });
-      if (!res.ok) throw new Error("Failed");
-
-      const idSet = new Set(ids);
-      setData((prev) => {
-        if (!prev) return prev;
-        const nextItems = prev.items.map((item) => (
-          idSet.has(item.id) ? { ...item, status: bulkStatusTarget } : item
-        ));
-        return rebuildData(prev, nextItems);
-      });
-      setShowBulkStatusModal(false);
-      showToast(`${ids.length} request${ids.length === 1 ? "" : "s"} updated`, "success");
-    } catch {
-      showToast("Failed to update requests", "error");
-    }
-  }
-
-  const btnBase: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "8px 14px",
-    borderRadius: 10,
-    fontSize: 13,
-    fontWeight: 500,
-    cursor: "pointer",
-    border: "1px solid var(--color-border)",
-    background: "white",
-    color: "var(--color-text)",
-  };
-
-  const btnDanger: React.CSSProperties = {
-    ...btnBase,
-    border: "1px solid #fecaca",
-    background: "#fef2f2",
-    color: "#c53030",
-  };
-
-  const btnPrimary: React.CSSProperties = {
-    ...btnBase,
-    border: "none",
-    background: "var(--color-forest)",
-    color: "white",
-  };
+  const btnBase = ADMIN_BUTTON_BASE_STYLE;
+  const btnDanger = ADMIN_BUTTON_DANGER_STYLE;
+  const btnPrimary = ADMIN_BUTTON_PRIMARY_STYLE;
 
   return (
     <div style={{ padding: "clamp(20px, 2vw, 32px) clamp(16px, 1.25vw, 24px) 56px", maxWidth: 1320, margin: "0 auto" }}>
@@ -894,12 +707,12 @@ export default function AdminCateringRequestsPage() {
       {error && (
         <div
           style={{
-            background: "#fef2f2",
-            border: "1px solid #fecaca",
+            background: "var(--color-error-bg)",
+            border: "1px solid var(--color-error-border)",
             borderRadius: 12,
             padding: "12px 16px",
             fontSize: 14,
-            color: "#c53030",
+            color: "var(--color-error-text)",
             marginBottom: 24,
           }}
         >
@@ -907,582 +720,64 @@ export default function AdminCateringRequestsPage() {
         </div>
       )}
 
-      {loading ? (
-        <CompactMetricRail>
-          {[...Array(7)].map((_, idx) => (
-            <CompactMetricCard key={idx} variant={idx === 0 ? "dark" : "light"}>
-              <Skeleton w="60%" h={10} />
-              <div style={{ marginTop: 12 }}>
-                <Skeleton w="40%" h={24} />
-              </div>
-            </CompactMetricCard>
-          ))}
-        </CompactMetricRail>
-      ) : data && (
-        <CompactMetricRail>
-          <CompactMetricCard variant="dark">
-            <p
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: "var(--color-sage)",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                marginBottom: 8,
-              }}
-            >
-              Total Requests
-            </p>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-cream)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {data.total}
-            </p>
-          </CompactMetricCard>
+      <CateringMetrics
+        loading={loading}
+        data={data}
+        averageGuests={averageGuests}
+        statusFilter={statusFilter}
+        onStatusFilterChange={setStatusFilter}
+      />
 
-          {STATUS_OPTIONS.map((option) => {
-            const isActive = statusFilter === option.value;
-            return (
-              <CompactMetricCard
-                key={option.value}
-                onClick={() => setStatusFilter(isActive ? "all" : option.value)}
-                selected={isActive}
-              >
-                <p
-                  style={{
-                    fontSize: 10,
-                    fontWeight: 600,
-                    color: "var(--color-muted)",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                    marginBottom: 8,
-                  }}
-                >
-                  {option.label}
-                </p>
-                <p
-                  style={{
-                    fontSize: "clamp(24px, 2vw, 28px)",
-                    fontWeight: 700,
-                    color: "var(--color-forest)",
-                    fontFamily: "var(--font-serif)",
-                    lineHeight: 1,
-                  }}
-                >
-                  {data.status_counts[option.value]}
-                </p>
-                <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
-                  Click to filter
-                </p>
-              </CompactMetricCard>
-            );
-          })}
-
-          <CompactMetricCard>
-            <p
-              style={{
-                fontSize: 10,
-                fontWeight: 600,
-                color: "var(--color-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.08em",
-                marginBottom: 8,
-              }}
-            >
-              Average Guests
-            </p>
-            <p
-              style={{
-                fontSize: "clamp(24px, 2vw, 28px)",
-                fontWeight: 700,
-                color: "var(--color-forest)",
-                fontFamily: "var(--font-serif)",
-                lineHeight: 1,
-              }}
-            >
-              {averageGuests}
-            </p>
-            <p style={{ fontSize: 10, color: "var(--color-muted)", marginTop: 6, lineHeight: 1.4 }}>
-              Rounded across all requests
-            </p>
-          </CompactMetricCard>
-        </CompactMetricRail>
-      )}
-
-      <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-        <div style={{ position: "relative", flex: "1 1 240px", minWidth: 0 }}>
-          <svg
-            width="15"
-            height="15"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            style={{
-              position: "absolute",
-              left: 12,
-              top: "50%",
-              transform: "translateY(-50%)",
-              color: "var(--color-muted)",
-              pointerEvents: "none",
-            }}
-          >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.35-4.35" />
-          </svg>
-          <input
-            type="text"
-            placeholder="Search name, contact, type, budget, requests, comments..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{
-              width: "100%",
-              padding: "9px 12px 9px 36px",
-              borderRadius: 12,
-              border: "1px solid var(--color-border)",
-              fontSize: 13,
-              color: "var(--color-text)",
-              background: "white",
-              outline: "none",
-              boxSizing: "border-box",
-            }}
-          />
-        </div>
-
-        <select
-          value={eventTypeFilter}
-          onChange={(e) => setEventTypeFilter(e.target.value)}
-          style={{
-            padding: "9px 12px",
-            borderRadius: 12,
-            border: "1px solid var(--color-border)",
-            fontSize: 13,
-            color: "var(--color-text)",
-            background: "white",
-            cursor: "pointer",
-            outline: "none",
-          }}
-        >
-          <option value="all">All event types</option>
-          {CATERING_EVENT_TYPES.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={budgetFilter}
-          onChange={(e) => setBudgetFilter(e.target.value)}
-          style={{
-            padding: "9px 12px",
-            borderRadius: 12,
-            border: "1px solid var(--color-border)",
-            fontSize: 13,
-            color: "var(--color-text)",
-            background: "white",
-            cursor: "pointer",
-            outline: "none",
-          }}
-        >
-          <option value="all">All budgets</option>
-          {CATERING_BUDGET_RANGES.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.name}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          style={{
-            padding: "9px 12px",
-            borderRadius: 12,
-            border: "1px solid var(--color-border)",
-            fontSize: 13,
-            color: "var(--color-text)",
-            background: "white",
-            cursor: "pointer",
-            outline: "none",
-          }}
-        >
-          <option value="all">All statuses</option>
-          {STATUS_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-
-        {hasFilters && (
-          <button
-            onClick={() => {
-              setSearchQuery("");
-              setEventTypeFilter("all");
-              setBudgetFilter("all");
-              setStatusFilter("all");
-            }}
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              padding: "8px 12px",
-              borderRadius: 12,
-              border: "1px solid var(--color-border)",
-              background: "white",
-              fontSize: 13,
-              color: "var(--color-muted)",
-              cursor: "pointer",
-            }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-            Clear
-          </button>
-        )}
-
-        {!loading && (
-          <span style={{ fontSize: 13, color: "var(--color-muted)", marginLeft: "auto" }}>
-            {filtered.length} result{filtered.length === 1 ? "" : "s"}
-          </span>
-        )}
-      </div>
-
-      {selectedIds.size > 0 && (
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 12,
-            padding: "10px 16px",
-            background: "#f0f7eb",
-            border: "1px solid #c8ddb4",
-            borderRadius: 12,
-            marginBottom: 12,
-            flexWrap: "wrap",
-          }}
-        >
-          <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-forest)" }}>
-            {selectedIds.size} selected
-          </span>
-          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <select
-              value={bulkStatusTarget}
-              onChange={(e) => setBulkStatusTarget(e.target.value as CateringRequestStatus)}
-              style={{
-                padding: "6px 10px",
-                borderRadius: 8,
-                border: "1px solid #c8ddb4",
-                fontSize: 13,
-                color: "var(--color-text)",
-                background: "white",
-                cursor: "pointer",
-                outline: "none",
-              }}
-            >
-              {STATUS_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-            <button onClick={() => setShowBulkStatusModal(true)} style={btnBase}>
-              Mark all as
-            </button>
-          </div>
-          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
-          <button onClick={() => setShowBulkDeleteModal(true)} style={btnDanger}>
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="3 6 5 6 21 6" />
-              <path d="M19 6l-1 14H6L5 6" />
-              <path d="M10 11v6M14 11v6" />
-              <path d="M9 6V4h6v2" />
-            </svg>
-            Delete selected
-          </button>
-          <button onClick={() => setSelectedIds(new Set())} style={{ ...btnBase, marginLeft: "auto" }}>
-            Clear
-          </button>
-        </div>
-      )}
-
-      <div
-        style={{
-          background: "white",
-          border: "1px solid var(--color-border)",
-          borderRadius: 20,
-          overflow: "hidden",
+      <CateringFilters
+        searchQuery={searchQuery}
+        eventTypeFilter={eventTypeFilter}
+        budgetFilter={budgetFilter}
+        statusFilter={statusFilter}
+        resultCount={filtered.length}
+        loading={loading}
+        onSearchChange={setSearchQuery}
+        onEventTypeChange={setEventTypeFilter}
+        onBudgetChange={setBudgetFilter}
+        onStatusChange={setStatusFilter}
+        onClear={() => {
+          setSearchQuery("");
+          setEventTypeFilter("all");
+          setBudgetFilter("all");
+          setStatusFilter("all");
         }}
+      />
+
+      <AdminBulkTableFrame
+        bulk={buildAdminBulkStatusProps(selectedIds.size, bulkStatusTarget, STATUS_OPTIONS, setBulkStatusTarget, () => setShowBulkStatusModal(true), () => setShowBulkDeleteModal(true), () => setSelectedIds(new Set()), btnBase, btnDanger)}
+        loading={loading}
+        empty={filtered.length === 0}
+        emptyState={<CateringEmptyState hasFilters={hasFilters} />}
       >
-        {loading ? (
-          <div style={{ padding: 32, display: "flex", flexDirection: "column", gap: 16 }}>
-            {[...Array(5)].map((_, idx) => (
-              <Skeleton key={idx} h={20} />
+          <AdminSelectableTable
+            headerCheckboxRef={headerCheckboxRef}
+            allSelected={allOnPageSelected}
+            onToggleAll={toggleSelectAll}
+            headers={["Submitted", "Requester", "Contact", "Event Date", "Event Type", "Guests", "Budget", "Status", "Special Requests"]}
+          >
+            {paginated.map((item, index) => (
+              <CateringRequestRow
+                key={item.id}
+                item={item}
+                selected={selectedIds.has(item.id)}
+                expanded={expandedId === item.id}
+                last={index === paginated.length - 1}
+                onToggleSelected={() => toggleSelect(item.id)}
+                onToggleExpanded={() => setExpandedId(expandedId === item.id ? null : item.id)}
+                onDelete={() => setDeleteTarget(item.id)}
+                onStatusChange={handleStatusChange}
+                onCommentAdd={handleCommentAdd}
+              />
             ))}
-          </div>
-        ) : filtered.length === 0 ? (
-          <div style={{ padding: 48, textAlign: "center" }}>
-            <svg
-              width="40"
-              height="40"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="var(--color-border)"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{ margin: "0 auto 12px" }}
-            >
-              <path d="M8 3v9" />
-              <path d="M12 3v9" />
-              <path d="M10 12v9" />
-              <path d="M17 3v18" />
-              <path d="M17 8a4 4 0 0 0 0-5" />
-              <path d="M6 3v5a2 2 0 0 0 4 0V3" />
-            </svg>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--color-forest)", marginBottom: 4 }}>
-              No catering requests yet
-            </p>
-            <p style={{ fontSize: 13, color: "var(--color-muted)" }}>
-              {hasFilters ? "No results match your filters." : "New catering inquiries will appear here."}
-            </p>
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-cream)" }}>
-                  <th style={{ padding: "11px 12px 11px 16px", width: 36 }}>
-                    <input
-                      ref={headerCheckboxRef}
-                      type="checkbox"
-                      checked={allOnPageSelected}
-                      onChange={toggleSelectAll}
-                      style={{ cursor: "pointer" }}
-                    />
-                  </th>
-                  {[
-                    "Submitted",
-                    "Requester",
-                    "Contact",
-                    "Event Date",
-                    "Event Type",
-                    "Guests",
-                    "Budget",
-                    "Status",
-                    "Special Requests",
-                    "",
-                  ].map((column) => (
-                    <th
-                      key={column}
-                      style={{
-                        textAlign: "left",
-                        padding: "11px 16px",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "var(--color-muted)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.07em",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {column}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {paginated.map((item, idx) => {
-                  const isExpanded = expandedId === item.id;
-                  const isLast = idx === paginated.length - 1;
 
-                  return (
-                    <Fragment key={item.id}>
-                      <tr
-                        onClick={() => setExpandedId(isExpanded ? null : item.id)}
-                        style={{
-                          borderBottom: !isExpanded && !isLast ? "1px solid var(--color-border)" : "none",
-                          background: isExpanded ? "#fafaf9" : "white",
-                          cursor: "pointer",
-                          transition: "background 0.1s",
-                        }}
-                      >
-                        <td
-                          style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedIds.has(item.id)}
-                            onChange={() => toggleSelect(item.id)}
-                            style={{ cursor: "pointer" }}
-                          />
-                        </td>
+          </AdminSelectableTable>
+      </AdminBulkTableFrame>
 
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <div style={{ fontWeight: 500, color: "var(--color-text)" }}>
-                            {formatCreatedDate(item.created_at)}
-                          </div>
-                          <div style={{ fontSize: 11, color: "var(--color-muted)", marginTop: 2 }}>
-                            {formatCreatedTime(item.created_at)}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <span style={{ fontWeight: 500, color: "var(--color-text)" }}>{item.full_name}</span>
-                        </td>
-
-                        <td style={{ padding: "13px 16px", verticalAlign: "top", minWidth: 220 }}>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <span style={{ color: "var(--color-text)" }}>{item.email}</span>
-                            {item.phone_number ? (
-                              <span style={{ color: "var(--color-muted)" }}>{item.phone_number}</span>
-                            ) : (
-                              <span style={{ color: "var(--color-border)" }}>No phone</span>
-                            )}
-                          </div>
-                        </td>
-
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <span style={{ color: "var(--color-text)" }}>{formatEventDate(item.event_date)}</span>
-                        </td>
-
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <EventTypeBadge eventType={item.event_type} />
-                        </td>
-
-                        <td style={{ padding: "13px 16px", whiteSpace: "nowrap", verticalAlign: "top" }}>
-                          <span style={{ color: "var(--color-text)", fontWeight: 500 }}>{item.guest_count}</span>
-                        </td>
-
-                        <td style={{ padding: "13px 16px", verticalAlign: "top", minWidth: 150 }}>
-                          <span style={{ color: item.budget_range ? "var(--color-text)" : "var(--color-muted)" }}>
-                            {getCateringBudgetRangeLabel(item.budget_range)}
-                          </span>
-                        </td>
-
-                        <td style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}>
-                          <StatusBadge status={item.status} />
-                        </td>
-
-                        <td style={{ padding: "13px 16px", color: "var(--color-text)", maxWidth: 280, verticalAlign: "top" }}>
-                          {item.special_requests ? (
-                            <span
-                              style={{
-                                display: "-webkit-box",
-                                WebkitLineClamp: 2,
-                                WebkitBoxOrient: "vertical",
-                                overflow: "hidden",
-                              }}
-                            >
-                              {item.special_requests}
-                            </span>
-                          ) : (
-                            <span style={{ color: "var(--color-border)" }}>No special requests</span>
-                          )}
-                        </td>
-
-                        <td
-                          style={{ padding: "13px 16px", verticalAlign: "top", whiteSpace: "nowrap" }}
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <button
-                            onClick={() => setDeleteTarget(item.id)}
-                            title="Delete"
-                            style={{
-                              padding: "5px 8px",
-                              borderRadius: 8,
-                              border: "1px solid var(--color-border)",
-                              background: "white",
-                              cursor: "pointer",
-                              color: "var(--color-muted)",
-                              display: "inline-flex",
-                              alignItems: "center",
-                            }}
-                          >
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                              <polyline points="3 6 5 6 21 6" />
-                              <path d="M19 6l-1 14H6L5 6" />
-                              <path d="M10 11v6M14 11v6" />
-                              <path d="M9 6V4h6v2" />
-                            </svg>
-                          </button>
-                        </td>
-                      </tr>
-
-                      {isExpanded && (
-                        <ExpandedRow
-                          key={`expanded-${item.id}`}
-                          item={item}
-                          colSpan={COL_COUNT}
-                          onStatusChange={handleStatusChange}
-                          onCommentAdd={handleCommentAdd}
-                        />
-                      )}
-
-                      {isExpanded && !isLast && (
-                        <tr key={`sep-${item.id}`}>
-                          <td colSpan={COL_COUNT} style={{ padding: 0, borderBottom: "1px solid var(--color-border)" }} />
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {!loading && totalPages > 1 && (
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 16 }}>
-          <button
-            onClick={() => setPage((prev) => Math.max(1, prev - 1))}
-            disabled={page === 1}
-            style={{
-              padding: "7px 14px",
-              borderRadius: 10,
-              border: "1px solid var(--color-border)",
-              background: "white",
-              fontSize: 13,
-              color: page === 1 ? "var(--color-border)" : "var(--color-text)",
-              cursor: page === 1 ? "not-allowed" : "pointer",
-            }}
-          >
-            Previous
-          </button>
-          <span style={{ fontSize: 13, color: "var(--color-muted)" }}>
-            Page {page} of {totalPages}
-          </span>
-          <button
-            onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
-            disabled={page === totalPages}
-            style={{
-              padding: "7px 14px",
-              borderRadius: 10,
-              border: "1px solid var(--color-border)",
-              background: "white",
-              fontSize: 13,
-              color: page === totalPages ? "var(--color-border)" : "var(--color-text)",
-              cursor: page === totalPages ? "not-allowed" : "pointer",
-            }}
-          >
-            Next
-          </button>
-        </div>
-      )}
+      {!loading && <AdminPagination page={page} totalPages={totalPages} onPageChange={setPage} />}
 
       <Modal
         isOpen={!!deleteTarget}
@@ -1541,8 +836,8 @@ export default function AdminCateringRequestsPage() {
             fontSize: 14,
             fontWeight: 500,
             color: "white",
-            background: toast.type === "success" ? "var(--color-forest)" : "#c53030",
-            boxShadow: "0 4px 20px rgba(0,0,0,0.15)",
+            background: toast.type === "success" ? "var(--color-forest)" : "var(--color-error-text)",
+            boxShadow: "0 4px 20px color-mix(in srgb, var(--color-text) 15%, transparent)",
           }}
         >
           {toast.message}

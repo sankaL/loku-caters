@@ -132,17 +132,25 @@ def _normalize_requirement_group(raw: Any, index: int) -> ComboRequirementGroup:
     group_name = _normalize_text(raw.get("name")) or f"Group {index + 1}"
     item_ids_raw = raw.get("item_ids")
     if not isinstance(item_ids_raw, list) or len(item_ids_raw) == 0:
-        raise ValueError(f"Combo requirement group '{group_name}' must include at least one item")
+        raise ValueError(
+            f"Combo requirement group '{group_name}' must include at least one item"
+        )
 
-    item_ids = tuple(_normalize_text(item_id) for item_id in item_ids_raw if _normalize_text(item_id))
+    item_ids = tuple(
+        _normalize_text(item_id) for item_id in item_ids_raw if _normalize_text(item_id)
+    )
     if len(item_ids) != len(item_ids_raw):
-        raise ValueError(f"Combo requirement group '{group_name}' contains an empty item id")
+        raise ValueError(
+            f"Combo requirement group '{group_name}' contains an empty item id"
+        )
     if len(set(item_ids)) != len(item_ids):
         raise ValueError(f"Combo requirement group '{group_name}' cannot repeat items")
 
     min_quantity = int(raw.get("min_quantity") or 0)
     if min_quantity < 1:
-        raise ValueError(f"Combo requirement group '{group_name}' min_quantity must be at least 1")
+        raise ValueError(
+            f"Combo requirement group '{group_name}' min_quantity must be at least 1"
+        )
 
     return ComboRequirementGroup(
         id=group_id,
@@ -152,7 +160,9 @@ def _normalize_requirement_group(raw: Any, index: int) -> ComboRequirementGroup:
     )
 
 
-def _legacy_requirements_to_groups(requirements_raw: Any) -> tuple[ComboRequirementGroup, ...]:
+def _legacy_requirements_to_groups(
+    requirements_raw: Any,
+) -> tuple[ComboRequirementGroup, ...]:
     if not isinstance(requirements_raw, list) or len(requirements_raw) == 0:
         return ()
     groups: list[ComboRequirementGroup] = []
@@ -174,7 +184,9 @@ def _group_item_label(group: ComboRequirementGroup, item_names: dict[str, str]) 
     return _format_name_list(labels)
 
 
-def _group_requirement_label(group: ComboRequirementGroup, item_names: dict[str, str]) -> str:
+def _group_requirement_label(
+    group: ComboRequirementGroup, item_names: dict[str, str]
+) -> str:
     return f"{group.min_quantity} x {_group_item_label(group, item_names)}"
 
 
@@ -199,7 +211,11 @@ def normalize_combo_deals(
                     for group in raw.requirement_groups
                     for item_id in group.item_ids
                 }
-                missing_item_ids = sorted(item_id for item_id in combo_item_ids if item_id not in allowed_item_ids)
+                missing_item_ids = sorted(
+                    item_id
+                    for item_id in combo_item_ids
+                    if item_id not in allowed_item_ids
+                )
                 if missing_item_ids:
                     raise ValueError(
                         f"Combo deal '{raw.name}' references items not selected for the event: {', '.join(missing_item_ids)}"
@@ -232,22 +248,32 @@ def normalize_combo_deals(
             requirement_groups = _legacy_requirements_to_groups(raw.get("requirements"))
 
         if not requirement_groups:
-            raise ValueError(f"Combo deal '{name}' must include at least one requirement group")
+            raise ValueError(
+                f"Combo deal '{name}' must include at least one requirement group"
+            )
 
         group_ids = [group.id for group in requirement_groups]
         if len(set(group_ids)) != len(group_ids):
-            raise ValueError(f"Combo deal '{name}' cannot include duplicate requirement group ids")
+            raise ValueError(
+                f"Combo deal '{name}' cannot include duplicate requirement group ids"
+            )
 
         seen_group_items: set[str] = set()
         for group in requirement_groups:
             overlapping = seen_group_items.intersection(group.item_ids)
             if overlapping:
                 overlap_copy = ", ".join(sorted(overlapping))
-                raise ValueError(f"Combo deal '{name}' repeats items across groups: {overlap_copy}")
+                raise ValueError(
+                    f"Combo deal '{name}' repeats items across groups: {overlap_copy}"
+                )
             seen_group_items.update(group.item_ids)
 
         if allowed_item_ids is not None:
-            missing_item_ids = sorted(item_id for item_id in seen_group_items if item_id not in allowed_item_ids)
+            missing_item_ids = sorted(
+                item_id
+                for item_id in seen_group_items
+                if item_id not in allowed_item_ids
+            )
             if missing_item_ids:
                 raise ValueError(
                     f"Combo deal '{name}' references items not selected for the event: {', '.join(missing_item_ids)}"
@@ -259,36 +285,56 @@ def normalize_combo_deals(
 
         discount_type = _normalize_text(discount_raw.get("type"))
         if discount_type not in {"fixed_amount", "percentage"}:
-            raise ValueError(f"Combo deal '{name}' discount.type must be 'fixed_amount' or 'percentage'")
+            raise ValueError(
+                f"Combo deal '{name}' discount.type must be 'fixed_amount' or 'percentage'"
+            )
 
         amount_value = round(float(discount_raw.get("amount") or 0), 2)
         if amount_value <= 0:
-            raise ValueError(f"Combo deal '{name}' discount amount must be greater than 0")
+            raise ValueError(
+                f"Combo deal '{name}' discount amount must be greater than 0"
+            )
         if discount_type == "percentage" and amount_value > 100:
-            raise ValueError(f"Combo deal '{name}' percentage discounts cannot exceed 100")
+            raise ValueError(
+                f"Combo deal '{name}' percentage discounts cannot exceed 100"
+            )
 
         applies_to_raw = _normalize_text(discount_raw.get("applies_to"))
         if applies_to_raw not in {"combo_total", "item", "group"}:
-            raise ValueError(f"Combo deal '{name}' discount.applies_to must be 'combo_total', 'item', or 'group'")
+            raise ValueError(
+                f"Combo deal '{name}' discount.applies_to must be 'combo_total', 'item', or 'group'"
+            )
 
         target_group_id = _normalize_text(discount_raw.get("target_group_id")) or None
         target_item_id = _normalize_text(discount_raw.get("target_item_id")) or None
 
         if applies_to_raw == "group":
             if not target_group_id:
-                raise ValueError(f"Combo deal '{name}' requires discount.target_group_id when applies_to is 'group'")
+                raise ValueError(
+                    f"Combo deal '{name}' requires discount.target_group_id when applies_to is 'group'"
+                )
             if target_group_id not in group_ids:
-                raise ValueError(f"Combo deal '{name}' target group must be one of its requirement groups")
+                raise ValueError(
+                    f"Combo deal '{name}' target group must be one of its requirement groups"
+                )
             applies_to = "group"
         elif applies_to_raw == "item":
             if not target_item_id:
-                raise ValueError(f"Combo deal '{name}' requires discount.target_item_id when applies_to is 'item'")
+                raise ValueError(
+                    f"Combo deal '{name}' requires discount.target_item_id when applies_to is 'item'"
+                )
             target_group_id = next(
-                (group.id for group in requirement_groups if target_item_id in group.item_ids),
+                (
+                    group.id
+                    for group in requirement_groups
+                    if target_item_id in group.item_ids
+                ),
                 None,
             )
             if not target_group_id:
-                raise ValueError(f"Combo deal '{name}' target item must belong to one of its requirement groups")
+                raise ValueError(
+                    f"Combo deal '{name}' target item must belong to one of its requirement groups"
+                )
             applies_to = "group"
         else:
             target_group_id = None
@@ -349,7 +395,11 @@ def combo_discount_scope_label(combo: ComboDeal, item_names: dict[str, str]) -> 
     if combo.discount.applies_to == "combo_total":
         return "Whole combo"
     target_group = next(
-        (group for group in combo.requirement_groups if group.id == combo.discount.target_group_id),
+        (
+            group
+            for group in combo.requirement_groups
+            if group.id == combo.discount.target_group_id
+        ),
         None,
     )
     if target_group is None:
@@ -357,7 +407,9 @@ def combo_discount_scope_label(combo: ComboDeal, item_names: dict[str, str]) -> 
     return _group_item_label(target_group, item_names)
 
 
-def combo_preview_text(combo: ComboDeal, item_names: dict[str, str], currency: str) -> str:
+def combo_preview_text(
+    combo: ComboDeal, item_names: dict[str, str], currency: str
+) -> str:
     requirement_copy = ", ".join(
         _group_requirement_label(group, item_names)
         for group in combo.requirement_groups
@@ -365,7 +417,9 @@ def combo_preview_text(combo: ComboDeal, item_names: dict[str, str], currency: s
     if combo.discount.type == "fixed_amount":
         discount_amount = format_currency(combo.discount.amount_value, currency)
     else:
-        normalized_percent = f"{combo.discount.amount_value:.2f}".rstrip("0").rstrip(".")
+        normalized_percent = f"{combo.discount.amount_value:.2f}".rstrip("0").rstrip(
+            "."
+        )
         discount_amount = f"{normalized_percent}%"
     if combo.discount.applies_to == "combo_total":
         return f"Buy {requirement_copy} and save {discount_amount} on the combo."
@@ -441,7 +495,10 @@ def _group_consumption_candidates(
     state_to_quantity: dict[str, int],
     prices_cents: dict[str, int],
 ) -> tuple[tuple[tuple[str, int], ...], ...]:
-    if combo.discount.applies_to == "group" and group.id == combo.discount.target_group_id:
+    if (
+        combo.discount.applies_to == "group"
+        and group.id == combo.discount.target_group_id
+    ):
         full_consumption = _full_group_consumption(group, state, state_to_quantity)
         if sum(quantity for _, quantity in full_consumption) < group.min_quantity:
             return ()
@@ -501,7 +558,9 @@ def _allocate_discount_from_consumption(
             key=lambda item_id: (-contributions[item_id], item_id),
         )[0]
         allocations[highest_item_id] += remainder
-    return tuple(sorted((item_id, cents) for item_id, cents in allocations.items() if cents > 0))
+    return tuple(
+        sorted((item_id, cents) for item_id, cents in allocations.items() if cents > 0)
+    )
 
 
 def _build_combo_application(
@@ -513,11 +572,15 @@ def _build_combo_application(
     currency: str,
 ) -> Optional[ComboApplication]:
     consumed_quantities: list[tuple[str, int]] = []
-    group_consumption_lookup = {group_id: consumption for group_id, consumption in group_consumptions}
+    group_consumption_lookup = {
+        group_id: consumption for group_id, consumption in group_consumptions
+    }
     total_consumed_cents = 0
     for _, consumption in group_consumptions:
         consumed_quantities.extend(consumption)
-        total_consumed_cents += _group_consumption_total_cents(consumption, prices_cents)
+        total_consumed_cents += _group_consumption_total_cents(
+            consumption, prices_cents
+        )
 
     if total_consumed_cents <= 0:
         return None
@@ -526,14 +589,20 @@ def _build_combo_application(
         applicable_consumption = tuple(sorted(consumed_quantities))
         applicable_total_cents = total_consumed_cents
     else:
-        applicable_consumption = group_consumption_lookup.get(combo.discount.target_group_id or "", ())
-        applicable_total_cents = _group_consumption_total_cents(applicable_consumption, prices_cents)
+        applicable_consumption = group_consumption_lookup.get(
+            combo.discount.target_group_id or "", ()
+        )
+        applicable_total_cents = _group_consumption_total_cents(
+            applicable_consumption, prices_cents
+        )
 
     if applicable_total_cents <= 0:
         return None
 
     if combo.discount.type == "fixed_amount":
-        savings_cents = min(_to_cents(combo.discount.amount_value), applicable_total_cents)
+        savings_cents = min(
+            _to_cents(combo.discount.amount_value), applicable_total_cents
+        )
     else:
         savings_cents = min(
             int(round(applicable_total_cents * combo.discount.amount_value / 100.0)),
@@ -544,9 +613,21 @@ def _build_combo_application(
 
     preview_text = combo_preview_text(combo, item_names, currency)
     discount_scope_label = combo_discount_scope_label(combo, item_names)
-    discount_allocations = _allocate_discount_from_consumption(applicable_consumption, prices_cents, savings_cents)
-    consumed_quantities_tuple = tuple(sorted((item_id, quantity) for item_id, quantity in consumed_quantities if quantity > 0))
-    preference_score = applicable_total_cents if combo.discount.applies_to == "group" else total_consumed_cents
+    discount_allocations = _allocate_discount_from_consumption(
+        applicable_consumption, prices_cents, savings_cents
+    )
+    consumed_quantities_tuple = tuple(
+        sorted(
+            (item_id, quantity)
+            for item_id, quantity in consumed_quantities
+            if quantity > 0
+        )
+    )
+    preference_score = (
+        applicable_total_cents
+        if combo.discount.applies_to == "group"
+        else total_consumed_cents
+    )
 
     return ComboApplication(
         combo_id=combo.id,
@@ -593,9 +674,13 @@ def _build_combo_applications_for_state(
             return ()
         group_consumption_options.append(candidates)
 
-    applications_by_consumption: dict[tuple[tuple[str, int], ...], ComboApplication] = {}
+    applications_by_consumption: dict[
+        tuple[tuple[str, int], ...], ComboApplication
+    ] = {}
 
-    def collect(index: int, current: list[tuple[str, tuple[tuple[str, int], ...]]]) -> None:
+    def collect(
+        index: int, current: list[tuple[str, tuple[tuple[str, int], ...]]]
+    ) -> None:
         if index == len(group_consumption_options):
             application = _build_combo_application(
                 combo=combo,
@@ -605,7 +690,9 @@ def _build_combo_applications_for_state(
                 currency=currency,
             )
             if application is not None:
-                applications_by_consumption.setdefault(application.consumed_quantities, application)
+                applications_by_consumption.setdefault(
+                    application.consumed_quantities, application
+                )
             return
 
         group = combo.requirement_groups[index]
@@ -617,7 +704,9 @@ def _build_combo_applications_for_state(
     collect(0, [])
 
     applications = list(applications_by_consumption.values())
-    applications.sort(key=lambda application: (-application.savings_cents, application.tie_key))
+    applications.sort(
+        key=lambda application: (-application.savings_cents, application.tie_key)
+    )
     return tuple(applications)
 
 
@@ -636,13 +725,17 @@ def _allocate_line_discounts(
         if not item_lines or discount_cents <= 0:
             continue
 
-        item_total_cents = sum(base_totals_cents_by_line[line.line_id] for line in item_lines)
+        item_total_cents = sum(
+            base_totals_cents_by_line[line.line_id] for line in item_lines
+        )
         if item_total_cents <= 0:
             continue
 
         allocated = 0
         for line in item_lines:
-            share = (discount_cents * base_totals_cents_by_line[line.line_id]) // item_total_cents
+            share = (
+                discount_cents * base_totals_cents_by_line[line.line_id]
+            ) // item_total_cents
             share = min(share, base_totals_cents_by_line[line.line_id])
             line_discounts[line.line_id] += share
             allocated += share
@@ -651,12 +744,17 @@ def _allocate_line_discounts(
         if remainder > 0:
             highest_line = sorted(
                 item_lines,
-                key=lambda line: (-base_totals_cents_by_line[line.line_id], line.line_id),
+                key=lambda line: (
+                    -base_totals_cents_by_line[line.line_id],
+                    line.line_id,
+                ),
             )[0]
             line_discounts[highest_line.line_id] += remainder
 
     for line in lines:
-        line_discounts[line.line_id] = min(line_discounts[line.line_id], base_totals_cents_by_line[line.line_id])
+        line_discounts[line.line_id] = min(
+            line_discounts[line.line_id], base_totals_cents_by_line[line.line_id]
+        )
     return line_discounts
 
 
@@ -687,8 +785,14 @@ def quote_cart(
     currency: str,
 ) -> dict[str, Any]:
     item_lookup = {str(item["id"]): item for item in items}
-    price_cents_by_item = {item_id: effective_item_price_cents(item) for item_id, item in item_lookup.items()}
-    item_names = {item_id: str(item.get("name") or item_id) for item_id, item in item_lookup.items()}
+    price_cents_by_item = {
+        item_id: effective_item_price_cents(item)
+        for item_id, item in item_lookup.items()
+    }
+    item_names = {
+        item_id: str(item.get("name") or item_id)
+        for item_id, item in item_lookup.items()
+    }
 
     normalized_lines: list[PricingLineInput] = []
     for line in lines:
@@ -698,18 +802,28 @@ def quote_cart(
         quantity = int(line.quantity)
         if quantity < 1:
             raise ValueError(f"Quantity must be at least 1 for item {item_id}")
-        normalized_lines.append(PricingLineInput(line_id=str(line.line_id), item_id=item_id, quantity=quantity))
+        normalized_lines.append(
+            PricingLineInput(
+                line_id=str(line.line_id), item_id=item_id, quantity=quantity
+            )
+        )
 
     normalized_combo_deals = [
         combo
-        for combo in normalize_combo_deals(combo_deals, allowed_item_ids=set(item_lookup.keys()))
+        for combo in normalize_combo_deals(
+            combo_deals, allowed_item_ids=set(item_lookup.keys())
+        )
         if combo.enabled
     ]
-    normalized_combo_deals.sort(key=lambda combo: (combo.sort_order, combo.name.lower(), combo.id))
+    normalized_combo_deals.sort(
+        key=lambda combo: (combo.sort_order, combo.name.lower(), combo.id)
+    )
 
     quantities_by_item: dict[str, int] = {}
     for line in normalized_lines:
-        quantities_by_item[line.item_id] = quantities_by_item.get(line.item_id, 0) + line.quantity
+        quantities_by_item[line.item_id] = (
+            quantities_by_item.get(line.item_id, 0) + line.quantity
+        )
 
     combo_item_ids = sorted(
         {
@@ -719,11 +833,15 @@ def quote_cart(
             for item_id in group.item_ids
         }
     )
-    initial_state = tuple(quantities_by_item.get(item_id, 0) for item_id in combo_item_ids)
+    initial_state = tuple(
+        quantities_by_item.get(item_id, 0) for item_id in combo_item_ids
+    )
     state_to_quantity = {item_id: index for index, item_id in enumerate(combo_item_ids)}
 
     @lru_cache(maxsize=None)
-    def combo_applications(combo_index: int, state: tuple[int, ...]) -> tuple[ComboApplication, ...]:
+    def combo_applications(
+        combo_index: int, state: tuple[int, ...]
+    ) -> tuple[ComboApplication, ...]:
         return _build_combo_applications_for_state(
             combo=normalized_combo_deals[combo_index],
             state=state,
@@ -735,7 +853,7 @@ def quote_cart(
 
     @lru_cache(maxsize=None)
     def best_applications(
-        state: tuple[int, ...]
+        state: tuple[int, ...],
     ) -> tuple[int, tuple[tuple[Any, ...], ...], tuple[ComboApplication, ...]]:
         best_savings = 0
         best_keys: tuple[tuple[Any, ...], ...] = ()
@@ -750,7 +868,9 @@ def quote_cart(
                         break
                     next_state[idx] -= quantity
                 else:
-                    child_savings, child_keys, child_selected = best_applications(tuple(next_state))
+                    child_savings, child_keys, child_selected = best_applications(
+                        tuple(next_state)
+                    )
                     total_savings = application.savings_cents + child_savings
                     candidate_keys = (application.tie_key,) + child_keys
                     candidate_selected = (application,) + child_selected
@@ -758,7 +878,9 @@ def quote_cart(
                         best_savings = total_savings
                         best_keys = candidate_keys
                         best_selected = candidate_selected
-                    elif total_savings == best_savings and (not best_keys or candidate_keys < best_keys):
+                    elif total_savings == best_savings and (
+                        not best_keys or candidate_keys < best_keys
+                    ):
                         best_keys = candidate_keys
                         best_selected = candidate_selected
 
@@ -767,12 +889,16 @@ def quote_cart(
     best_discount_cents, _, chosen_applications = best_applications(initial_state)
 
     remaining_quantities = dict(quantities_by_item)
-    item_discount_cents: dict[str, int] = {item_id: 0 for item_id in quantities_by_item.keys()}
+    item_discount_cents: dict[str, int] = {
+        item_id: 0 for item_id in quantities_by_item.keys()
+    }
     grouped_applied_combos: dict[str, dict[str, Any]] = {}
 
     for application in chosen_applications:
         for item_id, quantity in application.consumed_quantities:
-            remaining_quantities[item_id] = remaining_quantities.get(item_id, 0) - quantity
+            remaining_quantities[item_id] = (
+                remaining_quantities.get(item_id, 0) - quantity
+            )
         for item_id, cents in application.discount_allocations:
             item_discount_cents[item_id] = item_discount_cents.get(item_id, 0) + cents
 
@@ -796,13 +922,17 @@ def quote_cart(
         line.line_id: price_cents_by_item[line.item_id] * line.quantity
         for line in normalized_lines
     }
-    line_discounts_cents = _allocate_line_discounts(normalized_lines, base_totals_cents_by_line, item_discount_cents)
+    line_discounts_cents = _allocate_line_discounts(
+        normalized_lines, base_totals_cents_by_line, item_discount_cents
+    )
 
     line_results: list[dict[str, Any]] = []
     subtotal_cents = 0
     for line in normalized_lines:
         base_total_cents = base_totals_cents_by_line[line.line_id]
-        discount_cents = min(line_discounts_cents.get(line.line_id, 0), base_total_cents)
+        discount_cents = min(
+            line_discounts_cents.get(line.line_id, 0), base_total_cents
+        )
         final_total_cents = base_total_cents - discount_cents
         subtotal_cents += base_total_cents
         line_results.append(
@@ -816,14 +946,18 @@ def quote_cart(
                 "discount_total": cents_to_amount(discount_cents),
                 "total_price": cents_to_amount(final_total_cents),
                 "applied_combo_ids": sorted(
-                    combo_id for combo_id, combo in grouped_applied_combos.items() if combo["savings_cents"] > 0
+                    combo_id
+                    for combo_id, combo in grouped_applied_combos.items()
+                    if combo["savings_cents"] > 0
                 ),
             }
         )
 
     opportunities: list[dict[str, Any]] = []
     if sum(quantities_by_item.values()) > 0:
-        current_state = tuple(quantities_by_item.get(item_id, 0) for item_id in combo_item_ids)
+        current_state = tuple(
+            quantities_by_item.get(item_id, 0) for item_id in combo_item_ids
+        )
         for combo in normalized_combo_deals:
             current_candidates = _build_combo_applications_for_state(
                 combo=combo,
@@ -841,7 +975,10 @@ def quote_cart(
             hypothetical_quantities = dict(quantities_by_item)
 
             for group in combo.requirement_groups:
-                current_qty = sum(max(0, quantities_by_item.get(item_id, 0)) for item_id in group.item_ids)
+                current_qty = sum(
+                    max(0, quantities_by_item.get(item_id, 0))
+                    for item_id in group.item_ids
+                )
                 if current_qty > 0:
                     matched_requirement_count += 1
                 missing_qty = max(0, group.min_quantity - current_qty)
@@ -854,7 +991,9 @@ def quote_cart(
                     prices_cents=price_cents_by_item,
                     item_names=item_names,
                 )
-                hypothetical_quantities[preferred_item_id] = hypothetical_quantities.get(preferred_item_id, 0) + missing_qty
+                hypothetical_quantities[preferred_item_id] = (
+                    hypothetical_quantities.get(preferred_item_id, 0) + missing_qty
+                )
                 options = [
                     {
                         "item_id": item_id,
@@ -869,7 +1008,9 @@ def quote_cart(
                         "group_id": group.id,
                         "group_name": group.name,
                         "item_id": preferred_item_id,
-                        "item_name": item_names.get(preferred_item_id, preferred_item_id),
+                        "item_name": item_names.get(
+                            preferred_item_id, preferred_item_id
+                        ),
                         "missing_quantity": missing_qty,
                         "group_min_quantity": group.min_quantity,
                         "options": options,
@@ -879,7 +1020,9 @@ def quote_cart(
             if not missing_requirements or matched_requirement_count == 0:
                 continue
 
-            hypothetical_state = tuple(hypothetical_quantities.get(item_id, 0) for item_id in combo_item_ids)
+            hypothetical_state = tuple(
+                hypothetical_quantities.get(item_id, 0) for item_id in combo_item_ids
+            )
             candidates = _build_combo_applications_for_state(
                 combo=combo,
                 state=hypothetical_state,
@@ -929,7 +1072,11 @@ def quote_cart(
             }
             for combo_id, entry in grouped_applied_combos.items()
         ),
-        key=lambda entry: (-_to_cents(entry["savings_total"]), entry["name"].lower(), entry["combo_id"]),
+        key=lambda entry: (
+            -_to_cents(entry["savings_total"]),
+            entry["name"].lower(),
+            entry["combo_id"],
+        ),
     )
 
     return {

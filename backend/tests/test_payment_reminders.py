@@ -109,12 +109,26 @@ class PaymentReminderTests(unittest.TestCase):
         db = FakeSession(order=order, location=SimpleNamespace(address="123 Main St"))
         active_etransfer = {"enabled": True, "email": "payments@example.com"}
 
-        with patch("routers.admin._get_reminder_context", return_value=({}, "April 2, 2026", active_etransfer)):
+        with patch(
+            "routers.admin._get_reminder_context",
+            return_value=({}, "April 2, 2026", active_etransfer),
+        ):
             with patch("routers.admin._get_order_group_rows", return_value=[order]):
                 with patch("routers.admin.send_payment_reminder") as mock_send:
                     result = admin_send_single_payment_reminder("order-1", db, {})
 
-        self.assertEqual(result, {"success": True, "order_id": "order-1", "status": "sent", "message": "Payment reminder sent", "email": "test@example.com", "name": "Test Customer", "reminded": False})
+        self.assertEqual(
+            result,
+            {
+                "success": True,
+                "order_id": "order-1",
+                "status": "sent",
+                "message": "Payment reminder sent",
+                "email": "test@example.com",
+                "name": "Test Customer",
+                "reminded": False,
+            },
+        )
         mock_send.assert_called_once()
         payload = mock_send.call_args.args[0]
         self.assertEqual(payload["email"], "test@example.com")
@@ -170,10 +184,28 @@ class PaymentReminderTests(unittest.TestCase):
         self.assertEqual(payload["address"], "789 Random Road")
 
     def test_grouped_payment_reminder_sends_single_summary(self):
-        first = make_order(id="order-1", group_id="group-1", item_name="Lamprais", quantity=1, total_price=24.0, base_total_price=24.0)
-        second = make_order(id="order-2", group_id="group-1", item_name="Fish Cutlet", quantity=2, total_price=12.0, base_total_price=12.0)
+        first = make_order(
+            id="order-1",
+            group_id="group-1",
+            item_name="Lamprais",
+            quantity=1,
+            total_price=24.0,
+            base_total_price=24.0,
+        )
+        second = make_order(
+            id="order-2",
+            group_id="group-1",
+            item_name="Fish Cutlet",
+            quantity=2,
+            total_price=12.0,
+            base_total_price=12.0,
+        )
         db = FakeSession(order=first, location=SimpleNamespace(address="123 Main St"))
-        event = SimpleNamespace(event_date="April 2, 2026", etransfer_enabled=True, etransfer_email="payments@example.com")
+        event = SimpleNamespace(
+            event_date="April 2, 2026",
+            etransfer_enabled=True,
+            etransfer_email="payments@example.com",
+        )
 
         with patch("routers.admin._get_order_group_rows", return_value=[first, second]):
             with patch("routers.admin.send_payment_reminder") as mock_send:
@@ -242,7 +274,10 @@ class PaymentReminderTests(unittest.TestCase):
             )
 
         self.assertEqual(result["status"], "skipped_not_confirmed")
-        self.assertEqual(result["message"], "Only confirmed or picked up unpaid orders can be reminded")
+        self.assertEqual(
+            result["message"],
+            "Only confirmed or picked up unpaid orders can be reminded",
+        )
 
     def test_payment_reminder_skips_missing_email(self):
         order = make_order(email="   ")
@@ -281,7 +316,9 @@ class PaymentReminderTests(unittest.TestCase):
         db = FakeSession(order=order, location=SimpleNamespace(address="123 Main St"))
 
         with patch("routers.admin._get_order_group_rows", return_value=[order]):
-            with patch("routers.admin.send_payment_reminder", side_effect=RuntimeError("boom")):
+            with patch(
+                "routers.admin.send_payment_reminder", side_effect=RuntimeError("boom")
+            ):
                 result = _send_order_payment_reminder(
                     order,
                     db,

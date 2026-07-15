@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import ReviewTicker from "@/components/ui/ReviewTicker";
+import CustomerReviewsSection from "@/components/CustomerReviewsSection";
 import type { PublicReview } from "@/components/ui/ReviewTicker";
 import { API_URL } from "@/config/event";
 import type { EventConfig } from "@/config/event";
@@ -122,39 +122,11 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
         </div>
       </section>
 
-      {/* What Our Customers Say */}
-      {reviews.length > 0 && (
-        <section className="pb-24 px-6 bg-[color:var(--color-cream)]">
-          <div className="max-w-5xl mx-auto">
-            <div className="text-center mb-10 animate-fade-up">
-              <span className="text-sm font-bold tracking-widest uppercase text-[color:var(--color-bark)] block mb-3">
-                Customers
-              </span>
-              <h2
-                className="text-3xl md:text-4xl font-bold text-[color:var(--color-forest)]"
-                style={{ fontFamily: "var(--font-serif)" }}
-              >
-                What Our Customers Say
-              </h2>
-            </div>
-          </div>
-          <div style={{ opacity: 0.75 }}>
-            <ReviewTicker reviews={reviews} />
-          </div>
-          <div className="text-center mt-10">
-            <Link
-              href="/reviews"
-              className="inline-flex items-center gap-2 text-[color:var(--color-sage)] font-semibold hover:text-[color:var(--color-forest)] transition-colors"
-            >
-              Share your experience
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14"></path>
-                <path d="m12 5 7 7-7 7"></path>
-              </svg>
-            </Link>
-          </div>
-        </section>
-      )}
+      <CustomerReviewsSection
+        reviews={reviews}
+        className="pb-24 px-6 bg-[color:var(--color-cream)]"
+        showShareLink
+      />
 
       {/* Signature Dishes */}
       <section className="py-24 px-6">

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Archive,
@@ -27,6 +27,8 @@ import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import CustomSelect from "@/components/ui/CustomSelect";
 import Modal from "@/components/ui/Modal";
+import { useAdminToast } from "@/hooks/useAdminToast";
+import { useObjectState } from "@/hooks/useObjectState";
 import {
   buildOriginalRow,
   cloneSnapshot,
@@ -91,6 +93,15 @@ interface ReportItemTypeTotal {
   share: number;
 }
 
+interface CustomerHandoffRow {
+  location: string;
+  timeSlot: string;
+  customer: string;
+  status: string;
+  items: string[];
+  notes: string[];
+}
+
 interface ConfirmDialogState {
   intent: ConfirmIntent;
   title: string;
@@ -98,6 +109,14 @@ interface ConfirmDialogState {
   confirmLabel: string;
   rowId?: string;
   variant?: "default" | "danger";
+}
+
+interface PlanningFilters {
+  search: string;
+  status: string;
+  location: string;
+  item: string;
+  needsReview: boolean;
 }
 
 function makeDropId(location: string, timeSlot: string) {
@@ -109,6 +128,36 @@ function parseDropId(id: string) {
   return { location: location || "Unassigned", timeSlot: timeSlot || "Unassigned" };
 }
 
+function handoffValue(value: string | null | undefined, fallback: string): string {
+  return value || fallback;
+}
+
+function addUniqueNote(notes: string[], note: string | null | undefined, prepend = false) {
+  if (!note || notes.includes(note)) return;
+  if (prepend) notes.unshift(note);
+  else notes.push(note);
+}
+
+function buildCustomerHandoffRows(snapshot: EventPlanSnapshot): CustomerHandoffRow[] {
+  const bundleNotes = new Map(snapshot.bundles.map((bundle) => [bundle.bundle_id, bundle.order_notes || ""]));
+  const rows = new Map<string, CustomerHandoffRow>();
+  for (const row of snapshot.planned_rows.filter((entry) => entry.row_state !== "removed")) {
+    const location = handoffValue(row.pickup_location, "Unassigned");
+    const timeSlot = handoffValue(row.pickup_time_slot, "Unassigned");
+    const customer = handoffValue(row.customer_name, "Extra");
+    const status = handoffValue(row.status, "extra");
+    const key = [location, timeSlot, customer, status, row.source_bundle_id || ""].join("|||");
+    const current = rows.get(key) ?? { location, timeSlot, customer, status, items: [], notes: [] };
+    current.items.push(`${row.planned_item_name} x${row.quantity}`);
+    addUniqueNote(current.notes, row.notes);
+    addUniqueNote(current.notes, bundleNotes.get(row.source_bundle_id || ""), true);
+    rows.set(key, current);
+  }
+  return Array.from(rows.values()).sort((a, b) =>
+    `${a.location} ${a.timeSlot} ${a.customer}`.localeCompare(`${b.location} ${b.timeSlot} ${b.customer}`),
+  );
+}
+
 function statusTone(status: string) {
   if (status === "confirmed" || status === "ready" || status === "picked_up") return "success";
   if (status === "pending" || status === "draft") return "warning";
@@ -116,36 +165,22 @@ function statusTone(status: string) {
   return "muted";
 }
 
+const PILL_STYLES = {
+  success: { background: "var(--color-success-bg)", color: "var(--color-success-text)", border: "var(--color-success-border)" },
+  warning: { background: "var(--color-warning-bg)", color: "var(--color-warning-text)", border: "var(--color-warning-border)" },
+  error: { background: "var(--color-error-bg)", color: "var(--color-error-text)", border: "var(--color-error-border)" },
+  muted: { background: "var(--color-cream)", color: "var(--color-muted)", border: "var(--color-border)" },
+} as const;
+
 function Pill({ children, tone = "muted" }: { children: React.ReactNode; tone?: "success" | "warning" | "error" | "muted" }) {
+  const style = PILL_STYLES[tone];
   return (
     <span
       className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-semibold"
       style={{
-        background:
-          tone === "success"
-            ? "var(--color-success-bg)"
-            : tone === "warning"
-              ? "var(--color-warning-bg)"
-              : tone === "error"
-                ? "var(--color-error-bg)"
-                : "var(--color-cream)",
-        color:
-          tone === "success"
-            ? "var(--color-success-text)"
-            : tone === "warning"
-              ? "var(--color-warning-text)"
-              : tone === "error"
-                ? "var(--color-error-text)"
-                : "var(--color-muted)",
-        border: `1px solid ${
-          tone === "success"
-            ? "var(--color-success-border)"
-            : tone === "warning"
-              ? "var(--color-warning-border)"
-              : tone === "error"
-                ? "var(--color-error-border)"
-                : "var(--color-border)"
-        }`,
+        background: style.background,
+        color: style.color,
+        border: `1px solid ${style.border}`,
       }}
     >
       {children}
@@ -160,6 +195,42 @@ function getSplitGroupKey(row: EventPlanRow) {
 
 function stopDrag(event: React.PointerEvent<HTMLElement>) {
   event.stopPropagation();
+}
+
+function PlanRowAction({
+  rowId,
+  hasSplitRows,
+  isExtra,
+  readOnly,
+  onOpenSplit,
+  onMergeSplit,
+}: {
+  rowId: string;
+  hasSplitRows: boolean;
+  isExtra: boolean;
+  readOnly: boolean;
+  onOpenSplit: (rowId: string) => void;
+  onMergeSplit: (rowId: string) => void;
+}) {
+  const action = hasSplitRows
+    ? { label: "Merge", title: "Merge split rows", icon: <GitMerge size={14} weight="bold" />, onClick: onMergeSplit }
+    : isExtra
+      ? { label: "Edit", title: "Edit extra row", icon: <NotePencil size={14} weight="bold" />, onClick: onOpenSplit }
+      : { label: "Split", title: "Split item", icon: <Scissors size={14} weight="bold" />, onClick: onOpenSplit };
+  return (
+    <button
+      type="button"
+      onPointerDown={stopDrag}
+      onClick={() => action.onClick(rowId)}
+      disabled={readOnly}
+      className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
+      style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
+      title={action.title}
+    >
+      {action.icon}
+      {action.label}
+    </button>
+  );
 }
 
 function DraggablePlanRow({
@@ -231,46 +302,14 @@ function DraggablePlanRow({
               {row.notes && <Pill><NotePencil size={12} weight="bold" /> Note</Pill>}
             </div>
             <div className="flex items-center gap-2">
-              {hasSplitRows ? (
-                <button
-                  type="button"
-                  onPointerDown={stopDrag}
-                  onClick={() => onMergeSplit(row.id)}
-                  disabled={readOnly}
-                  className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
-                  style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
-                  title="Merge split rows"
-                >
-                  <GitMerge size={14} weight="bold" />
-                  Merge
-                </button>
-              ) : isExtra ? (
-                <button
-                  type="button"
-                  onPointerDown={stopDrag}
-                  onClick={() => onOpenSplit(row.id)}
-                  disabled={readOnly}
-                  className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
-                  style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
-                  title="Edit extra row"
-                >
-                  <NotePencil size={14} weight="bold" />
-                  Edit
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  onPointerDown={stopDrag}
-                  onClick={() => onOpenSplit(row.id)}
-                  disabled={readOnly}
-                  className="inline-flex items-center gap-1 rounded-xl border px-2.5 py-1.5 text-xs font-semibold transition-all active:scale-[0.98] disabled:opacity-55"
-                  style={{ borderColor: "var(--color-border)", color: "var(--color-forest)", background: "var(--color-cream)" }}
-                  title="Split item"
-                >
-                  <Scissors size={14} weight="bold" />
-                  Split
-                </button>
-              )}
+              <PlanRowAction
+                rowId={row.id}
+                hasSplitRows={hasSplitRows}
+                isExtra={isExtra}
+                readOnly={readOnly}
+                onOpenSplit={onOpenSplit}
+                onMergeSplit={onMergeSplit}
+              />
               <button
                 type="button"
                 onPointerDown={stopDrag}
@@ -486,134 +525,7 @@ function SkeletonEditor() {
   );
 }
 
-export default function PlanningEditorClient({ planId }: PlanningEditorClientProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
-
-  const [plan, setPlan] = useState<EventPlan | null>(null);
-  const [snapshot, setSnapshot] = useState<EventPlanSnapshot | null>(null);
-  const [savedSnapshotText, setSavedSnapshotText] = useState("");
-  const [name, setName] = useState("");
-  const [savedName, setSavedName] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<EditorTab>("board");
-  const [activeSplitRowId, setActiveSplitRowId] = useState<string | null>(null);
-  const [splitDraftRows, setSplitDraftRows] = useState<EventPlanRow[]>([]);
-  const [splitDraftOrderNotes, setSplitDraftOrderNotes] = useState("");
-  const [actionsOpen, setActionsOpen] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState | null>(null);
-  const [filters, setFilters] = useState({
-    search: "",
-    status: "all",
-    location: "all",
-    item: "all",
-    needsReview: false,
-  });
-  const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const splitPanelRef = useRef<HTMLDivElement | null>(null);
-  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
-  const toastTimeoutRef = useRef<number | null>(null);
-
-  const showToast = useCallback((message: string, type: "success" | "error") => {
-    if (toastTimeoutRef.current) window.clearTimeout(toastTimeoutRef.current);
-    setToast({ message, type });
-    toastTimeoutRef.current = window.setTimeout(() => setToast(null), 4200);
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      if (toastTimeoutRef.current) window.clearTimeout(toastTimeoutRef.current);
-    };
-  }, []);
-
-  const loadPlan = useCallback(async (signal?: AbortSignal) => {
-    const token = await getAdminToken();
-    if (!token) return;
-    const res = await fetch(`${API_URL}/api/admin/event-plans/${planId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal,
-    });
-    if (!res.ok) throw new Error(await getApiErrorMessage(res, "Failed to load event plan"));
-    const data = (await res.json()) as EventPlan;
-    if (signal?.aborted) return;
-    const nextSnapshot = normalizeSnapshot(data.snapshot as EventPlanSnapshot);
-    setPlan(data);
-    setSnapshot(nextSnapshot);
-    setSavedSnapshotText(JSON.stringify(nextSnapshot));
-    setName(data.name);
-    setSavedName(data.name);
-    setActiveSplitRowId(null);
-    setSplitDraftRows([]);
-    setSplitDraftOrderNotes("");
-  }, [planId]);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    loadPlan(controller.signal)
-      .catch((error) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        showToast(error instanceof Error ? error.message : "Failed to load event plan", "error");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-    return () => controller.abort();
-  }, [loadPlan, showToast]);
-
-  const isDirty = useMemo(() => {
-    if (!snapshot) return false;
-    return name !== savedName || JSON.stringify(snapshot) !== savedSnapshotText;
-  }, [name, savedName, savedSnapshotText, snapshot]);
-
-  useEffect(() => {
-    if (!isDirty) return;
-    const handler = (event: BeforeUnloadEvent) => {
-      event.preventDefault();
-      event.returnValue = "";
-    };
-    window.addEventListener("beforeunload", handler);
-    return () => window.removeEventListener("beforeunload", handler);
-  }, [isDirty]);
-
-  useEffect(() => {
-    if (!activeSplitRowId) return;
-    function handlePointerDown(event: MouseEvent) {
-      if (splitPanelRef.current && !splitPanelRef.current.contains(event.target as Node)) {
-        setActiveSplitRowId(null);
-        setSplitDraftRows([]);
-        setSplitDraftOrderNotes("");
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [activeSplitRowId]);
-
-  useEffect(() => {
-    if (!actionsOpen) return;
-    function handlePointerDown(event: MouseEvent) {
-      if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
-        setActionsOpen(false);
-      }
-    }
-    document.addEventListener("mousedown", handlePointerDown);
-    return () => document.removeEventListener("mousedown", handlePointerDown);
-  }, [actionsOpen]);
-
-  useEffect(() => {
-    const action = searchParams.get("action");
-    if (!action || !plan || isDirty) return;
-    if (action === "duplicate") {
-      void handleDuplicate();
-    }
-    if (action === "archive" && plan.status !== "archived") {
-      void handleArchive();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [plan, searchParams, isDirty]);
-
+function usePlanningCatalog(snapshot: EventPlanSnapshot | null) {
   const clientTotals = useMemo(() => (snapshot ? getPlanTotals(snapshot) : null), [snapshot]);
 
   const itemNames = useMemo(() => {
@@ -660,6 +572,20 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
     { value: "all", label: "All items" },
     ...itemNames.map((item) => ({ value: item, label: item })),
   ], [itemNames]);
+  return {
+    clientTotals, locations, timeSlots, statusOptions, locationOptions, itemOptions,
+  };
+}
+
+function usePlanningDerivedData(
+  snapshot: EventPlanSnapshot | null,
+  filters: PlanningFilters,
+  activeSplitRowId: string | null,
+  splitDraftRows: EventPlanRow[],
+) {
+  const {
+    clientTotals, locations, timeSlots, statusOptions, locationOptions, itemOptions,
+  } = usePlanningCatalog(snapshot);
 
   const activeSplitRow = useMemo(
     () => snapshot?.planned_rows.find((row) => row.id === activeSplitRowId) ?? null,
@@ -807,34 +733,204 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
   }, [snapshot]);
 
   const customerHandoffRows = useMemo(() => {
-    if (!snapshot) return [];
-    const bundleNotes = new Map(snapshot.bundles.map((bundle) => [bundle.bundle_id, bundle.order_notes || ""]));
-    const map = new Map<string, { location: string; timeSlot: string; customer: string; status: string; items: string[]; notes: string[] }>();
-    for (const row of snapshot.planned_rows) {
-      if (row.row_state === "removed") continue;
-      const key = [
-        row.pickup_location || "Unassigned",
-        row.pickup_time_slot || "Unassigned",
-        row.customer_name || "Extra",
-        row.status || "extra",
-        row.source_bundle_id || "",
-      ].join("|||");
-      const current = map.get(key) ?? {
-        location: row.pickup_location || "Unassigned",
-        timeSlot: row.pickup_time_slot || "Unassigned",
-        customer: row.customer_name || "Extra",
-        status: row.status || "extra",
-        items: [],
-        notes: [],
-      };
-      current.items.push(`${row.planned_item_name} x${row.quantity}`);
-      if (row.notes) current.notes.push(row.notes);
-      const bundleNote = row.source_bundle_id ? bundleNotes.get(row.source_bundle_id) : "";
-      if (bundleNote && !current.notes.includes(bundleNote)) current.notes.unshift(bundleNote);
-      map.set(key, current);
-    }
-    return Array.from(map.values()).sort((a, b) => `${a.location} ${a.timeSlot} ${a.customer}`.localeCompare(`${b.location} ${b.timeSlot} ${b.customer}`));
+    return snapshot ? buildCustomerHandoffRows(snapshot) : [];
   }, [snapshot]);
+  return {
+    clientTotals, statusOptions, locationOptions, itemOptions,
+    activeSplitRow, activeSplitLimit,
+    splitLimitReached, activeSplitBundle, filteredBoardRows, boardLanes,
+    quantityBreakdown, itemTypeTotals, customerHandoffRows,
+  };
+}
+
+function usePlanningEditorUiState() {
+  const [state, setState] = useObjectState({
+    plan: null as EventPlan | null,
+    snapshot: null as EventPlanSnapshot | null,
+    savedSnapshotText: "",
+    name: "",
+    savedName: "",
+    loading: true,
+    saving: false,
+    activeTab: "board" as EditorTab,
+    activeSplitRowId: null as string | null,
+    actionsOpen: false,
+    confirmDialog: null as ConfirmDialogState | null,
+    splitDraftRows: [] as EventPlanRow[],
+    splitDraftOrderNotes: "",
+  });
+  const [filters, setFilters] = useState<PlanningFilters>({
+    search: "",
+    status: "all",
+    location: "all",
+    item: "all",
+    needsReview: false,
+  });
+  const { toast, showToast } = useAdminToast();
+  const splitPanelRef = useRef<HTMLDivElement | null>(null);
+  const actionsMenuRef = useRef<HTMLDivElement | null>(null);
+  return {
+    state, setState, filters, setFilters, toast, showToast,
+    splitPanelRef, actionsMenuRef,
+  };
+}
+
+type PlanningEditorUiState = ReturnType<typeof usePlanningEditorUiState>;
+
+function usePlanningEditorLifecycle({
+  isDirty,
+  activeSplitRowId,
+  actionsOpen,
+  splitPanelRef,
+  actionsMenuRef,
+  setState,
+}: {
+  isDirty: boolean;
+  activeSplitRowId: string | null;
+  actionsOpen: boolean;
+  splitPanelRef: PlanningEditorUiState["splitPanelRef"];
+  actionsMenuRef: PlanningEditorUiState["actionsMenuRef"];
+  setState: PlanningEditorUiState["setState"];
+}) {
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+  useEffect(() => {
+    if (!activeSplitRowId) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (splitPanelRef.current && !splitPanelRef.current.contains(event.target as Node)) {
+        setState("activeSplitRowId", null);
+        setState("splitDraftRows", []);
+        setState("splitDraftOrderNotes", "");
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [activeSplitRowId, setState, splitPanelRef]);
+
+  useEffect(() => {
+    if (!actionsOpen) return;
+    function handlePointerDown(event: MouseEvent) {
+      if (actionsMenuRef.current && !actionsMenuRef.current.contains(event.target as Node)) {
+        setState("actionsOpen", false);
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => document.removeEventListener("mousedown", handlePointerDown);
+  }, [actionsMenuRef, actionsOpen, setState]);
+}
+
+function usePlanningPlanLoader(
+  planId: string,
+  setState: PlanningEditorUiState["setState"],
+  showToast: PlanningEditorUiState["showToast"],
+) {
+  const loadPlan = useCallback(async (signal?: AbortSignal) => {
+    const token = await getAdminToken();
+    if (!token) return;
+    const response = await fetch(`${API_URL}/api/admin/event-plans/${planId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal,
+    });
+    if (!response.ok) throw new Error(await getApiErrorMessage(response, "Failed to load event plan"));
+    const data = (await response.json()) as EventPlan;
+    if (signal?.aborted) return;
+    const snapshot = normalizeSnapshot(data.snapshot as EventPlanSnapshot);
+    setState("plan", data);
+    setState("snapshot", snapshot);
+    setState("savedSnapshotText", JSON.stringify(snapshot));
+    setState("name", data.name);
+    setState("savedName", data.name);
+    setState("activeSplitRowId", null);
+    setState("splitDraftRows", []);
+    setState("splitDraftOrderNotes", "");
+  }, [planId, setState]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setState("loading", true);
+    void loadPlan(controller.signal)
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
+        showToast(error instanceof Error ? error.message : "Failed to load event plan", "error");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setState("loading", false);
+      });
+    return () => controller.abort();
+  }, [loadPlan, setState, showToast]);
+
+}
+
+function usePlanningEditorModel({ planId }: PlanningEditorClientProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }));
+
+  const {
+    state, setState, filters, setFilters, toast, showToast,
+    splitPanelRef, actionsMenuRef,
+  } = usePlanningEditorUiState();
+  const {
+    plan, snapshot, savedSnapshotText, name, savedName, loading, saving,
+    activeTab, activeSplitRowId, actionsOpen, confirmDialog,
+    splitDraftRows, splitDraftOrderNotes,
+  } = state;
+  const setPlan = (value: EventPlan | null) => setState("plan", value);
+  const setSnapshot: Dispatch<SetStateAction<EventPlanSnapshot | null>> = (value) => setState("snapshot", value);
+  const setSavedSnapshotText = (value: string) => setState("savedSnapshotText", value);
+  const setName = (value: string) => setState("name", value);
+  const setSavedName = (value: string) => setState("savedName", value);
+  const setSaving = (value: boolean) => setState("saving", value);
+  const setActiveTab = (value: EditorTab) => setState("activeTab", value);
+  const setActiveSplitRowId = (value: string | null) => setState("activeSplitRowId", value);
+  const setActionsOpen: Dispatch<SetStateAction<boolean>> = (value) => setState("actionsOpen", value);
+  const setConfirmDialog = (value: ConfirmDialogState | null) => setState("confirmDialog", value);
+  const setSplitDraftRows: Dispatch<SetStateAction<EventPlanRow[]>> = (value) => setState("splitDraftRows", value);
+  const setSplitDraftOrderNotes = (value: string) => setState("splitDraftOrderNotes", value);
+
+  usePlanningPlanLoader(planId, setState, showToast);
+
+  const isDirty = useMemo(() => {
+    if (!snapshot) return false;
+    return name !== savedName || JSON.stringify(snapshot) !== savedSnapshotText;
+  }, [name, savedName, savedSnapshotText, snapshot]);
+
+  usePlanningEditorLifecycle({
+    isDirty,
+    activeSplitRowId,
+    actionsOpen,
+    splitPanelRef,
+    actionsMenuRef,
+    setState,
+  });
+
+  useEffect(() => {
+    const action = searchParams.get("action");
+    if (!action || !plan || isDirty) return;
+    if (action === "duplicate") {
+      void handleDuplicate();
+    }
+    if (action === "archive" && plan.status !== "archived") {
+      void handleArchive();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan, searchParams, isDirty]);
+
+  const {
+    clientTotals, statusOptions, locationOptions, itemOptions,
+    activeSplitRow, activeSplitLimit,
+    splitLimitReached, activeSplitBundle, filteredBoardRows, boardLanes,
+    quantityBreakdown, itemTypeTotals, customerHandoffRows,
+  } = usePlanningDerivedData(snapshot, filters, activeSplitRowId, splitDraftRows);
+
 
   function updateSnapshot(updater: (draft: EventPlanSnapshot) => void) {
     setSnapshot((current) => {
@@ -1263,8 +1359,33 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
   const currentIssues = snapshot?.issues ?? [];
   const exportDisabled = isDirty || saving || currentIssues.length > 0;
 
-  if (loading) return <SkeletonEditor />;
-  if (!plan || !snapshot || !clientTotals) {
+  const issues = currentIssues;
+  const warnings = snapshot?.warnings ?? [];
+
+  return {
+    loading, plan, snapshot, clientTotals, toast, goBackToPlanning,
+    name, setName, readOnly, isDirty, activeTab, setActiveTab,
+    handleRefresh, cleanStateRequired, handleSave, saving,
+    actionsMenuRef, setActionsOpen, actionsOpen, exportDisabled,
+    issues, handleExportPdf, handleRestore, handleMarkReady,
+    handleArchive, handleDuplicate, warnings, filters, setFilters,
+    statusOptions, locationOptions, itemOptions, addExtraRow,
+    updateSnapshot, sensors, handleDragEnd, filteredBoardRows,
+    boardLanes, openSplitPanel, mergeSplitRows, deletePlannedRow,
+    activeSplitRow, closeSplitPanel, splitPanelRef, activeSplitBundle,
+    splitDraftOrderNotes, setSplitDraftOrderNotes, activeSplitLimit,
+    splitDraftRows, splitLimitReached, activeSplitRowId, splitDraftRow,
+    deleteDraftRow, updateDraftRow, autoBalanceDraft, resetDraftOrder,
+    saveSplitPanel, quantityBreakdown, customerHandoffRows,
+    itemTypeTotals, confirmDialog, setConfirmDialog, handleConfirmDialog,
+  };
+}
+
+type PlanningEditorModel = ReturnType<typeof usePlanningEditorModel>;
+
+function PlanningEditorView({ model }: { model: PlanningEditorModel }) {
+  if (model.loading) return <SkeletonEditor />;
+  if (!model.plan || !model.snapshot || !model.clientTotals) {
     return (
       <div className="px-6 py-10">
         <p style={{ color: "var(--color-error-text)" }}>Event plan could not be loaded.</p>
@@ -1272,11 +1393,26 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
     );
   }
 
-  const issues = currentIssues;
-  const warnings = snapshot.warnings ?? [];
-
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
+      <PlanningToast model={model} />
+
+      <div className="w-full space-y-5">
+        <PlanningHeader model={model} />
+
+	        <PlanningWorkspace model={model} />
+      </div>
+
+      <PlanningConfirmDialog model={model} />
+
+    </div>
+  );
+}
+
+function PlanningToast({ model }: { model: PlanningEditorModel }) {
+  const { toast } = model;
+  return (
+    <>
       {toast && (
         <div
           className="fixed bottom-6 right-6 max-w-[360px] rounded-2xl px-5 py-3 text-sm font-semibold shadow-[0_24px_70px_-26px_rgba(28,28,26,0.62)]"
@@ -1290,8 +1426,14 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
           {toast.message}
         </div>
       )}
+    </>
+  );
+}
 
-      <div className="w-full space-y-5">
+function PlanningHeader({ model }: { model: PlanningEditorModel }) {
+  const { plan, snapshot, goBackToPlanning, name, setName, readOnly, isDirty } = model;
+  if (!plan || !snapshot) return null;
+  return (
         <header className="space-y-5">
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_auto] xl:items-start">
             <div className="min-w-0">
@@ -1315,6 +1457,24 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
               </div>
             </div>
 
+            <PlanningHeaderActions model={model} />
+          </div>
+
+          <PlanningMetrics model={model} />
+        </header>
+  );
+}
+
+function PlanningHeaderActions({ model }: { model: PlanningEditorModel }) {
+  const {
+    plan, activeTab, setActiveTab, handleRefresh, cleanStateRequired,
+    handleSave, isDirty, saving, readOnly, actionsMenuRef,
+    setActionsOpen, actionsOpen, exportDisabled, issues,
+    handleExportPdf, handleRestore, handleMarkReady, handleArchive,
+    handleDuplicate,
+  } = model;
+  if (!plan) return null;
+  return (
 	            <div className="flex flex-wrap items-center justify-start gap-2 sm:justify-end">
 	              <div className="inline-grid h-10 grid-cols-2 rounded-xl p-1 shadow-[0_18px_42px_-32px_rgba(28,28,26,0.45)]" style={{ background: "var(--color-accent)" }}>
 	                {(["board", "preview"] as EditorTab[]).map((tab) => (
@@ -1442,8 +1602,13 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
 	                )}
 	              </div>
 	            </div>
-          </div>
+  );
+}
 
+function PlanningMetrics({ model }: { model: PlanningEditorModel }) {
+  const { snapshot, clientTotals, issues, warnings } = model;
+  if (!snapshot || !clientTotals) return null;
+  return (
 	          <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
 	            {[
 	              { label: "Orders", value: snapshot.totals.included_order_count, detail: "included", tone: "forest" },
@@ -1484,9 +1649,28 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
 	              );
 	            })}
 	          </div>
-        </header>
+  );
+}
 
-	        {activeTab === "board" ? (
+function PlanningWorkspace({ model }: { model: PlanningEditorModel }) {
+  return model.activeTab === "board"
+    ? <PlanningBoard model={model} />
+    : <PlanningPreview model={model} />;
+}
+
+function PlanningBoard({ model }: { model: PlanningEditorModel }) {
+  const {
+    filters, setFilters, statusOptions, locationOptions, itemOptions,
+    addExtraRow, readOnly, snapshot, updateSnapshot, sensors,
+    handleDragEnd, filteredBoardRows, boardLanes, openSplitPanel,
+    mergeSplitRows, deletePlannedRow, activeSplitRow, closeSplitPanel,
+    splitPanelRef, activeSplitBundle, splitDraftOrderNotes,
+    setSplitDraftOrderNotes, activeSplitLimit, splitDraftRows,
+    splitLimitReached, activeSplitRowId, splitDraftRow, deleteDraftRow,
+    updateDraftRow, autoBalanceDraft, resetDraftOrder, saveSplitPanel,
+  } = model;
+  if (!snapshot) return null;
+  return (
 	          <div className="space-y-5">
 	            <section className="py-4">
               <div className="grid grid-cols-1 gap-3 md:grid-cols-[1fr_150px_150px_150px_auto]">
@@ -1630,7 +1814,16 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
               </div>
             )}
           </div>
-        ) : (
+  );
+}
+
+function PlanningPreview({ model }: { model: PlanningEditorModel }) {
+  const {
+    snapshot, name, quantityBreakdown, customerHandoffRows,
+    itemTypeTotals, issues, warnings,
+  } = model;
+  if (!snapshot) return null;
+  return (
           <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_340px]">
             <section className="rounded-[1.5rem] border p-5" style={{ background: "white", borderColor: "var(--color-border)" }}>
 	              <div className="mb-5 border-b pb-4" style={{ borderColor: "var(--color-border)" }}>
@@ -1810,9 +2003,12 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
               </section>
             </aside>
           </div>
-        )}
-      </div>
+  );
+}
 
+function PlanningConfirmDialog({ model }: { model: PlanningEditorModel }) {
+  const { confirmDialog, setConfirmDialog, handleConfirmDialog } = model;
+  return (
       <Modal
         isOpen={Boolean(confirmDialog)}
         onClose={() => setConfirmDialog(null)}
@@ -1845,9 +2041,13 @@ export default function PlanningEditorClient({ planId }: PlanningEditorClientPro
       >
         {confirmDialog?.body}
       </Modal>
-    </div>
   );
 }
+
+export default function PlanningEditorClient(props: PlanningEditorClientProps) {
+  return <PlanningEditorView model={usePlanningEditorModel(props)} />;
+}
+
 
 function IssueList({ issues, emptyText, tone }: { issues: EventPlanIssue[]; emptyText: string; tone: "error" | "warning" }) {
   if (issues.length === 0) {

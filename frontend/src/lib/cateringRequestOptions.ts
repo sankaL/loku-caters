@@ -26,7 +26,7 @@ function titleCaseToken(token: string): string {
   return token.charAt(0).toUpperCase() + token.slice(1);
 }
 
-export function humanizeCateringOptionValue(value: string): string {
+function humanizeCateringOptionValue(value: string): string {
   const trimmed = value.trim();
   if (!trimmed) return "";
   return trimmed

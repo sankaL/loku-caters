@@ -4,7 +4,9 @@ Hosted on **Supabase (PostgreSQL)**. Schema is managed via Alembic migrations in
 
 ## Security: Row Level Security (RLS)
 
-App tables that live in the `public` schema, plus `public.alembic_version`, are not intended to be accessed via Supabase PostgREST from the browser. RLS is enabled on these tables, no RLS policies are defined, and direct grants to Supabase API roles are revoked when those roles exist. The FastAPI backend connects directly to Postgres as the table owner and performs all reads and writes.
+All application tables in the `public` schema have PostgreSQL row level security enabled. Revision `0026_harden_rls` also revokes table and sequence access from Supabase's `anon` and `authenticated` API roles and creates the restrictive `deny_direct_api_access` policy for both roles on every application table. The policy uses `USING (false)` and `WITH CHECK (false)`, so direct reads and writes through the Supabase Data API are denied even if a permissive policy is added later.
+
+The FastAPI backend remains the only data access path. It connects with the database owner credential documented in `DATABASE_URL`, validates public payloads, computes prices on the server, and performs admin authorization before database access. RLS is not forced on the table owner because doing so would block the existing backend connection and break the application. If the backend is moved to a least-privilege database role, add explicit backend policies in the same deployment before changing the connection role.
 
 ---
 
@@ -381,6 +383,9 @@ alembic upgrade head
 | `a4d7e3b91c2f_add_combo_deals_and_grouped_order_pricing` | adds `events.combo_deals` and grouped cart pricing columns on `orders` (`group_id`, `base_total_price`, `discount_total`, `pricing_meta`) |
 | `0021_feedback_rating_and_show_in_reviews` | adds `rating` (Integer, nullable) and `show_in_reviews` (Boolean, default false) to `feedback` |
 | `0023_event_plans` | adds `orders.updated_at`, creates backend-managed `event_plans`, enables RLS, and revokes direct API-role access |
+| `0024_invoices` | creates `invoices`, `invoice_settings`, and `invoice_number_counters` with RLS and revoked direct API-role access |
+| `0025_decouple_invoices` | makes invoices independent snapshots with owned line items and payment state |
+| `0026_harden_rls` | enables RLS across every application table, revokes direct API-role table and sequence access, revokes matching default privileges for future objects created by the migration role, and adds explicit restrictive deny policies |
 
 ---
 

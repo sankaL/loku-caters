@@ -20,7 +20,9 @@ depends_on = None
 def upgrade() -> None:
     op.add_column(
         "orders",
-        sa.Column("paid", sa.Boolean(), nullable=False, server_default=sa.text("false")),
+        sa.Column(
+            "paid", sa.Boolean(), nullable=False, server_default=sa.text("false")
+        ),
     )
     op.add_column("orders", sa.Column("payment_method", sa.Text(), nullable=True))
     op.add_column("orders", sa.Column("payment_method_other", sa.Text(), nullable=True))
@@ -68,9 +70,15 @@ def downgrade() -> None:
         )
     )
 
-    op.drop_constraint("ck_orders_payment_non_other_null_details", "orders", type_="check")
-    op.drop_constraint("ck_orders_payment_other_requires_details", "orders", type_="check")
-    op.drop_constraint("ck_orders_payment_paid_requires_method", "orders", type_="check")
+    op.drop_constraint(
+        "ck_orders_payment_non_other_null_details", "orders", type_="check"
+    )
+    op.drop_constraint(
+        "ck_orders_payment_other_requires_details", "orders", type_="check"
+    )
+    op.drop_constraint(
+        "ck_orders_payment_paid_requires_method", "orders", type_="check"
+    )
     op.drop_constraint("ck_orders_payment_unpaid_fields_null", "orders", type_="check")
 
     op.drop_column("orders", "payment_method_other")

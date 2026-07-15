@@ -24,14 +24,20 @@ def optional_text(value: Any) -> Optional[str]:
 
 def settings_snapshot(settings: Any) -> dict[str, Any]:
     return {
-        "business_name": str(getattr(settings, "business_name", None) or "Loku Caters").strip(),
+        "business_name": str(
+            getattr(settings, "business_name", None) or "Loku Caters"
+        ).strip(),
         "business_address": optional_text(getattr(settings, "business_address", None)),
         "business_email": optional_text(getattr(settings, "business_email", None)),
         "business_phone": optional_text(getattr(settings, "business_phone", None)),
         "payment_method": str(getattr(settings, "payment_method", None) or "none"),
         "payment_email": optional_text(getattr(settings, "payment_email", None)),
-        "payment_instructions": optional_text(getattr(settings, "payment_instructions", None)),
-        "default_footer_note": optional_text(getattr(settings, "default_footer_note", None)),
+        "payment_instructions": optional_text(
+            getattr(settings, "payment_instructions", None)
+        ),
+        "default_footer_note": optional_text(
+            getattr(settings, "default_footer_note", None)
+        ),
     }
 
 
@@ -43,7 +49,9 @@ def default_due_date(issue_date: date, pickup_date: Optional[date]) -> date:
 
 def invoice_lines_from_orders(orders: Iterable[Any]) -> list[dict[str, Any]]:
     lines: list[dict[str, Any]] = []
-    for order in sorted(list(orders), key=lambda row: (getattr(row, "created_at", None), str(row.id))):
+    for order in sorted(
+        list(orders), key=lambda row: (getattr(row, "created_at", None), str(row.id))
+    ):
         quantity = max(1, int(getattr(order, "quantity", 0) or 0))
         line_subtotal = money(getattr(order, "base_total_price", 0))
         lines.append(
@@ -85,18 +93,25 @@ def calculate_invoice_amounts(
     }
 
 
-def order_snapshot(orders: Iterable[Any], event_name: Optional[str]) -> Optional[dict[str, Any]]:
-    rows = sorted(list(orders), key=lambda row: (getattr(row, "created_at", None), str(row.id)))
+def order_snapshot(
+    orders: Iterable[Any], event_name: Optional[str]
+) -> Optional[dict[str, Any]]:
+    rows = sorted(
+        list(orders), key=lambda row: (getattr(row, "created_at", None), str(row.id))
+    )
     if not rows:
         return None
     primary = rows[0]
     pickup_date = getattr(primary, "pickup_date", None)
     created_at = getattr(primary, "created_at", None)
     return {
-        "bundle_id": optional_text(getattr(primary, "group_id", None)) or str(primary.id),
+        "bundle_id": optional_text(getattr(primary, "group_id", None))
+        or str(primary.id),
         "primary_order_id": str(primary.id),
         "reference": str(primary.id)[:8].upper(),
-        "event_id": int(primary.event_id) if getattr(primary, "event_id", None) is not None else None,
+        "event_id": int(primary.event_id)
+        if getattr(primary, "event_id", None) is not None
+        else None,
         "event_name": optional_text(event_name),
         "pickup_location": optional_text(getattr(primary, "pickup_location", None)),
         "pickup_time_slot": optional_text(getattr(primary, "pickup_time_slot", None)),

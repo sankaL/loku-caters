@@ -4,7 +4,7 @@
 
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
-        docker-ready db-up db-down db-migrate db-seed db-seed-if-empty db-reset \
+        docker-ready db-up db-down db-api-roles db-migrate db-seed db-seed-if-empty db-reset test-backend quality-backend audit-backend \
         stop stop-backend-port stop-frontend-port logs-backend help
 
 # ----------------------------------------------------------------------------
@@ -117,7 +117,7 @@ dev-local: sync-config db-up db-migrate db-seed
 
 ## Start just the backend with local DB settings (foreground, with reload)
 dev-backend: sync-config stop-backend-port
-	cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT)
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT)
 
 ## Start just the frontend
 dev-frontend: stop-frontend-port
@@ -164,16 +164,21 @@ db-down:
 	docker compose -f docker-compose.dev.yml down
 
 ## Run Alembic migrations against the local DB
-db-migrate: sync-config
-	cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
+db-api-roles: db-up
+	@docker compose -f docker-compose.dev.yml exec -T db \
+	    psql -U $(LOCAL_DB_USER) -d $(LOCAL_DB_NAME) \
+	    -c "DO \$$$$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF; END \$$$$;" >/dev/null
+
+db-migrate: sync-config db-api-roles
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
 
 ## Seed the local DB with comprehensive test data (removes existing orders first)
 db-seed:
-	cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py
+	@cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py
 
 ## Seed the local DB with comprehensive test data only if it is empty
 db-seed-if-empty:
-	cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py --only-if-empty
+	@cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py --only-if-empty
 
 ## Drop all tables, re-run migrations, and seed fresh test data
 db-reset: db-up
@@ -184,6 +189,23 @@ db-reset: db-up
 	@$(MAKE) db-migrate
 	@$(MAKE) db-seed
 	@echo "Database reset and seeded."
+
+## Run backend tests against the migrated local database
+test-backend: sync-config db-up db-migrate
+	@cd backend && $(BACKEND_DEV_ENV) python3 -m pytest -q
+
+## Run backend lint, bytecode compilation, and unit tests
+quality-backend:
+	@cd backend && python3 -m ruff check .
+	@cd backend && python3 -m ruff format --check .
+	@cd backend && python3 -m compileall -q .
+	@cd backend && python3 -m pytest -q
+
+## Scan production backend code and Python dependencies for security issues
+audit-backend:
+	@cd backend && python3 -m bandit -q -r . \
+		-x ./tests,./alembic,./seed.py,./seed_dev.py,./seed_comprehensive.py,./backfill_customers.py
+	@cd backend && python3 -m pip_audit -r requirements.txt
 
 # ============================================================================
 # Process management
@@ -231,6 +253,9 @@ help:
 	@echo "    make db-migrate      Run Alembic migrations on local DB"
 	@echo "    make db-seed         Insert comprehensive test data (clears existing first)"
 	@echo "    make db-reset        Drop schema + migrate + seed (full wipe)"
+	@echo "    make test-backend    Run backend tests against the local database"
+	@echo "    make quality-backend Run backend lint, compile, and unit-test checks"
+	@echo "    make audit-backend   Run backend code and dependency security scans"
 	@echo ""
 	@echo "  CONFIG:"
 	@echo "    make sync-config     Copy config/event-config.json to frontend and backend"

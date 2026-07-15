@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { API_URL, CURRENCY, fetchEventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
@@ -25,6 +25,8 @@ import OrdersAreaChart from "@/components/admin/dashboard/OrdersAreaChart";
 import TopEventsRevenueTile, {
   type DashboardEventSummary,
 } from "@/components/admin/dashboard/TopEventsRevenueTile";
+import AdminToast from "@/components/admin/AdminToast";
+import { useAdminToast } from "@/hooks/useAdminToast";
 
 type Range = "7d" | "30d" | "1y";
 const TOP_METRIC_HEIGHT = 160;
@@ -207,29 +209,46 @@ function fmt0(amount: number, currency: string): string {
   return new Intl.NumberFormat("en-CA", { style: "currency", currency, maximumFractionDigits: 0 }).format(amount);
 }
 
+function itemWord(count: number): string {
+  return count === 1 ? "item" : "items";
+}
+
+interface DashboardState {
+  orders: Order[];
+  events: DashboardEventSummary[];
+  eventsLoadFailed: boolean;
+  currency: string;
+  loading: boolean;
+  range: Range;
+}
+
+const INITIAL_DASHBOARD_STATE: DashboardState = {
+  orders: [],
+  events: [],
+  eventsLoadFailed: false,
+  currency: CURRENCY,
+  loading: true,
+  range: "7d",
+};
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 export default function DashboardPage() {
   const router = useRouter();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [events, setEvents] = useState<DashboardEventSummary[]>([]);
-  const [eventsLoadFailed, setEventsLoadFailed] = useState(false);
-  const [currency, setCurrency] = useState(CURRENCY);
-  const [loading, setLoading] = useState(true);
-  const [range, setRange] = useState<Range>("7d");
-  const [toast, setToast] = useState<string | null>(null);
-
-  function itemWord(n: number): string {
-    return n === 1 ? "item" : "items";
-  }
+  const [state, setState] = useState<DashboardState>(INITIAL_DASHBOARD_STATE);
+  const { orders, events, eventsLoadFailed, currency, loading, range } = state;
+  const { toast, showToast } = useAdminToast(4000);
+  const updateState = useCallback((patch: Partial<DashboardState>) => {
+    setState((current) => ({ ...current, ...patch }));
+  }, []);
 
   useEffect(() => {
     async function load() {
       try {
         const token = await getAdminToken();
         if (!token) { router.push("/admin/login"); return; }
-        setEventsLoadFailed(false);
+        updateState({ eventsLoadFailed: false });
 
         const [ordersResult, configResult, eventsResult] = await Promise.allSettled([
           fetch(`${API_URL}/api/admin/orders`, {
@@ -249,34 +268,29 @@ export default function DashboardPage() {
         if (ordersRes.status === 401) { router.push("/admin/login"); return; }
         if (!ordersRes.ok) throw new Error("Failed to load orders");
 
-        setOrders(await ordersRes.json());
+        const patch: Partial<DashboardState> = { orders: await ordersRes.json() };
         if (configResult.status === "fulfilled" && configResult.value) {
-          setCurrency(configResult.value.currency);
+          patch.currency = configResult.value.currency;
         }
         if (eventsResult.status === "fulfilled" && eventsResult.value.status === 401) {
           router.push("/admin/login");
           return;
         }
         if (eventsResult.status === "fulfilled" && eventsResult.value.ok) {
-          setEvents(await eventsResult.value.json());
+          patch.events = await eventsResult.value.json();
         } else {
-          setEvents([]);
-          setEventsLoadFailed(true);
+          patch.events = [];
+          patch.eventsLoadFailed = true;
         }
+        updateState(patch);
       } catch {
-        setToast("Failed to load dashboard data");
+        showToast("Failed to load dashboard data", "error");
       } finally {
-        setLoading(false);
+        updateState({ loading: false });
       }
     }
     load();
-  }, [router]);
-
-  useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), 4000);
-    return () => clearTimeout(t);
-  }, [toast]);
+  }, [router, showToast, updateState]);
 
   // Aggregations
   const revenue = computeRevenue(orders);
@@ -381,7 +395,7 @@ export default function DashboardPage() {
             data={timeline}
             topItems={timelineItems}
             range={range}
-            onRangeChange={setRange}
+            onRangeChange={(nextRange) => updateState({ range: nextRange })}
             currency={currency}
           />
         )}
@@ -420,33 +434,7 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {/* Toast */}
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 24,
-            right: 24,
-            background: "white",
-            border: "1px solid #fee2e2",
-            borderRadius: 16,
-            padding: "14px 20px",
-            boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            zIndex: 9999,
-            fontSize: 14,
-          }}
-        >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          <span style={{ color: "var(--color-text)" }}>{toast}</span>
-        </div>
-      )}
+      <AdminToast toast={toast} />
 
       <style>{`
         @keyframes pulse {

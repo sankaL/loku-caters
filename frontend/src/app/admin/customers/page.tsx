@@ -1,15 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, type CSSProperties, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import Modal from "@/components/ui/Modal";
+import { AdminCrudContent, AdminSelectableTable } from "@/components/admin/AdminCrudParts";
+import AdminToast from "@/components/admin/AdminToast";
 import { API_URL, fetchEventConfig, type EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
+import { postAdminBulkBatches, removeSelectedIds, toggleSelectedId } from "@/lib/adminBulk";
 import type { Customer } from "@/lib/customers";
+import { useObjectState } from "@/hooks/useObjectState";
+import { usePageSelection } from "@/hooks/usePageSelection";
+import { useAdminToast } from "@/hooks/useAdminToast";
 
 const EVENT_REMINDER_SEND_INTERVAL_MS = 500;
 const EVENT_REMINDER_RETRY_BACKOFF_MS = [1000, 2000];
+const EVENT_REMINDER_MAX_ATTEMPTS = 3;
 const PAGE_SIZE = 10;
 
 type QueueItemStatus = "queued" | "sending" | "retrying" | "sent" | "skipped" | "failed";
@@ -18,6 +25,12 @@ type QueueOutcome = "sent" | "skipped" | "retryable_failed" | "failed" | "unauth
 interface EventReminderResponse {
   status: string;
   message?: string;
+}
+
+interface ReminderAttemptResult {
+  outcome: QueueOutcome;
+  message: string;
+  resultCode: string | null;
 }
 
 interface EventReminderQueueItem {
@@ -93,20 +106,83 @@ function buildRunState(
   };
 }
 
+function classifyReminderResponse(data: EventReminderResponse): ReminderAttemptResult {
+  if (data.status === "sent") return { outcome: "sent", message: data.message || "Event reminder sent", resultCode: data.status };
+  if (data.status === "skipped_missing_email") {
+    return { outcome: "skipped", message: data.message || "Customer is missing an email address", resultCode: data.status };
+  }
+  if (data.status === "failed") {
+    return { outcome: "retryable_failed", message: data.message || "Failed to send event reminder", resultCode: data.status };
+  }
+  return { outcome: "skipped", message: data.message || "Event reminder skipped", resultCode: data.status };
+}
+
+function updateQueueItem(
+  items: EventReminderQueueItem[],
+  itemIndex: number,
+  patch: Partial<EventReminderQueueItem>,
+): EventReminderQueueItem[] {
+  return items.map((item, index) => index === itemIndex ? { ...item, ...patch } : item);
+}
+
+function terminalQueueStatus(outcome: QueueOutcome): QueueItemStatus | null {
+  if (outcome === "sent" || outcome === "skipped" || outcome === "failed") return outcome;
+  return null;
+}
+
+async function runCustomerReminderAttempts(options: {
+  items: EventReminderQueueItem[];
+  itemIndex: number;
+  customerId: string;
+  token: string;
+  sendAttempt: (customerId: string, token: string) => Promise<ReminderAttemptResult>;
+  onProgress: (items: EventReminderQueueItem[], activeCustomerId: string | null) => void;
+}): Promise<{ items: EventReminderQueueItem[]; unauthorized: boolean }> {
+  let items = options.items;
+  for (let attempt = 1; attempt <= EVENT_REMINDER_MAX_ATTEMPTS; attempt += 1) {
+    items = updateQueueItem(items, options.itemIndex, { status: "sending", attempts: attempt, message: "" });
+    options.onProgress(items, options.customerId);
+    const result = await options.sendAttempt(options.customerId, options.token);
+    if (result.outcome === "unauthorized") {
+      items = updateQueueItem(items, options.itemIndex, { status: "failed", message: result.message, lastResultCode: result.resultCode });
+      return { items, unauthorized: true };
+    }
+    const terminalStatus = terminalQueueStatus(result.outcome);
+    if (terminalStatus) {
+      items = updateQueueItem(items, options.itemIndex, { status: terminalStatus, message: result.message, lastResultCode: result.resultCode });
+      options.onProgress(items, null);
+      return { items, unauthorized: false };
+    }
+    if (attempt < EVENT_REMINDER_MAX_ATTEMPTS) {
+      items = updateQueueItem(items, options.itemIndex, { status: "retrying", message: "Retrying after send failure", lastResultCode: result.resultCode });
+      options.onProgress(items, options.customerId);
+      await wait(Math.max(EVENT_REMINDER_SEND_INTERVAL_MS, EVENT_REMINDER_RETRY_BACKOFF_MS[attempt - 1]));
+      continue;
+    }
+    items = updateQueueItem(items, options.itemIndex, {
+      status: "failed",
+      message: `Send failed after ${EVENT_REMINDER_MAX_ATTEMPTS} attempts`,
+      lastResultCode: result.resultCode,
+    });
+    options.onProgress(items, null);
+  }
+  return { items, unauthorized: false };
+}
+
 function getStatusBadge(item: EventReminderQueueItem): { label: string; bg: string; color: string; border: string } {
   switch (item.status) {
     case "sending":
-      return { label: "Sending", bg: "#eff6ff", color: "#1d4ed8", border: "#bfdbfe" };
+      return { label: "Sending", bg: "var(--color-info-bg)", color: "var(--color-info-text)", border: "var(--color-info-border)" };
     case "retrying":
-      return { label: "Retrying", bg: "#fffbeb", color: "#92400e", border: "#fcd34d" };
+      return { label: "Retrying", bg: "var(--color-warning-bg)", color: "var(--color-warning-text)", border: "var(--color-warning-border)" };
     case "sent":
-      return { label: "Sent", bg: "#f0fdf4", color: "#166534", border: "#bbf7d0" };
+      return { label: "Sent", bg: "var(--color-success-bg)", color: "var(--color-success-text)", border: "var(--color-success-border)" };
     case "skipped":
       return { label: "Skipped", bg: "var(--color-cream)", color: "var(--color-muted)", border: "var(--color-border)" };
     case "failed":
-      return { label: "Failed", bg: "#fff1f2", color: "#be123c", border: "#fecdd3" };
+      return { label: "Failed", bg: "var(--color-error-bg)", color: "var(--color-error-text)", border: "var(--color-error-border)" };
     default:
-      return { label: "Queued", bg: "#f3f4f6", color: "#374151", border: "#d1d5db" };
+      return { label: "Queued", bg: "var(--color-cream)", color: "var(--color-text)", border: "var(--color-border)" };
   }
 }
 
@@ -119,45 +195,124 @@ function EditIcon() {
   );
 }
 
-export default function AdminCustomersPage() {
-  const router = useRouter();
-  const headerCheckboxRef = useRef<HTMLInputElement | null>(null);
-  const modalHeaderCheckboxRef = useRef<HTMLInputElement | null>(null);
+function CustomerTableRow({
+  customer,
+  selected,
+  isLast,
+  buttonStyle,
+  onToggle,
+  onEdit,
+}: {
+  customer: Customer;
+  selected: boolean;
+  isLast: boolean;
+  buttonStyle: CSSProperties;
+  onToggle: () => void;
+  onEdit: () => void;
+}) {
+  const pickupLocations = customer.pickup_locations || [];
+  return (
+    <tr style={{ borderBottom: isLast ? "none" : "1px solid var(--color-border)", background: "white" }}>
+      <td style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }}>
+        <input type="checkbox" checked={selected} onChange={onToggle} style={{ cursor: "pointer" }} />
+      </td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", fontWeight: 600 }}>{customer.name}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>{customer.email}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>{customer.phone_number || <span style={{ color: "var(--color-border)" }}>-</span>}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          {pickupLocations.length > 0
+            ? pickupLocations.map((location) => (
+              <span key={location} style={{ display: "inline-flex", alignItems: "center", padding: "4px 9px", borderRadius: 999, fontSize: 12, fontWeight: 600, background: "var(--color-success-bg)", color: "var(--color-forest)", border: "1px solid var(--color-success-border)" }}>
+                {location}
+              </span>
+            ))
+            : <span style={{ color: "var(--color-border)" }}>-</span>}
+        </div>
+      </td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>{formatDateTime(customer.created_at)}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>{formatDateTime(customer.updated_at)}</td>
+      <td style={{ padding: "13px 16px", verticalAlign: "top", textAlign: "center" }}>
+        <button type="button" onClick={onEdit} aria-label={`Edit ${customer.name}`} title={`Edit ${customer.name}`} style={buttonStyle}><EditIcon /></button>
+      </td>
+    </tr>
+  );
+}
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeEventConfig, setActiveEventConfig] = useState<EventConfig | null>(null);
-  const [activeEventLoading, setActiveEventLoading] = useState(true);
+function CustomersTable({
+  loading,
+  filteredCount,
+  visibleCustomers,
+  search,
+  pickupLocation,
+  selectedIds,
+  allVisibleSelected,
+  headerCheckboxRef,
+  buttonStyle,
+  onToggleAll,
+  onToggle,
+  onEdit,
+}: {
+  loading: boolean;
+  filteredCount: number;
+  visibleCustomers: Customer[];
+  search: string;
+  pickupLocation: string;
+  selectedIds: Set<string>;
+  allVisibleSelected: boolean;
+  headerCheckboxRef: RefObject<HTMLInputElement | null>;
+  buttonStyle: CSSProperties;
+  onToggleAll: () => void;
+  onToggle: (customerId: string) => void;
+  onEdit: (customer: Customer) => void;
+}) {
+  const headers = ["Name", "Email", "Phone", "Pickup Locations", "Created", "Updated"];
+  const emptyMessage = search.trim() || pickupLocation !== "all"
+    ? "No customers match the current filters."
+    : "Customers will appear here as orders are placed and backfilled.";
+  return (
+    <AdminCrudContent loading={loading} empty={filteredCount === 0} emptyMessage={emptyMessage}>
+      <AdminSelectableTable headerCheckboxRef={headerCheckboxRef} allSelected={allVisibleSelected} onToggleAll={onToggleAll} headers={headers}>
+        {visibleCustomers.map((customer, index) => (
+            <CustomerTableRow
+              key={customer.id}
+              customer={customer}
+              selected={selectedIds.has(customer.id)}
+              isLast={index === visibleCustomers.length - 1}
+              buttonStyle={buttonStyle}
+              onToggle={() => onToggle(customer.id)}
+              onEdit={() => onEdit(customer)}
+            />
+        ))}
+      </AdminSelectableTable>
+    </AdminCrudContent>
+  );
+}
 
-  const [search, setSearch] = useState("");
-  const [pickupLocation, setPickupLocation] = useState("all");
-  const [page, setPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+type AdminToastHandler = ReturnType<typeof useAdminToast>["showToast"];
 
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [editPhoneNumber, setEditPhoneNumber] = useState("");
-  const [savingCustomer, setSavingCustomer] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
+function filterCustomers(customers: Customer[], search: string, pickupLocation: string): Customer[] {
+  const normalizedSearch = search.trim().toLowerCase();
+  return customers.filter((customer) => {
+    const matchesSearch = !normalizedSearch || [
+      customer.name,
+      customer.email,
+      customer.phone_number ?? "",
+      ...(customer.pickup_locations || []),
+    ].some((value) => value.toLowerCase().includes(normalizedSearch));
+    const matchesPickupLocation = pickupLocation === "all"
+      || (customer.pickup_locations || []).includes(pickupLocation);
+    return matchesSearch && matchesPickupLocation;
+  });
+}
 
-  const [showEventReminderModal, setShowEventReminderModal] = useState(false);
-  const [showEventReminderConfirm, setShowEventReminderConfirm] = useState(false);
-  const [eventReminderSearch, setEventReminderSearch] = useState("");
-  const [eventReminderPickupLocation, setEventReminderPickupLocation] = useState("all");
-  const [eventReminderSelectedIds, setEventReminderSelectedIds] = useState<Set<string>>(new Set());
-  const [eventReminderLocationIds, setEventReminderLocationIds] = useState<Set<string>>(new Set());
-  const [eventReminderItemIds, setEventReminderItemIds] = useState<Set<string>>(new Set());
-  const [eventReminderRun, setEventReminderRun] = useState<EventReminderRunState>(EMPTY_EVENT_REMINDER_RUN);
-
-  const showToast = useCallback((message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  }, []);
+function useCustomerResources(router: ReturnType<typeof useRouter>, showToast: AdminToastHandler) {
+  const [resource, setResource] = useObjectState({
+    customers: [] as Customer[],
+    loading: true,
+    activeEventConfig: null as EventConfig | null,
+    activeEventLoading: true,
+  });
 
   const loadCustomers = useCallback(async () => {
     try {
@@ -166,43 +321,50 @@ export default function AdminCustomersPage() {
         router.push("/admin/login");
         return;
       }
-
-      const res = await fetch(`${API_URL}/api/admin/customers`, {
+      const response = await fetch(`${API_URL}/api/admin/customers`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (res.status === 401) {
+      if (response.status === 401) {
         router.push("/admin/login");
         return;
       }
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to load customers"));
+      if (!response.ok) {
+        throw new Error(await getApiErrorMessage(response, "Failed to load customers"));
       }
-
-      setCustomers(await res.json());
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to load customers", "error");
+      setResource("customers", await response.json());
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : "Failed to load customers", "error");
     } finally {
-      setLoading(false);
+      setResource("loading", false);
     }
-  }, [router, showToast]);
+  }, [router, setResource, showToast]);
 
   const loadActiveEventConfig = useCallback(async () => {
     try {
-      const config = await fetchEventConfig();
-      setActiveEventConfig(config);
-    } catch (err: unknown) {
-      setActiveEventConfig(null);
-      showToast(err instanceof Error ? err.message : "Failed to load active event", "error");
+      setResource("activeEventConfig", await fetchEventConfig());
+    } catch (error: unknown) {
+      setResource("activeEventConfig", null);
+      showToast(error instanceof Error ? error.message : "Failed to load active event", "error");
     } finally {
-      setActiveEventLoading(false);
+      setResource("activeEventLoading", false);
     }
-  }, [showToast]);
+  }, [setResource, showToast]);
 
   useEffect(() => {
-    loadCustomers();
-    loadActiveEventConfig();
-  }, [loadCustomers, loadActiveEventConfig]);
+    void loadCustomers();
+    void loadActiveEventConfig();
+  }, [loadActiveEventConfig, loadCustomers]);
+
+  const setCustomers: Dispatch<SetStateAction<Customer[]>> = (value) => setResource("customers", value);
+  return { ...resource, setCustomers, loadCustomers };
+}
+
+function useCustomerFilters(customers: Customer[]) {
+  const [filters, setFilter] = useObjectState({ search: "", pickupLocation: "all", page: 1 });
+  const { search, pickupLocation, page } = filters;
+  const setSearch = (value: string) => setFilter("search", value);
+  const setPickupLocation = (value: string) => setFilter("pickupLocation", value);
+  const setPage: Dispatch<SetStateAction<number>> = (value) => setFilter("page", value);
 
   const pickupLocationOptions = useMemo(() => {
     const values = new Set<string>();
@@ -214,27 +376,14 @@ export default function AdminCustomersPage() {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [customers]);
 
-  const filteredCustomers = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    return customers.filter((customer) => {
-      const matchesSearch = !normalizedSearch || [
-        customer.name,
-        customer.email,
-        customer.phone_number ?? "",
-        ...(customer.pickup_locations || []),
-      ].some((value) => value.toLowerCase().includes(normalizedSearch));
-
-      const matchesPickupLocation = pickupLocation === "all"
-        || (customer.pickup_locations || []).includes(pickupLocation);
-
-      return matchesSearch && matchesPickupLocation;
-    });
-  }, [customers, pickupLocation, search]);
+  const filteredCustomers = useMemo(
+    () => filterCustomers(customers, search, pickupLocation),
+    [customers, pickupLocation, search],
+  );
 
   useEffect(() => {
-    setPage(1);
-  }, [pickupLocation, search]);
+    setFilter("page", 1);
+  }, [pickupLocation, search, setFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -242,62 +391,85 @@ export default function AdminCustomersPage() {
   const pageEnd = filteredCustomers.length === 0 ? 0 : Math.min(currentPage * PAGE_SIZE, filteredCustomers.length);
 
   useEffect(() => {
-    setPage((current) => {
-      const next = Math.min(Math.max(current, 1), totalPages);
-      return next;
-    });
-  }, [totalPages]);
+    setFilter("page", (current) => Math.min(Math.max(current, 1), totalPages));
+  }, [setFilter, totalPages]);
 
   const visibleCustomers = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     return filteredCustomers.slice(start, start + PAGE_SIZE);
   }, [currentPage, filteredCustomers]);
 
+  return {
+    search, setSearch, pickupLocation, setPickupLocation, setPage,
+    pickupLocationOptions, filteredCustomers, visibleCustomers,
+    totalPages, currentPage, pageStart, pageEnd,
+  };
+}
+
+function useVisibleCustomerSelection(visibleCustomers: Customer[], filteredCustomers: Customer[]) {
+  const selection = usePageSelection(visibleCustomers, null);
+  const { setSelectedIds } = selection;
   useEffect(() => {
-    setSelectedIds((prev) => {
-      const next = new Set<string>();
-      const visibleIds = new Set(filteredCustomers.map((customer) => customer.id));
-      for (const id of prev) {
-        if (visibleIds.has(id)) next.add(id);
-      }
-      return next;
+    setSelectedIds((previous) => {
+      const filteredIds = new Set(filteredCustomers.map((customer) => customer.id));
+      return new Set(Array.from(previous).filter((id) => filteredIds.has(id)));
     });
-  }, [filteredCustomers]);
+  }, [filteredCustomers, setSelectedIds]);
+  return selection;
+}
 
-  const allVisibleSelected = visibleCustomers.length > 0 && visibleCustomers.every((customer) => selectedIds.has(customer.id));
-  const someVisibleSelected = visibleCustomers.some((customer) => selectedIds.has(customer.id));
+function useReminderCustomerSelection(customers: Customer[], search: string, pickupLocation: string) {
+  const filteredCustomers = useMemo(
+    () => filterCustomers(customers, search, pickupLocation),
+    [customers, pickupLocation, search],
+  );
+  return { filteredCustomers, selection: usePageSelection(filteredCustomers, null) };
+}
 
-  useEffect(() => {
-    if (!headerCheckboxRef.current) return;
-    headerCheckboxRef.current.indeterminate = !allVisibleSelected && someVisibleSelected;
-  }, [allVisibleSelected, someVisibleSelected]);
+function useCustomerPageModel() {
+  const router = useRouter();
+  const { toast, showToast } = useAdminToast();
+  const resources = useCustomerResources(router, showToast);
+  const customerFilters = useCustomerFilters(resources.customers);
+  const [bulkState, setBulkState] = useObjectState({ showBulkDeleteModal: false, bulkDeleting: false });
+  const [editState, setEditState] = useObjectState({ showEditModal: false, editingCustomer: null as Customer | null, editName: "", editEmail: "", editPhoneNumber: "", savingCustomer: false, editError: null as string | null });
+  const [reminderState, setReminderState] = useObjectState({ showEventReminderModal: false, showEventReminderConfirm: false, eventReminderSearch: "", eventReminderPickupLocation: "all", eventReminderLocationIds: new Set<string>(), eventReminderItemIds: new Set<string>(), eventReminderRun: EMPTY_EVENT_REMINDER_RUN });
 
-  function toggleSelectAll() {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) {
-        for (const customer of visibleCustomers) next.delete(customer.id);
-      } else {
-        for (const customer of visibleCustomers) next.add(customer.id);
-      }
-      return next;
-    });
-  }
+  const { customers, loading, activeEventConfig, activeEventLoading, setCustomers, loadCustomers } = resources;
+  const {
+    search, setSearch, pickupLocation, setPickupLocation, setPage,
+    pickupLocationOptions, filteredCustomers, visibleCustomers,
+    totalPages, currentPage, pageStart, pageEnd,
+  } = customerFilters;
+  const { showBulkDeleteModal, bulkDeleting } = bulkState;
+  const { showEditModal, editingCustomer, editName, editEmail, editPhoneNumber, savingCustomer, editError } = editState;
+  const { showEventReminderModal, showEventReminderConfirm, eventReminderSearch, eventReminderPickupLocation, eventReminderLocationIds, eventReminderItemIds, eventReminderRun } = reminderState;
+  const setShowBulkDeleteModal = (value: boolean) => setBulkState("showBulkDeleteModal", value);
+  const setBulkDeleting = (value: boolean) => setBulkState("bulkDeleting", value);
+  const setShowEditModal = (value: boolean) => setEditState("showEditModal", value);
+  const setEditingCustomer = (value: Customer | null) => setEditState("editingCustomer", value);
+  const setEditName = (value: string) => setEditState("editName", value);
+  const setEditEmail = (value: string) => setEditState("editEmail", value);
+  const setEditPhoneNumber = (value: string) => setEditState("editPhoneNumber", value);
+  const setSavingCustomer = (value: boolean) => setEditState("savingCustomer", value);
+  const setEditError = (value: string | null) => setEditState("editError", value);
+  const setShowEventReminderModal = (value: boolean) => setReminderState("showEventReminderModal", value);
+  const setShowEventReminderConfirm = (value: boolean) => setReminderState("showEventReminderConfirm", value);
+  const setEventReminderSearch = (value: string) => setReminderState("eventReminderSearch", value);
+  const setEventReminderPickupLocation = (value: string) => setReminderState("eventReminderPickupLocation", value);
+  const setEventReminderLocationIds: Dispatch<SetStateAction<Set<string>>> = (value) => setReminderState("eventReminderLocationIds", value);
+  const setEventReminderItemIds: Dispatch<SetStateAction<Set<string>>> = (value) => setReminderState("eventReminderItemIds", value);
+  const setEventReminderRun: Dispatch<SetStateAction<EventReminderRunState>> = (value) => setReminderState("eventReminderRun", value);
 
-  function toggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const customerSelection = useVisibleCustomerSelection(visibleCustomers, filteredCustomers);
+  const { selectedIds, setSelectedIds, headerCheckboxRef, allOnPageSelected: allVisibleSelected, toggleAll: toggleSelectAll, toggleOne: toggleSelect } = customerSelection;
 
   async function handleBulkDelete() {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
 
     setBulkDeleting(true);
+    let deleted = 0;
     try {
       const token = await getAdminToken();
       if (!token) {
@@ -305,30 +477,24 @@ export default function AdminCustomersPage() {
         return;
       }
 
-      const res = await fetch(`${API_URL}/api/admin/customers/bulk-delete`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ ids }),
+      const result = await postAdminBulkBatches({
+        ids,
+        url: `${API_URL}/api/admin/customers/bulk-delete`,
+        headers: { Authorization: `Bearer ${token}` },
+        onUnauthorized: () => router.push("/admin/login"),
+        getErrorMessage: (response) => getApiErrorMessage(response, "Failed to delete customers"),
       });
+      const deletedSet = new Set(result.completedIds);
+      setCustomers((prev) => prev.filter((customer) => !deletedSet.has(customer.id)));
+      setSelectedIds((prev) => removeSelectedIds(prev, result.completedIds));
+      deleted = result.completedIds.length;
+      if (result.error) throw result.error;
 
-      if (res.status === 401) {
-        router.push("/admin/login");
-        return;
-      }
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to delete customers"));
-      }
-
-      const idSet = new Set(ids);
-      setCustomers((prev) => prev.filter((customer) => !idSet.has(customer.id)));
-      setSelectedIds(new Set());
       setShowBulkDeleteModal(false);
       showToast(`${ids.length} customer${ids.length === 1 ? "" : "s"} deleted`, "success");
     } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to delete customers", "error");
+      const message = err instanceof Error ? err.message : "Failed to delete customers";
+      showToast(deleted > 0 ? `Deleted ${deleted}; ${ids.length - deleted} failed. ${message}` : message, "error");
     } finally {
       setBulkDeleting(false);
     }
@@ -423,41 +589,12 @@ export default function AdminCustomersPage() {
     return null;
   }, [activeEventConfig, activeEventItems.length, activeEventLoading, activeEventLocations.length]);
 
-  const filteredEventReminderCustomers = useMemo(() => {
-    const normalizedSearch = eventReminderSearch.trim().toLowerCase();
-
-    return customers.filter((customer) => {
-      const matchesSearch = !normalizedSearch || [
-        customer.name,
-        customer.email,
-        customer.phone_number ?? "",
-        ...(customer.pickup_locations || []),
-      ].some((value) => value.toLowerCase().includes(normalizedSearch));
-
-      const matchesPickupLocation = eventReminderPickupLocation === "all"
-        || (customer.pickup_locations || []).includes(eventReminderPickupLocation);
-
-      return matchesSearch && matchesPickupLocation;
-    });
-  }, [customers, eventReminderPickupLocation, eventReminderSearch]);
-
-  const allVisibleEventReminderSelected = filteredEventReminderCustomers.length > 0
-    && filteredEventReminderCustomers.every((customer) => eventReminderSelectedIds.has(customer.id));
-  const someVisibleEventReminderSelected = filteredEventReminderCustomers.some((customer) => eventReminderSelectedIds.has(customer.id));
-
-  useEffect(() => {
-    if (!modalHeaderCheckboxRef.current) return;
-    modalHeaderCheckboxRef.current.indeterminate = !allVisibleEventReminderSelected && someVisibleEventReminderSelected;
-  }, [allVisibleEventReminderSelected, someVisibleEventReminderSelected]);
-
-  function toggleEventReminderCustomer(id: string) {
-    setEventReminderSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
+  const { filteredCustomers: filteredEventReminderCustomers, selection: reminderSelection } = useReminderCustomerSelection(
+    customers,
+    eventReminderSearch,
+    eventReminderPickupLocation,
+  );
+  const { selectedIds: eventReminderSelectedIds, setSelectedIds: setEventReminderSelectedIds, headerCheckboxRef: modalHeaderCheckboxRef, allOnPageSelected: allVisibleEventReminderSelected, toggleOne: toggleEventReminderCustomer } = reminderSelection;
 
   function selectAllVisibleEventReminderCustomers() {
     setEventReminderSelectedIds((prev) => {
@@ -508,21 +645,11 @@ export default function AdminCustomersPage() {
   }
 
   function toggleLocationSelection(id: string) {
-    setEventReminderLocationIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setEventReminderLocationIds((prev) => toggleSelectedId(prev, id));
   }
 
   function toggleItemSelection(id: string) {
-    setEventReminderItemIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setEventReminderItemIds((prev) => toggleSelectedId(prev, id));
   }
 
   function buildQueueItems(customerIds: string[]): EventReminderQueueItem[] {
@@ -548,7 +675,7 @@ export default function AdminCustomersPage() {
   async function sendEventReminderAttempt(
     customerId: string,
     token: string
-  ): Promise<{ outcome: QueueOutcome; message: string; resultCode: string | null }> {
+  ): Promise<ReminderAttemptResult> {
     try {
       const res = await fetch(`${API_URL}/api/admin/customers/${customerId}/event-reminder`, {
         method: "POST",
@@ -571,16 +698,8 @@ export default function AdminCustomersPage() {
         };
       }
 
-      if (res.status === 404) {
-        return {
-          outcome: "failed",
-          message: await getApiErrorMessage(res, "Customer not found"),
-          resultCode: null,
-        };
-      }
-
       if (!res.ok) {
-        const message = await getApiErrorMessage(res, "Failed to send event reminder");
+        const message = await getApiErrorMessage(res, res.status === 404 ? "Customer not found" : "Failed to send event reminder");
         const retryable = res.status >= 500 || res.status === 429;
         return {
           outcome: retryable ? "retryable_failed" : "failed",
@@ -590,32 +709,7 @@ export default function AdminCustomersPage() {
       }
 
       const data = await res.json() as EventReminderResponse;
-      if (data.status === "sent") {
-        return {
-          outcome: "sent",
-          message: data.message || "Event reminder sent",
-          resultCode: data.status,
-        };
-      }
-      if (data.status === "skipped_missing_email") {
-        return {
-          outcome: "skipped",
-          message: data.message || "Customer is missing an email address",
-          resultCode: data.status,
-        };
-      }
-      if (data.status === "failed") {
-        return {
-          outcome: "retryable_failed",
-          message: data.message || "Failed to send event reminder",
-          resultCode: data.status,
-        };
-      }
-      return {
-        outcome: "skipped",
-        message: data.message || "Event reminder skipped",
-        resultCode: data.status,
-      };
+      return classifyReminderResponse(data);
     } catch (err) {
       return {
         outcome: "retryable_failed",
@@ -652,92 +746,21 @@ export default function AdminCustomersPage() {
       const itemIndex = items.findIndex((item) => item.customerId === customerId);
       if (itemIndex < 0) continue;
 
-      let itemCompleted = false;
-
-      for (let attempt = 1; attempt <= 3; attempt += 1) {
-        items = items.map((item, idx) => (idx === itemIndex
-          ? { ...item, status: "sending", attempts: attempt, message: "" }
-          : item
-        ));
-        setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: customerId }));
-
-        const result = await sendEventReminderAttempt(customerId, token);
-
-        if (result.outcome === "sent") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "sent", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-          itemCompleted = true;
-          break;
-        }
-
-        if (result.outcome === "skipped") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "skipped", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-          itemCompleted = true;
-          break;
-        }
-
-        if (result.outcome === "failed") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "failed", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-          itemCompleted = true;
-          break;
-        }
-
-        if (result.outcome === "unauthorized") {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? { ...item, status: "failed", message: result.message, lastResultCode: result.resultCode }
-            : item
-          ));
-          const stoppedRun = buildRunState(items, { isRunning: false, isComplete: true, activeCustomerId: null });
-          setEventReminderRun(stoppedRun);
-          showToast("Admin session expired. Reminder queue stopped.", "error");
-          return;
-        }
-
-        if (attempt < 3) {
-          items = items.map((item, idx) => (idx === itemIndex
-            ? {
-              ...item,
-              status: "retrying",
-              message: "Retrying after send failure",
-              lastResultCode: result.resultCode,
-            }
-            : item
-          ));
-          setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: customerId }));
-          await wait(Math.max(EVENT_REMINDER_SEND_INTERVAL_MS, EVENT_REMINDER_RETRY_BACKOFF_MS[attempt - 1]));
-          continue;
-        }
-
-        items = items.map((item, idx) => (idx === itemIndex
-          ? {
-            ...item,
-            status: "failed",
-            message: "Send failed after 3 attempts",
-            lastResultCode: result.resultCode,
-          }
-          : item
-        ));
-        setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
-        itemCompleted = true;
-      }
-
-      if (!itemCompleted) {
-        items = items.map((item, idx) => (idx === itemIndex
-          ? { ...item, status: "failed", message: "Send failed after 3 attempts" }
-          : item
-        ));
-        setEventReminderRun(buildRunState(items, { isRunning: true, isComplete: false, activeCustomerId: null }));
+      const attemptResult = await runCustomerReminderAttempts({
+        items,
+        itemIndex,
+        customerId,
+        token,
+        sendAttempt: sendEventReminderAttempt,
+        onProgress: (nextItems, activeCustomerId) => {
+          setEventReminderRun(buildRunState(nextItems, { isRunning: true, isComplete: false, activeCustomerId }));
+        },
+      });
+      items = attemptResult.items;
+      if (attemptResult.unauthorized) {
+        setEventReminderRun(buildRunState(items, { isRunning: false, isComplete: true, activeCustomerId: null }));
+        showToast("Admin session expired. Reminder queue stopped.", "error");
+        return;
       }
 
       if (customerIndex < customerIdsToProcess.length - 1) {
@@ -800,9 +823,9 @@ export default function AdminCustomersPage() {
 
   const btnDanger: CSSProperties = {
     ...btnBase,
-    background: "#fff1f2",
-    border: "1px solid #fecdd3",
-    color: "#be123c",
+    background: "var(--color-error-bg)",
+    border: "1px solid var(--color-error-border)",
+    color: "var(--color-error-text)",
   };
 
   const btnPrimary: CSSProperties = {
@@ -819,8 +842,8 @@ export default function AdminCustomersPage() {
     width: 34,
     height: 34,
     borderRadius: "999px",
-    border: "1px solid #d8e7cc",
-    background: "#f6faf2",
+    border: "1px solid var(--color-success-border)",
+    background: "var(--color-success-bg)",
     color: "var(--color-forest)",
     cursor: "pointer",
   };
@@ -834,20 +857,52 @@ export default function AdminCustomersPage() {
 
   const failedEventReminderItems = eventReminderRun.items.filter((item) => item.status === "failed");
 
+  return {
+    toast, eventReminderDisabledReason, openEventReminderModal,
+    search, setSearch, pickupLocation, setPickupLocation, pickupLocationOptions,
+    selectedIds, setSelectedIds, setShowBulkDeleteModal,
+    btnPrimary, btnBase, btnDanger, btnIcon,
+    loading, filteredCustomers, visibleCustomers, allVisibleSelected,
+    headerCheckboxRef, toggleSelectAll, toggleSelect, openEditModal,
+    pageStart, pageEnd, currentPage, totalPages, setPage,
+    showBulkDeleteModal, bulkDeleting, handleBulkDelete,
+    showEditModal, closeEditModal, editingCustomer, savingCustomer,
+    handleSaveCustomer, editError, editName, setEditName, editEmail,
+    setEditEmail, editPhoneNumber, setEditPhoneNumber,
+    showEventReminderModal, closeEventReminderModal, eventReminderRun,
+    failedEventReminderItems, handleRetryFailedEventReminders,
+    eventReminderLoading, openEventReminderConfirm,
+    eventReminderActionDisabled, eventReminderSelectedIds,
+    eventReminderProgressPercent, eventReminderSearch,
+    setEventReminderSearch, eventReminderPickupLocation,
+    setEventReminderPickupLocation, filteredEventReminderCustomers,
+    selectAllVisibleEventReminderCustomers,
+    unselectAllVisibleEventReminderCustomers, modalHeaderCheckboxRef,
+    allVisibleEventReminderSelected, toggleEventReminderCustomer,
+    activeEventDate, activeEventLocations, eventReminderLocationIds,
+    toggleLocationSelection, activeEventItems, eventReminderItemIds,
+    toggleItemSelection, showEventReminderConfirm,
+    closeEventReminderConfirm, setShowEventReminderConfirm,
+    setShowEventReminderModal, handleSendEventReminders,
+  };
+}
+
+type CustomerPageModel = ReturnType<typeof useCustomerPageModel>;
+
+function CustomersPageView({ model }: { model: CustomerPageModel }) {
+  const {
+    pageStart, pageEnd, currentPage, totalPages, setPage,
+    headerCheckboxRef, allVisibleSelected, visibleCustomers, filteredCustomers,
+    toggleSelectAll, toggleSelect, openEditModal, loading,
+    btnIcon, btnDanger, btnBase, btnPrimary,
+    selectedIds, setSelectedIds, setShowBulkDeleteModal,
+    pickupLocationOptions, pickupLocation, setPickupLocation, search, setSearch,
+    openEventReminderModal, eventReminderDisabledReason, toast,
+  } = model;
+
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      {toast && (
-        <div
-          className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
-          style={{
-            background: toast.type === "success" ? "#d1fae5" : "#fee2e2",
-            color: toast.type === "success" ? "#065f46" : "#991b1b",
-            border: `1px solid ${toast.type === "success" ? "#6ee7b7" : "#fca5a5"}`,
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
 
       <div className="mb-8 flex flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -907,8 +962,8 @@ export default function AdminCustomersPage() {
             alignItems: "center",
             gap: 12,
             padding: "10px 16px",
-            background: "#f0f7eb",
-            border: "1px solid #c8ddb4",
+            background: "var(--color-success-bg)",
+            border: "1px solid var(--color-success-border)",
             borderRadius: 12,
             marginBottom: 12,
             flexWrap: "wrap",
@@ -917,7 +972,7 @@ export default function AdminCustomersPage() {
           <span style={{ fontSize: 13, fontWeight: 600, color: "var(--color-forest)" }}>
             {selectedIds.size} selected
           </span>
-          <div style={{ width: 1, height: 20, background: "#c8ddb4" }} />
+          <div style={{ width: 1, height: 20, background: "var(--color-success-border)" }} />
           <button onClick={openEventReminderModal} style={btnBase} disabled={Boolean(eventReminderDisabledReason)}>
             Event Reminder
           </button>
@@ -934,157 +989,21 @@ export default function AdminCustomersPage() {
         Use the edit icon in the Actions column to update a customer&apos;s email or phone number.
       </p>
 
-      <div
-        style={{
-          background: "white",
-          border: "1px solid var(--color-border)",
-          borderRadius: 20,
-          overflow: "hidden",
-        }}
-      >
-        {loading ? (
-          <div className="flex justify-center py-16">
-            <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" opacity="0.3" />
-              <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
-            </svg>
-          </div>
-        ) : filteredCustomers.length === 0 ? (
-          <div style={{ padding: 48, textAlign: "center" }}>
-            <p style={{ fontSize: 15, fontWeight: 600, color: "var(--color-forest)", marginBottom: 4 }}>
-              No customers found
-            </p>
-            <p style={{ fontSize: 13, color: "var(--color-muted)" }}>
-              {search.trim() || pickupLocation !== "all"
-                ? "No customers match the current filters."
-                : "Customers will appear here as orders are placed and backfilled."}
-            </p>
-          </div>
-        ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: "1px solid var(--color-border)", background: "var(--color-cream)" }}>
-                  <th style={{ padding: "11px 12px 11px 16px", width: 36 }}>
-                    <input
-                      ref={headerCheckboxRef}
-                      type="checkbox"
-                      checked={allVisibleSelected}
-                      onChange={toggleSelectAll}
-                      style={{ cursor: "pointer" }}
-                    />
-                  </th>
-                  {["Name", "Email", "Phone", "Pickup Locations", "Created", "Updated"].map((label) => (
-                    <th
-                      key={label}
-                      style={{
-                        textAlign: "left",
-                        padding: "11px 16px",
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: "var(--color-muted)",
-                        textTransform: "uppercase",
-                        letterSpacing: "0.07em",
-                        whiteSpace: "nowrap",
-                      }}
-                      >
-                        {label}
-                      </th>
-                  ))}
-                  <th
-                    style={{
-                      textAlign: "center",
-                      padding: "11px 16px",
-                      fontSize: 11,
-                      fontWeight: 600,
-                      color: "var(--color-muted)",
-                      textTransform: "uppercase",
-                      letterSpacing: "0.07em",
-                      whiteSpace: "nowrap",
-                      width: 92,
-                    }}
-                  >
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleCustomers.map((customer, idx) => (
-                  <tr
-                    key={customer.id}
-                    style={{
-                      borderBottom: idx < visibleCustomers.length - 1 ? "1px solid var(--color-border)" : "none",
-                      background: "white",
-                    }}
-                  >
-                    <td style={{ padding: "13px 12px 13px 16px", verticalAlign: "top" }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(customer.id)}
-                        onChange={() => toggleSelect(customer.id)}
-                        style={{ cursor: "pointer" }}
-                      />
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)" }}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        <span style={{ fontWeight: 600 }}>{customer.name}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>
-                      {customer.email}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-text)", whiteSpace: "nowrap" }}>
-                      {customer.phone_number || <span style={{ color: "var(--color-border)" }}>-</span>}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top" }}>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                        {(customer.pickup_locations || []).length > 0 ? (
-                          customer.pickup_locations.map((location) => (
-                            <span
-                              key={location}
-                              style={{
-                                display: "inline-flex",
-                                alignItems: "center",
-                                padding: "4px 9px",
-                                borderRadius: 999,
-                                fontSize: 12,
-                                fontWeight: 600,
-                                background: "#edf5e7",
-                                color: "var(--color-forest)",
-                                border: "1px solid #d8e7cc",
-                              }}
-                            >
-                              {location}
-                            </span>
-                          ))
-                        ) : (
-                          <span style={{ color: "var(--color-border)" }}>-</span>
-                        )}
-                      </div>
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>
-                      {formatDateTime(customer.created_at)}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", color: "var(--color-muted)", whiteSpace: "nowrap" }}>
-                      {formatDateTime(customer.updated_at)}
-                    </td>
-                    <td style={{ padding: "13px 16px", verticalAlign: "top", textAlign: "center" }}>
-                      <button
-                        type="button"
-                        onClick={() => openEditModal(customer)}
-                        aria-label={`Edit ${customer.name}`}
-                        title={`Edit ${customer.name}`}
-                        style={btnIcon}
-                      >
-                        <EditIcon />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+      <div style={{ background: "white", border: "1px solid var(--color-border)", borderRadius: 20, overflow: "hidden" }}>
+        <CustomersTable
+          loading={loading}
+          filteredCount={filteredCustomers.length}
+          visibleCustomers={visibleCustomers}
+          search={search}
+          pickupLocation={pickupLocation}
+          selectedIds={selectedIds}
+          allVisibleSelected={allVisibleSelected}
+          headerCheckboxRef={headerCheckboxRef}
+          buttonStyle={btnIcon}
+          onToggleAll={toggleSelectAll}
+          onToggle={toggleSelect}
+          onEdit={openEditModal}
+        />
       </div>
 
       {filteredCustomers.length > 0 && (
@@ -1124,6 +1043,29 @@ export default function AdminCustomersPage() {
         </div>
       )}
 
+      <CustomerDialogs model={model} />
+
+    </div>
+  );
+}
+
+function CustomerDialogs({ model }: { model: CustomerPageModel }) {
+  return (
+    <>
+      <CustomerBulkDeleteDialog model={model} />
+      <CustomerEditDialog model={model} />
+      <EventReminderDialog model={model} />
+      <EventReminderConfirmDialog model={model} />
+    </>
+  );
+}
+
+function CustomerBulkDeleteDialog({ model }: { model: CustomerPageModel }) {
+  const {
+    showBulkDeleteModal, bulkDeleting, setShowBulkDeleteModal,
+    selectedIds, btnBase, btnDanger, handleBulkDelete,
+  } = model;
+  return (
       <Modal
         isOpen={showBulkDeleteModal}
         onClose={() => !bulkDeleting && setShowBulkDeleteModal(false)}
@@ -1142,7 +1084,17 @@ export default function AdminCustomersPage() {
       >
         {selectedIds.size} customer record{selectedIds.size === 1 ? "" : "s"} will be permanently deleted from the customer list. Orders will not be changed.
       </Modal>
+  );
+}
 
+function CustomerEditDialog({ model }: { model: CustomerPageModel }) {
+  const {
+    showEditModal, closeEditModal, editingCustomer, btnBase,
+    savingCustomer, btnPrimary, handleSaveCustomer, editError,
+    editName, setEditName, editEmail, setEditEmail,
+    editPhoneNumber, setEditPhoneNumber,
+  } = model;
+  return (
       <Modal
         isOpen={showEditModal}
         onClose={closeEditModal}
@@ -1171,9 +1123,9 @@ export default function AdminCustomersPage() {
                 style={{
                   padding: "12px 14px",
                   borderRadius: 12,
-                  background: "#fff1f2",
-                  border: "1px solid #fecdd3",
-                  color: "#9f1239",
+                  background: "var(--color-error-bg)",
+                  border: "1px solid var(--color-error-border)",
+                  color: "var(--color-error-text)",
                   fontSize: 13,
                 }}
               >
@@ -1249,9 +1201,9 @@ export default function AdminCustomersPage() {
                         borderRadius: 999,
                         fontSize: 12,
                         fontWeight: 600,
-                        background: "#edf5e7",
+                        background: "var(--color-success-bg)",
                         color: "var(--color-forest)",
-                        border: "1px solid #d8e7cc",
+                        border: "1px solid var(--color-success-border)",
                       }}
                     >
                       {location}
@@ -1269,13 +1221,34 @@ export default function AdminCustomersPage() {
           </div>
         </form>
       </Modal>
+  );
+}
 
+function EventReminderDialog({ model }: { model: CustomerPageModel }) {
+  const { showEventReminderModal, closeEventReminderModal, eventReminderRun } = model;
+  return (
       <Modal
         isOpen={showEventReminderModal}
         onClose={closeEventReminderModal}
         title="Event Reminder"
         size="xl"
-        actions={
+        actions={<EventReminderDialogActions model={model} />}
+      >
+        {eventReminderRun.total > 0
+          ? <EventReminderProgress model={model} />
+          : <EventReminderComposer model={model} />}
+      </Modal>
+  );
+}
+
+function EventReminderDialogActions({ model }: { model: CustomerPageModel }) {
+  const {
+    eventReminderRun, failedEventReminderItems,
+    handleRetryFailedEventReminders, eventReminderLoading, btnBase,
+    btnPrimary, closeEventReminderModal, openEventReminderConfirm,
+    eventReminderActionDisabled, eventReminderSelectedIds,
+  } = model;
+  return (
           eventReminderRun.total > 0 ? (
             <>
               {failedEventReminderItems.length > 0 && (
@@ -1313,9 +1286,12 @@ export default function AdminCustomersPage() {
               </button>
             </>
           )
-        }
-      >
-        {eventReminderRun.total > 0 ? (
+  );
+}
+
+function EventReminderProgress({ model }: { model: CustomerPageModel }) {
+  const { eventReminderRun, eventReminderProgressPercent } = model;
+  return (
           <div>
             <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
               Progress updates appear here while reminder emails are sent one at a time through Resend at a maximum rate of two emails per second.
@@ -1430,7 +1406,22 @@ export default function AdminCustomersPage() {
               })}
             </div>
           </div>
-        ) : (
+  );
+}
+
+function EventReminderComposer({ model }: { model: CustomerPageModel }) {
+  const {
+    eventReminderSearch, setEventReminderSearch, eventReminderPickupLocation,
+    setEventReminderPickupLocation, pickupLocationOptions,
+    filteredEventReminderCustomers, eventReminderSelectedIds, btnBase,
+    selectAllVisibleEventReminderCustomers,
+    unselectAllVisibleEventReminderCustomers, modalHeaderCheckboxRef,
+    allVisibleEventReminderSelected, toggleEventReminderCustomer,
+    eventReminderDisabledReason, activeEventDate, activeEventLocations,
+    eventReminderLocationIds, toggleLocationSelection, activeEventItems,
+    eventReminderItemIds, toggleItemSelection,
+  } = model;
+  return (
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
             <div style={{ minWidth: 0 }}>
               <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
@@ -1542,9 +1533,9 @@ export default function AdminCustomersPage() {
                                       borderRadius: 999,
                                       fontSize: 12,
                                       fontWeight: 600,
-                                      background: "#edf5e7",
+                                      background: "var(--color-success-bg)",
                                       color: "var(--color-forest)",
-                                      border: "1px solid #d8e7cc",
+                                      border: "1px solid var(--color-success-border)",
                                     }}
                                   >
                                     {location}
@@ -1684,10 +1675,18 @@ export default function AdminCustomersPage() {
               </div>
             </div>
           </div>
-        )}
-      </Modal>
+  );
+}
 
-      {/* Event Reminder Confirmation Modal */}
+
+function EventReminderConfirmDialog({ model }: { model: CustomerPageModel }) {
+  const {
+    showEventReminderConfirm, closeEventReminderConfirm, btnBase,
+    setShowEventReminderConfirm, setShowEventReminderModal,
+    handleSendEventReminders, eventReminderLoading, btnPrimary,
+    eventReminderSelectedIds,
+  } = model;
+  return (
       <Modal
         isOpen={showEventReminderConfirm}
         onClose={closeEventReminderConfirm}
@@ -1718,6 +1717,10 @@ export default function AdminCustomersPage() {
           Send event reminder emails to <span className="font-semibold" style={{ color: "var(--color-text)" }}>{eventReminderSelectedIds.size} customer{eventReminderSelectedIds.size !== 1 ? "s" : ""}</span>?
         </p>
       </Modal>
-    </div>
   );
+}
+
+
+export default function AdminCustomersPage() {
+  return <CustomersPageView model={useCustomerPageModel()} />;
 }

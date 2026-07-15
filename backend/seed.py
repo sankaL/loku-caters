@@ -136,9 +136,15 @@ SEED_ORDERS = [
 def main() -> None:
     db = SessionLocal()
     try:
-        active_event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+        active_event = (
+            db.query(Event)
+            .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+            .first()
+        )
         if active_event is None:
-            raise RuntimeError("No active event found. Create and activate an event before seeding orders.")
+            raise RuntimeError(
+                "No active event found. Create and activate an event before seeding orders."
+            )
 
         existing = db.query(Order).count()
         if existing > 0:
@@ -157,7 +163,9 @@ def main() -> None:
                 **fields,
             )
             db.add(order)
-            print(f"  {data['name']:20s}  {data['pickup_location']:12s}  {data['status']}")
+            print(
+                f"  {data['name']:20s}  {data['pickup_location']:12s}  {data['status']}"
+            )
 
         db.commit()
         print(f"\nSeeded {len(SEED_ORDERS)} orders.")

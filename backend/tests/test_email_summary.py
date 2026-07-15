@@ -7,7 +7,7 @@ os.environ.setdefault("RESEND_API_KEY", "test-key")
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from services.email import _build_order_summary_html  # noqa: E402
+from services.email import _build_order_summary_html, _subject_text  # noqa: E402
 
 
 def make_order_data(**overrides):
@@ -54,6 +54,32 @@ class EmailSummaryTests(unittest.TestCase):
         )
 
         self.assertIn("Combo savings", html)
+
+    def test_customer_and_admin_text_is_escaped_in_html(self):
+        html = _build_order_summary_html(
+            make_order_data(
+                pickup_location='<img src="https://example.invalid/track">',
+                items=[
+                    {
+                        "item_name": "<script>alert(1)</script>",
+                        "quantity": 1,
+                        "base_total": 20.0,
+                        "discount_total": 5.0,
+                        "total_price": 15.0,
+                    }
+                ],
+            )
+        )
+
+        self.assertNotIn("<script>", html)
+        self.assertNotIn("<img src=", html)
+        self.assertIn("&lt;script&gt;", html)
+
+    def test_email_subject_removes_header_control_characters(self):
+        self.assertEqual(
+            _subject_text("Order\r\nBcc: attacker@example.com"),
+            "Order Bcc: attacker@example.com",
+        )
 
 
 if __name__ == "__main__":

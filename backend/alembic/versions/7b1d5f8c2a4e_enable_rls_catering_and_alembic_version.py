@@ -31,7 +31,9 @@ def _set_row_level_security(enabled: bool) -> None:
     action = "ENABLE" if enabled else "DISABLE"
     for schema, table in _TABLES:
         op.execute(
-            sa.text(f"ALTER TABLE IF EXISTS {schema}.{table} {action} ROW LEVEL SECURITY")
+            sa.text(
+                f"ALTER TABLE IF EXISTS {schema}.{table} {action} ROW LEVEL SECURITY"
+            )
         )
 
 

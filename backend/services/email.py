@@ -1,17 +1,32 @@
 from html import escape
+import logging
 
 import resend
 from config import settings
 from event_config import CURRENCY
 
 resend.api_key = settings.resend_api_key
+resend.default_http_client = resend.RequestsClient(
+    timeout=settings.email_request_timeout_seconds
+)
+logger = logging.getLogger(__name__)
+
+
+def _html_text(value) -> str:
+    return escape(str(value or ""))
+
+
+def _subject_text(value) -> str:
+    return " ".join(str(value or "").replace("\r", " ").replace("\n", " ").split())[
+        :200
+    ]
 
 
 def _send_html_email(*, to_email: str, subject: str, html_body: str) -> None:
     message_payload = {
         "from": f"Loku Caters <{settings.from_email}>",
         "to": [to_email],
-        "subject": subject,
+        "subject": _subject_text(subject),
         "html": html_body,
     }
 
@@ -32,7 +47,9 @@ def _normalize_order_lines(order_data: dict) -> list[dict]:
                 {
                     "item_name": raw_line.get("item_name", ""),
                     "quantity": int(raw_line.get("quantity", 0) or 0),
-                    "base_total": float(raw_line.get("base_total", raw_line.get("total_price", 0)) or 0),
+                    "base_total": float(
+                        raw_line.get("base_total", raw_line.get("total_price", 0)) or 0
+                    ),
                     "discount_total": float(raw_line.get("discount_total", 0) or 0),
                     "total_price": float(raw_line.get("total_price", 0) or 0),
                 }
@@ -54,17 +71,24 @@ def _normalize_order_lines(order_data: dict) -> list[dict]:
 
 
 def _build_order_summary_html(order_data: dict) -> str:
-    currency = order_data.get("currency") or CURRENCY
+    currency = _html_text(order_data.get("currency") or CURRENCY)
     lines = _normalize_order_lines(order_data)
-    subtotal = float(order_data.get("subtotal", sum(line["base_total"] for line in lines)) or 0)
-    discount_total = float(order_data.get("discount_total", sum(line["discount_total"] for line in lines)) or 0)
-    grand_total = float(order_data.get("total_price", sum(line["total_price"] for line in lines)) or 0)
+    subtotal = float(
+        order_data.get("subtotal", sum(line["base_total"] for line in lines)) or 0
+    )
+    discount_total = float(
+        order_data.get("discount_total", sum(line["discount_total"] for line in lines))
+        or 0
+    )
+    grand_total = float(
+        order_data.get("total_price", sum(line["total_price"] for line in lines)) or 0
+    )
     has_combo_discounts = bool(order_data.get("has_combo_discounts"))
     has_manual_pricing = bool(order_data.get("has_manual_pricing"))
-    event_date = order_data.get("event_date", "")
-    pickup_location = order_data.get("pickup_location", "")
-    pickup_time_slot = order_data.get("pickup_time_slot", "")
-    address = order_data.get("address", "")
+    event_date = _html_text(order_data.get("event_date", ""))
+    pickup_location = _html_text(order_data.get("pickup_location", ""))
+    pickup_time_slot = _html_text(order_data.get("pickup_time_slot", ""))
+    address = _html_text(order_data.get("address", ""))
 
     location_display = pickup_location
     if address:
@@ -73,8 +97,8 @@ def _build_order_summary_html(order_data: dict) -> str:
     item_rows_html = "".join(
         f"""
                       <tr>
-                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">{line['item_name']} x {line['quantity']}</td>
-                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${line['total_price']:.2f}</td>
+                        <td style="font-size:14px;color:#4a4a4a;padding:6px 0;">{_html_text(line["item_name"])} x {line["quantity"]}</td>
+                        <td style="font-size:14px;color:#1C1C1A;font-weight:600;text-align:right;padding:6px 0;">{currency} ${line["total_price"]:.2f}</td>
                       </tr>
 """
         for line in lines
@@ -145,7 +169,7 @@ def _build_order_summary_html(order_data: dict) -> str:
 
 def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -> str:
     etransfer_enabled = bool(order_data.get("etransfer_enabled"))
-    etransfer_email = str(order_data.get("etransfer_email") or "").strip()
+    etransfer_email = _html_text(str(order_data.get("etransfer_email") or "").strip())
     pickup_completed = bool(order_data.get("pickup_completed"))
     if not etransfer_enabled or not etransfer_email:
         return ""
@@ -186,15 +210,19 @@ def _build_etransfer_section_html(order_data: dict, *, reminder: bool = False) -
 
 def send_confirmation(order_data: dict) -> None:
     if not settings.email_enabled:
-        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
+        logger.info("Email delivery disabled by configuration")
         return
 
-    name = order_data["name"]
+    name = _html_text(order_data["name"])
     email = order_data["email"]
     etransfer_section_html = _build_etransfer_section_html(order_data)
     summary_html = _build_order_summary_html(order_data)
     order_lines = _normalize_order_lines(order_data)
-    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Pre-Order"
+    subject_line_name = (
+        _subject_text(order_lines[0]["item_name"])
+        if len(order_lines) == 1
+        else "Loku Caters Pre-Order"
+    )
 
     html_body = f"""
 <!DOCTYPE html>
@@ -260,16 +288,16 @@ def send_confirmation(order_data: dict) -> None:
 
 def send_reminder(order_data: dict) -> None:
     if not settings.email_enabled:
-        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
+        logger.info("Email delivery disabled by configuration")
         return
 
-    name = order_data["name"]
+    name = _html_text(order_data["name"])
     email = order_data["email"]
-    event_date = order_data.get("event_date", "")
+    event_date = _html_text(order_data.get("event_date", ""))
     etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
     summary_html = _build_order_summary_html(order_data)
-    pickup_location = order_data.get("pickup_location", "")
-    address = order_data.get("address", "")
+    pickup_location = _html_text(order_data.get("pickup_location", ""))
+    address = _html_text(order_data.get("address", ""))
     location_display = pickup_location
     if address:
         location_display = f"{pickup_location} - {address}"
@@ -286,7 +314,11 @@ def send_reminder(order_data: dict) -> None:
             "We look forward to seeing you soon!"
         )
     order_lines = _normalize_order_lines(order_data)
-    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
+    subject_line_name = (
+        _subject_text(order_lines[0]["item_name"])
+        if len(order_lines) == 1
+        else "Loku Caters Order"
+    )
 
     html_body = f"""
 <!DOCTYPE html>
@@ -351,17 +383,21 @@ def send_reminder(order_data: dict) -> None:
 
 def send_payment_reminder(order_data: dict) -> None:
     if not settings.email_enabled:
-        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
+        logger.info("Email delivery disabled by configuration")
         return
 
-    name = order_data["name"]
+    name = _html_text(order_data["name"])
     email = order_data["email"]
-    event_date = order_data.get("event_date", "")
+    event_date = _html_text(order_data.get("event_date", ""))
     pickup_completed = bool(order_data.get("pickup_completed"))
     etransfer_section_html = _build_etransfer_section_html(order_data, reminder=True)
     summary_html = _build_order_summary_html(order_data)
     order_lines = _normalize_order_lines(order_data)
-    subject_line_name = order_lines[0]["item_name"] if len(order_lines) == 1 else "Loku Caters Order"
+    subject_line_name = (
+        _subject_text(order_lines[0]["item_name"])
+        if len(order_lines) == 1
+        else "Loku Caters Order"
+    )
     pickup_sentence_html = ""
     if event_date:
         pickup_sentence_html = (
@@ -462,21 +498,23 @@ def _build_event_reminder_list_html(title: str, items: list[str]) -> str:
 """
 
 
-def _build_event_reminder_button_html(label: str, url: str, *, secondary: bool = False) -> str:
+def _build_event_reminder_button_html(
+    label: str, url: str, *, secondary: bool = False
+) -> str:
     background = "#ffffff" if secondary else "#F2AF29"
     color = "#12270F" if secondary else "#ffffff"
     border = "1px solid #12270F" if secondary else "1px solid #F2AF29"
     return (
         f'<a href="{escape(url, quote=True)}" '
         f'style="display:inline-block;padding:12px 22px;border-radius:999px;'
-        f'background:{background};color:{color};border:{border};font-size:14px;'
+        f"background:{background};color:{color};border:{border};font-size:14px;"
         f'font-weight:700;text-decoration:none;">{escape(label)}</a>'
     )
 
 
 def send_event_reminder_email(email_data: dict) -> None:
     if not settings.email_enabled:
-        print("[email] Email delivery disabled by EMAIL_ENABLED=false")
+        logger.info("Email delivery disabled by configuration")
         return
 
     email = str(email_data.get("email") or "").strip()
@@ -487,8 +525,16 @@ def send_event_reminder_email(email_data: dict) -> None:
     event_date = escape(str(email_data.get("event_date") or ""))
     order_url = str(email_data.get("order_url") or "").strip()
     feedback_url = str(email_data.get("feedback_url") or "").strip()
-    location_names = [str(value).strip() for value in email_data.get("pickup_locations") or [] if str(value).strip()]
-    item_names = [str(value).strip() for value in email_data.get("items") or [] if str(value).strip()]
+    location_names = [
+        str(value).strip()
+        for value in email_data.get("pickup_locations") or []
+        if str(value).strip()
+    ]
+    item_names = [
+        str(value).strip()
+        for value in email_data.get("items") or []
+        if str(value).strip()
+    ]
 
     if not order_url:
         raise ValueError("order_url is required")
@@ -502,7 +548,9 @@ def send_event_reminder_email(email_data: dict) -> None:
     locations_html = _build_event_reminder_list_html("Pickup Locations", location_names)
     items_html = _build_event_reminder_list_html("Featured Items", item_names)
     order_button_html = _build_event_reminder_button_html("Order This Batch", order_url)
-    feedback_button_html = _build_event_reminder_button_html("Cannot Make This Batch?", feedback_url, secondary=True)
+    feedback_button_html = _build_event_reminder_button_html(
+        "Cannot Make This Batch?", feedback_url, secondary=True
+    )
 
     html_body = f"""
 <!DOCTYPE html>

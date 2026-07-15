@@ -91,7 +91,7 @@ export function buildPageMetadata(routeKey: RouteKey): Metadata {
   };
 }
 
-export function buildAbsoluteUrl(path: string): string {
+function buildAbsoluteUrl(path: string): string {
   return new URL(path, SITE_URL).toString();
 }
 

@@ -15,12 +15,18 @@ from database import Base
 class Item(Base):
     __tablename__ = "items"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    discounted_price: Mapped[Optional[float]] = mapped_column(Numeric(10, 2), nullable=True)
-    minimum_order_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    discounted_price: Mapped[Optional[float]] = mapped_column(
+        Numeric(10, 2), nullable=True
+    )
+    minimum_order_quantity: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
     image_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
@@ -28,7 +34,9 @@ class Item(Base):
 class Location(Base):
     __tablename__ = "locations"
 
-    id: Mapped[str] = mapped_column(Text, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        Text, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     address: Mapped[str] = mapped_column(Text, nullable=False, default="")
     time_slots: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
@@ -46,25 +54,33 @@ class Event(Base):
     hero_header_sage: Mapped[str] = mapped_column(Text, nullable=False, default="")
     hero_subheader: Mapped[str] = mapped_column(Text, nullable=False, default="")
     promo_details: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    tooltip_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    tooltip_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     tooltip_header: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tooltip_body: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     tooltip_image_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     hero_side_image_key: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    etransfer_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    etransfer_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     etransfer_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     item_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     location_ids: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     combo_deals: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     pickup_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Order(Base):
     __tablename__ = "orders"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     event_id: Mapped[int] = mapped_column(Integer, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     item_id: Mapped[str] = mapped_column(String, nullable=False)
@@ -79,8 +95,12 @@ class Order(Base):
     email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     exclude_email: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    base_total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
-    discount_total: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    base_total_price: Mapped[float] = mapped_column(
+        Numeric(10, 2), nullable=False, default=0
+    )
+    discount_total: Mapped[float] = mapped_column(
+        Numeric(10, 2), nullable=False, default=0
+    )
     total_price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     pricing_meta: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     status: Mapped[str] = mapped_column(String, default=OrderStatus.PENDING)
@@ -101,12 +121,18 @@ class Order(Base):
 class EventPlan(Base):
     __tablename__ = "event_plans"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     source_event_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
-    source_event_kind: Mapped[str] = mapped_column(Text, nullable=False, default="event")
+    source_event_kind: Mapped[str] = mapped_column(
+        Text, nullable=False, default="event"
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
-    included_order_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    included_order_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
     ordered_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     planned_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     issue_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -125,13 +151,21 @@ class EventPlan(Base):
 class Invoice(Base):
     __tablename__ = "invoices"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    invoice_number: Mapped[str] = mapped_column(Text, nullable=False, unique=True, index=True)
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
+    invoice_number: Mapped[str] = mapped_column(
+        Text, nullable=False, unique=True, index=True
+    )
     number_year: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     number_sequence: Mapped[int] = mapped_column(Integer, nullable=False)
-    source_bundle_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True, index=True)
+    source_bundle_id: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, index=True
+    )
     source_order_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    source_event_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    source_event_id: Mapped[Optional[int]] = mapped_column(
+        Integer, nullable=True, index=True
+    )
     order_reference: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     customer_name: Mapped[str] = mapped_column(Text, nullable=False)
     customer_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -141,7 +175,9 @@ class Invoice(Base):
     memo: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     currency: Mapped[str] = mapped_column(String, nullable=False)
     subtotal: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
-    discount_total: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    discount_total: Mapped[float] = mapped_column(
+        Numeric(10, 2), nullable=False, default=0
+    )
     total: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     line_items: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     paid: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
@@ -162,7 +198,9 @@ class InvoiceSettings(Base):
     __tablename__ = "invoice_settings"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
-    business_name: Mapped[str] = mapped_column(Text, nullable=False, default="Loku Caters")
+    business_name: Mapped[str] = mapped_column(
+        Text, nullable=False, default="Loku Caters"
+    )
     business_address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     business_email: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     business_phone: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -187,7 +225,9 @@ class InvoiceNumberCounter(Base):
 class Customer(Base):
     __tablename__ = "customers"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     email: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     phone_number: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
@@ -203,7 +243,9 @@ class Customer(Base):
 class Feedback(Base):
     __tablename__ = "feedback"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     origin: Mapped[str] = mapped_column(String, nullable=False)
     feedback_type: Mapped[str] = mapped_column(String, nullable=False)
     order_id: Mapped[Optional[str]] = mapped_column(String, nullable=True)
@@ -218,13 +260,17 @@ class Feedback(Base):
     status: Mapped[str] = mapped_column(String, nullable=False, default="new")
     admin_comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     rating: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    show_in_reviews: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    show_in_reviews: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
 
 
 class CateringRequest(Base):
     __tablename__ = "catering_requests"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     first_name: Mapped[str] = mapped_column(String, nullable=False)
     last_name: Mapped[str] = mapped_column(String, nullable=False)
     email: Mapped[str] = mapped_column(String, nullable=False)
@@ -243,7 +289,9 @@ class CateringRequest(Base):
 class CateringRequestComment(Base):
     __tablename__ = "catering_request_comments"
 
-    id: Mapped[str] = mapped_column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    id: Mapped[str] = mapped_column(
+        String, primary_key=True, default=lambda: str(uuid.uuid4())
+    )
     catering_request_id: Mapped[str] = mapped_column(String, nullable=False, index=True)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(

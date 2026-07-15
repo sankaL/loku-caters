@@ -47,7 +47,9 @@ def downgrade() -> None:
     )
 
     op.execute(sa.text("UPDATE orders SET email = '' WHERE email IS NULL"))
-    op.execute(sa.text("UPDATE orders SET phone_number = '' WHERE phone_number IS NULL"))
+    op.execute(
+        sa.text("UPDATE orders SET phone_number = '' WHERE phone_number IS NULL")
+    )
 
     op.alter_column("orders", "email", existing_type=sa.String(), nullable=False)
     op.alter_column("orders", "phone_number", existing_type=sa.String(), nullable=False)

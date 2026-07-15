@@ -20,7 +20,7 @@ export async function middleware(request: NextRequest) {
     getTokenFromAuthCookies(request);
 
   if (!accessToken) {
-    return NextResponse.redirect(new URL("/admin/login", request.url));
+    return redirectToLogin();
   }
 
   try {
@@ -30,8 +30,15 @@ export async function middleware(request: NextRequest) {
     if (!decoded.exp || decoded.exp * 1000 < Date.now()) throw new Error("expired");
     return NextResponse.next();
   } catch {
-    return NextResponse.redirect(new URL("/admin/login", request.url));
+    return redirectToLogin();
   }
+}
+
+function redirectToLogin(): NextResponse {
+  return new NextResponse(null, {
+    status: 307,
+    headers: { Location: "/admin/login" },
+  });
 }
 
 function getTokenFromAuthCookies(request: NextRequest): string | undefined {

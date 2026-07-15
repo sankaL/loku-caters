@@ -4,15 +4,50 @@ import unittest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from services.pricing import PricingLineInput, effective_minimum_order_quantity, normalize_combo_deals, quote_cart  # noqa: E402
+from services.pricing import (
+    PricingLineInput,
+    effective_minimum_order_quantity,
+    normalize_combo_deals,
+    quote_cart,
+)  # noqa: E402
 
 
 ITEMS = [
-    {"id": "lamprais", "name": "Lamprais", "price": 20.0, "discounted_price": None, "minimum_order_quantity": 1},
-    {"id": "roll", "name": "Egg Roll", "price": 3.0, "discounted_price": None, "minimum_order_quantity": 1},
-    {"id": "fish_roll", "name": "Fish Roll", "price": 3.0, "discounted_price": None, "minimum_order_quantity": 1},
-    {"id": "mutton_roll", "name": "Mutton Roll", "price": 4.0, "discounted_price": None, "minimum_order_quantity": 1},
-    {"id": "dessert", "name": "Watalappan", "price": 6.0, "discounted_price": 5.0, "minimum_order_quantity": 1},
+    {
+        "id": "lamprais",
+        "name": "Lamprais",
+        "price": 20.0,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "id": "roll",
+        "name": "Egg Roll",
+        "price": 3.0,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "id": "fish_roll",
+        "name": "Fish Roll",
+        "price": 3.0,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "id": "mutton_roll",
+        "name": "Mutton Roll",
+        "price": 4.0,
+        "discounted_price": None,
+        "minimum_order_quantity": 1,
+    },
+    {
+        "id": "dessert",
+        "name": "Watalappan",
+        "price": 6.0,
+        "discounted_price": 5.0,
+        "minimum_order_quantity": 1,
+    },
 ]
 
 
@@ -36,7 +71,11 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirements": [{"item_id": "lamprais", "min_quantity": 5}],
-                    "discount": {"type": "fixed_amount", "amount": 5, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 5,
+                        "applies_to": "combo_total",
+                    },
                 }
             ],
         )
@@ -60,7 +99,11 @@ class PricingTests(unittest.TestCase):
                         {"item_id": "lamprais", "min_quantity": 1},
                         {"item_id": "roll", "min_quantity": 5},
                     ],
-                    "discount": {"type": "fixed_amount", "amount": 4, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 4,
+                        "applies_to": "combo_total",
+                    },
                 }
             ],
         )
@@ -96,7 +139,9 @@ class PricingTests(unittest.TestCase):
         )
         self.assertEqual(result["subtotal"], 8.0)
         self.assertEqual(result["discount_total"], 2.0)
-        dessert_line = next(line for line in result["lines"] if line["item_id"] == "dessert")
+        dessert_line = next(
+            line for line in result["lines"] if line["item_id"] == "dessert"
+        )
         self.assertEqual(dessert_line["discount_total"], 2.0)
         self.assertEqual(dessert_line["total_price"], 3.0)
 
@@ -110,12 +155,36 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirements": [{"item_id": "roll", "min_quantity": 5}],
-                    "discount": {"type": "fixed_amount", "amount": 3, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 3,
+                        "applies_to": "combo_total",
+                    },
                 }
             ],
         )
         self.assertEqual(result["discount_total"], 6.0)
         self.assertEqual(result["applied_combos"][0]["application_count"], 2)
+
+    def test_maximum_public_quantity_handles_repeatable_unit_combo(self):
+        result = price_cart(
+            [PricingLineInput(line_id="roll", item_id="roll", quantity=250)],
+            [
+                {
+                    "id": "single-roll",
+                    "name": "Single Roll",
+                    "enabled": True,
+                    "sort_order": 0,
+                    "requirements": [{"item_id": "roll", "min_quantity": 1}],
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 0.01,
+                        "applies_to": "combo_total",
+                    },
+                }
+            ],
+        )
+        self.assertEqual(result["applied_combos"][0]["application_count"], 250)
 
     def test_percentage_combo_total_discount(self):
         result = price_cart(
@@ -133,7 +202,11 @@ class PricingTests(unittest.TestCase):
                         {"item_id": "lamprais", "min_quantity": 1},
                         {"item_id": "roll", "min_quantity": 5},
                     ],
-                    "discount": {"type": "percentage", "amount": 10, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 10,
+                        "applies_to": "combo_total",
+                    },
                 }
             ],
         )
@@ -168,7 +241,9 @@ class PricingTests(unittest.TestCase):
         )
         self.assertEqual(result["subtotal"], 8.0)
         self.assertEqual(result["discount_total"], 1.0)
-        dessert_line = next(line for line in result["lines"] if line["item_id"] == "dessert")
+        dessert_line = next(
+            line for line in result["lines"] if line["item_id"] == "dessert"
+        )
         self.assertEqual(dessert_line["discount_total"], 1.0)
         self.assertEqual(dessert_line["total_price"], 4.0)
 
@@ -189,7 +264,11 @@ class PricingTests(unittest.TestCase):
                         {"item_id": "lamprais", "min_quantity": 1},
                         {"item_id": "roll", "min_quantity": 5},
                     ],
-                    "discount": {"type": "fixed_amount", "amount": 4, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 4,
+                        "applies_to": "combo_total",
+                    },
                 },
                 {
                     "id": "lamprais-dessert",
@@ -200,7 +279,11 @@ class PricingTests(unittest.TestCase):
                         {"item_id": "lamprais", "min_quantity": 1},
                         {"item_id": "dessert", "min_quantity": 1},
                     ],
-                    "discount": {"type": "fixed_amount", "amount": 3, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 3,
+                        "applies_to": "combo_total",
+                    },
                 },
             ],
         )
@@ -234,7 +317,9 @@ class PricingTests(unittest.TestCase):
         result = price_cart(
             [
                 PricingLineInput(line_id="lamprais", item_id="lamprais", quantity=10),
-                PricingLineInput(line_id="mutton-roll", item_id="mutton_roll", quantity=1),
+                PricingLineInput(
+                    line_id="mutton-roll", item_id="mutton_roll", quantity=1
+                ),
             ],
             [
                 {
@@ -243,15 +328,33 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Lamprais", "item_ids": ["lamprais"], "min_quantity": 10},
-                        {"id": "addon", "name": "Roll Choice", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Lamprais",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 10,
+                        },
+                        {
+                            "id": "addon",
+                            "name": "Roll Choice",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "percentage", "amount": 50, "applies_to": "group", "target_group_id": "addon"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 50,
+                        "applies_to": "group",
+                        "target_group_id": "addon",
+                    },
                 }
             ],
         )
         self.assertEqual(result["discount_total"], 2.0)
-        self.assertEqual(result["applied_combos"][0]["discount_scope_label"], "Fish Roll or Mutton Roll")
+        self.assertEqual(
+            result["applied_combos"][0]["discount_scope_label"],
+            "Fish Roll or Mutton Roll",
+        )
 
     def test_group_discount_scales_per_bundle(self):
         result = price_cart(
@@ -266,10 +369,25 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Lamprais", "item_ids": ["lamprais"], "min_quantity": 10},
-                        {"id": "addon", "name": "Roll Choice", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Lamprais",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 10,
+                        },
+                        {
+                            "id": "addon",
+                            "name": "Roll Choice",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "percentage", "amount": 50, "applies_to": "group", "target_group_id": "addon"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 50,
+                        "applies_to": "group",
+                        "target_group_id": "addon",
+                    },
                 }
             ],
         )
@@ -281,7 +399,9 @@ class PricingTests(unittest.TestCase):
             [
                 PricingLineInput(line_id="lamprais", item_id="lamprais", quantity=10),
                 PricingLineInput(line_id="fish-roll", item_id="fish_roll", quantity=1),
-                PricingLineInput(line_id="mutton-roll", item_id="mutton_roll", quantity=1),
+                PricingLineInput(
+                    line_id="mutton-roll", item_id="mutton_roll", quantity=1
+                ),
             ],
             [
                 {
@@ -290,16 +410,35 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Lamprais", "item_ids": ["lamprais"], "min_quantity": 10},
-                        {"id": "addon", "name": "Roll Choice", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Lamprais",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 10,
+                        },
+                        {
+                            "id": "addon",
+                            "name": "Roll Choice",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "percentage", "amount": 50, "applies_to": "group", "target_group_id": "addon"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 50,
+                        "applies_to": "group",
+                        "target_group_id": "addon",
+                    },
                 }
             ],
         )
         self.assertEqual(result["discount_total"], 3.5)
-        mutton_line = next(line for line in result["lines"] if line["item_id"] == "mutton_roll")
-        fish_line = next(line for line in result["lines"] if line["item_id"] == "fish_roll")
+        mutton_line = next(
+            line for line in result["lines"] if line["item_id"] == "mutton_roll"
+        )
+        fish_line = next(
+            line for line in result["lines"] if line["item_id"] == "fish_roll"
+        )
         self.assertEqual(mutton_line["discount_total"], 2.0)
         self.assertEqual(fish_line["discount_total"], 1.5)
 
@@ -307,7 +446,9 @@ class PricingTests(unittest.TestCase):
         result = price_cart(
             [
                 PricingLineInput(line_id="lamprais", item_id="lamprais", quantity=1),
-                PricingLineInput(line_id="mutton-roll", item_id="mutton_roll", quantity=5),
+                PricingLineInput(
+                    line_id="mutton-roll", item_id="mutton_roll", quantity=5
+                ),
             ],
             [
                 {
@@ -316,17 +457,34 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Base group", "item_ids": ["lamprais"], "min_quantity": 1},
-                        {"id": "apps", "name": "Apps", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Base group",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 1,
+                        },
+                        {
+                            "id": "apps",
+                            "name": "Apps",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "percentage", "amount": 50, "applies_to": "group", "target_group_id": "apps"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 50,
+                        "applies_to": "group",
+                        "target_group_id": "apps",
+                    },
                 }
             ],
         )
         self.assertEqual(result["discount_total"], 10.0)
         self.assertEqual(result["applied_combos"][0]["application_count"], 1)
         self.assertEqual(result["upsell_opportunities"], [])
-        mutton_line = next(line for line in result["lines"] if line["item_id"] == "mutton_roll")
+        mutton_line = next(
+            line for line in result["lines"] if line["item_id"] == "mutton_roll"
+        )
         self.assertEqual(mutton_line["discount_total"], 10.0)
 
     def test_grouped_overlap_prefers_best_non_overlapping_solution(self):
@@ -343,10 +501,24 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Lamprais", "item_ids": ["lamprais"], "min_quantity": 10},
-                        {"id": "addon", "name": "Roll Choice", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Lamprais",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 10,
+                        },
+                        {
+                            "id": "addon",
+                            "name": "Roll Choice",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "fixed_amount", "amount": 2, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 2,
+                        "applies_to": "combo_total",
+                    },
                 },
                 {
                     "id": "lamprais-dessert",
@@ -354,10 +526,24 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 1,
                     "requirement_groups": [
-                        {"id": "base", "name": "Lamprais", "item_ids": ["lamprais"], "min_quantity": 10},
-                        {"id": "dessert", "name": "Dessert", "item_ids": ["dessert"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Lamprais",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 10,
+                        },
+                        {
+                            "id": "dessert",
+                            "name": "Dessert",
+                            "item_ids": ["dessert"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "fixed_amount", "amount": 3, "applies_to": "combo_total"},
+                    "discount": {
+                        "type": "fixed_amount",
+                        "amount": 3,
+                        "applies_to": "combo_total",
+                    },
                 },
             ],
         )
@@ -374,17 +560,39 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Lamprais", "item_ids": ["lamprais"], "min_quantity": 10},
-                        {"id": "addon", "name": "Roll Choice", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Lamprais",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 10,
+                        },
+                        {
+                            "id": "addon",
+                            "name": "Roll Choice",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "percentage", "amount": 50, "applies_to": "group", "target_group_id": "addon"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 50,
+                        "applies_to": "group",
+                        "target_group_id": "addon",
+                    },
                 }
             ],
         )
         self.assertEqual(len(result["upsell_opportunities"]), 1)
-        self.assertIn("Fish Roll or Mutton Roll", result["upsell_opportunities"][0]["preview_text"])
-        self.assertIn("Fish Roll or Mutton Roll", result["upsell_opportunities"][0]["message"])
-        missing_requirement = result["upsell_opportunities"][0]["missing_requirements"][0]
+        self.assertIn(
+            "Fish Roll or Mutton Roll",
+            result["upsell_opportunities"][0]["preview_text"],
+        )
+        self.assertIn(
+            "Fish Roll or Mutton Roll", result["upsell_opportunities"][0]["message"]
+        )
+        missing_requirement = result["upsell_opportunities"][0]["missing_requirements"][
+            0
+        ]
         self.assertEqual(missing_requirement["group_min_quantity"], 1)
         self.assertEqual(
             missing_requirement["options"],
@@ -404,7 +612,9 @@ class PricingTests(unittest.TestCase):
             ],
         )
 
-    def test_effective_minimum_order_quantity_uses_lowest_enabled_combo_group_minimum(self):
+    def test_effective_minimum_order_quantity_uses_lowest_enabled_combo_group_minimum(
+        self,
+    ):
         effective_minimum = effective_minimum_order_quantity(
             "fish_roll",
             10,
@@ -415,10 +625,25 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Base", "item_ids": ["lamprais"], "min_quantity": 1},
-                        {"id": "apps", "name": "Apps", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 5},
+                        {
+                            "id": "base",
+                            "name": "Base",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 1,
+                        },
+                        {
+                            "id": "apps",
+                            "name": "Apps",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 5,
+                        },
                     ],
-                    "discount": {"type": "percentage", "amount": 50, "applies_to": "group", "target_group_id": "apps"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 50,
+                        "applies_to": "group",
+                        "target_group_id": "apps",
+                    },
                 }
             ],
         )
@@ -433,10 +658,25 @@ class PricingTests(unittest.TestCase):
                     "enabled": True,
                     "sort_order": 0,
                     "requirement_groups": [
-                        {"id": "base", "name": "Lamprais", "item_ids": ["lamprais"], "min_quantity": 10},
-                        {"id": "addon", "name": "Roll Choice", "item_ids": ["fish_roll", "mutton_roll"], "min_quantity": 1},
+                        {
+                            "id": "base",
+                            "name": "Lamprais",
+                            "item_ids": ["lamprais"],
+                            "min_quantity": 10,
+                        },
+                        {
+                            "id": "addon",
+                            "name": "Roll Choice",
+                            "item_ids": ["fish_roll", "mutton_roll"],
+                            "min_quantity": 1,
+                        },
                     ],
-                    "discount": {"type": "percentage", "amount": 50, "applies_to": "group", "target_group_id": "addon"},
+                    "discount": {
+                        "type": "percentage",
+                        "amount": 50,
+                        "applies_to": "group",
+                        "target_group_id": "addon",
+                    },
                 }
             ],
             allowed_item_ids={item["id"] for item in ITEMS},
@@ -445,7 +685,9 @@ class PricingTests(unittest.TestCase):
         result = price_cart(
             [
                 PricingLineInput(line_id="lamprais", item_id="lamprais", quantity=10),
-                PricingLineInput(line_id="mutton-roll", item_id="mutton_roll", quantity=1),
+                PricingLineInput(
+                    line_id="mutton-roll", item_id="mutton_roll", quantity=1
+                ),
             ],
             normalized_combo_deals,
         )

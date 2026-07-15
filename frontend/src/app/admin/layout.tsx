@@ -117,6 +117,89 @@ const navItems: NavItem[] = [
 
 const COLLAPSED_KEY = "admin-sidebar-collapsed";
 
+function MobileBackdrop({ open, onClose }: { open: boolean; onClose: () => void }) {
+  if (!open) return null;
+  return <div className="fixed inset-0 z-30 md:hidden" style={{ background: "rgba(0,0,0,0.4)" }} onClick={onClose} />;
+}
+
+function SidebarBrand({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  return (
+    <div className="px-4 py-5 border-b flex items-center overflow-hidden" style={{ borderColor: "rgba(255,255,255,0.08)", gap: collapsed ? 0 : 12 }}>
+      <div className={`shrink-0 ${collapsed ? "md:hidden" : ""}`}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-sage)" }}>
+          <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+        </svg>
+      </div>
+      {!collapsed && (
+        <div className="flex-1 overflow-hidden">
+          <p className="text-xs font-semibold tracking-widest uppercase mb-0.5 truncate" style={{ color: "var(--color-sage)" }}>Loku Caters</p>
+          <p className="text-sm font-semibold truncate" style={{ color: "var(--color-cream)" }}>Admin</p>
+        </div>
+      )}
+      <button
+        onClick={onToggle}
+        title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        className="hidden md:flex shrink-0 items-center justify-center rounded-lg transition-all"
+        style={{ color: "rgba(247,245,240,0.35)", padding: "4px", marginLeft: collapsed ? "auto" : undefined }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.color = "rgba(247,245,240,0.7)";
+          event.currentTarget.style.background = "rgba(255,255,255,0.08)";
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.color = "rgba(247,245,240,0.35)";
+          event.currentTarget.style.background = "transparent";
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ transform: collapsed ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s ease" }}>
+          <path d="M15 18l-6-6 6-6" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function AdminNavigation({ pathname, collapsed }: { pathname: string; collapsed: boolean }) {
+  return (
+    <nav className="flex-1 px-2 py-4 space-y-1 overflow-hidden">
+      {navItems.map((item) => {
+        const active = pathname.startsWith(item.href) ||
+          (item.href === "/admin/config" && pathname.startsWith("/admin/events"));
+        return (
+          <Link
+            key={item.href}
+            href={item.href}
+            title={collapsed ? item.label : undefined}
+            className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all overflow-hidden"
+            style={{
+              color: active ? "var(--color-cream)" : "rgba(247,245,240,0.55)",
+              background: active ? "rgba(255,255,255,0.12)" : "transparent",
+              justifyContent: collapsed ? "center" : "flex-start",
+            }}
+          >
+            <span className="shrink-0" style={{ color: active ? "var(--color-sage)" : "rgba(114,145,82,0.6)" }}>{item.icon}</span>
+            {!collapsed && <span className="truncate">{item.label}</span>}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
+
+function MobileHeader({ onOpen }: { onOpen: () => void }) {
+  return (
+    <div className="md:hidden flex items-center px-4 py-3 border-b" style={{ background: "white", borderColor: "var(--color-border)" }}>
+      <button onClick={onOpen} aria-label="Open menu" className="p-2 rounded-xl transition-all" style={{ color: "var(--color-forest)" }}>
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+      <p className="ml-3 text-sm font-semibold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>Loku Caters Admin</p>
+    </div>
+  );
+}
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -156,14 +239,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ background: "var(--color-cream)" }}>
-      {/* Mobile backdrop */}
-      {mobileOpen && (
-        <div
-          className="fixed inset-0 z-30 md:hidden"
-          style={{ background: "rgba(0,0,0,0.4)" }}
-          onClick={() => setMobileOpen(false)}
-        />
-      )}
+      <MobileBackdrop open={mobileOpen} onClose={() => setMobileOpen(false)} />
 
       {/* Sidebar */}
       <aside
@@ -176,94 +252,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           transition: "width 0.2s ease, transform 0.2s ease",
         }}
       >
-
-        {/* Brand + collapse toggle */}
-        <div
-          className="px-4 py-5 border-b flex items-center overflow-hidden"
-          style={{ borderColor: "rgba(255,255,255,0.08)", gap: isCollapsed ? 0 : 12 }}
-        >
-          {/* Logo icon hidden on desktop when collapsed to give room for the toggle */}
-          <div className={`shrink-0 ${isCollapsed ? "md:hidden" : ""}`}>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: "var(--color-sage)" }}>
-              <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
-            </svg>
-          </div>
-          {!isCollapsed && (
-            <div className="flex-1 overflow-hidden">
-              <p
-                className="text-xs font-semibold tracking-widest uppercase mb-0.5 truncate"
-                style={{ color: "var(--color-sage)" }}
-              >
-                Loku Caters
-              </p>
-              <p className="text-sm font-semibold truncate" style={{ color: "var(--color-cream)" }}>
-                Admin
-              </p>
-            </div>
-          )}
-          {/* Collapse toggle (desktop only) */}
-          <button
-            onClick={toggleCollapsed}
-            title={isCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="hidden md:flex shrink-0 items-center justify-center rounded-lg transition-all"
-            style={{
-              color: "rgba(247,245,240,0.35)",
-              padding: "4px",
-              marginLeft: isCollapsed ? "auto" : undefined,
-            }}
-            onMouseEnter={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "rgba(247,245,240,0.7)";
-              (e.currentTarget as HTMLButtonElement).style.background = "rgba(255,255,255,0.08)";
-            }}
-            onMouseLeave={(e) => {
-              (e.currentTarget as HTMLButtonElement).style.color = "rgba(247,245,240,0.35)";
-              (e.currentTarget as HTMLButtonElement).style.background = "transparent";
-            }}
-          >
-            <svg
-              width="15"
-              height="15"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              style={{
-                transform: isCollapsed ? "rotate(180deg)" : "rotate(0deg)",
-                transition: "transform 0.2s ease",
-              }}
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 px-2 py-4 space-y-1 overflow-hidden">
-          {navItems.map((item) => {
-            const active = pathname.startsWith(item.href) ||
-              (item.href === "/admin/config" && pathname.startsWith("/admin/events"));
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                title={isCollapsed ? item.label : undefined}
-                className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all overflow-hidden"
-                style={{
-                  color: active ? "var(--color-cream)" : "rgba(247,245,240,0.55)",
-                  background: active ? "rgba(255,255,255,0.12)" : "transparent",
-                  justifyContent: isCollapsed ? "center" : "flex-start",
-                }}
-              >
-                <span className="shrink-0" style={{ color: active ? "var(--color-sage)" : "rgba(114,145,82,0.6)" }}>
-                  {item.icon}
-                </span>
-                {!isCollapsed && <span className="truncate">{item.label}</span>}
-              </Link>
-            );
-          })}
-        </nav>
+        <SidebarBrand collapsed={isCollapsed} onToggle={toggleCollapsed} />
+        <AdminNavigation pathname={pathname} collapsed={isCollapsed} />
 
         {/* Sign out */}
         <div className="px-2 pb-4 overflow-hidden">
@@ -298,24 +288,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       {/* Main content */}
       <main className="flex-1 overflow-auto min-w-0">
-        {/* Hamburger (mobile only) */}
-        <div className="md:hidden flex items-center px-4 py-3 border-b" style={{ background: "white", borderColor: "var(--color-border)" }}>
-          <button
-            onClick={() => setMobileOpen(true)}
-            aria-label="Open menu"
-            className="p-2 rounded-xl transition-all"
-            style={{ color: "var(--color-forest)" }}
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="3" y1="12" x2="21" y2="12" />
-              <line x1="3" y1="6" x2="21" y2="6" />
-              <line x1="3" y1="18" x2="21" y2="18" />
-            </svg>
-          </button>
-          <p className="ml-3 text-sm font-semibold" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>
-            Loku Caters Admin
-          </p>
-        </div>
+        <MobileHeader onOpen={() => setMobileOpen(true)} />
         {children}
       </main>
     </div>

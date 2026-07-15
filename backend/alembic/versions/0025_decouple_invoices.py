@@ -21,11 +21,21 @@ def upgrade() -> None:
     op.add_column("invoices", sa.Column("order_reference", sa.Text(), nullable=True))
     op.add_column(
         "invoices",
-        sa.Column("line_items", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
+        sa.Column(
+            "line_items",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'[]'::jsonb"),
+        ),
     )
-    op.add_column("invoices", sa.Column("paid", sa.Boolean(), nullable=False, server_default=sa.false()))
+    op.add_column(
+        "invoices",
+        sa.Column("paid", sa.Boolean(), nullable=False, server_default=sa.false()),
+    )
     op.add_column("invoices", sa.Column("payment_method", sa.String(), nullable=True))
-    op.add_column("invoices", sa.Column("payment_method_other", sa.Text(), nullable=True))
+    op.add_column(
+        "invoices", sa.Column("payment_method_other", sa.Text(), nullable=True)
+    )
 
     op.execute(
         sa.text(
@@ -79,7 +89,9 @@ def upgrade() -> None:
     )
 
     op.drop_constraint("invoices_source_bundle_id_key", "invoices", type_="unique")
-    op.alter_column("invoices", "source_bundle_id", existing_type=sa.Text(), nullable=True)
+    op.alter_column(
+        "invoices", "source_bundle_id", existing_type=sa.Text(), nullable=True
+    )
     op.create_check_constraint(
         "ck_invoices_payment_method",
         "invoices",
@@ -111,8 +123,12 @@ def downgrade() -> None:
         )
 
     op.drop_constraint("ck_invoices_payment_method", "invoices", type_="check")
-    op.alter_column("invoices", "source_bundle_id", existing_type=sa.Text(), nullable=False)
-    op.create_unique_constraint("invoices_source_bundle_id_key", "invoices", ["source_bundle_id"])
+    op.alter_column(
+        "invoices", "source_bundle_id", existing_type=sa.Text(), nullable=False
+    )
+    op.create_unique_constraint(
+        "invoices_source_bundle_id_key", "invoices", ["source_bundle_id"]
+    )
     op.drop_column("invoices", "payment_method_other")
     op.drop_column("invoices", "payment_method")
     op.drop_column("invoices", "paid")

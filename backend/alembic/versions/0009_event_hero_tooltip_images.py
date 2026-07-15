@@ -17,14 +17,26 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("events", sa.Column("hero_header_sage", sa.Text(), nullable=False, server_default=""))
-    op.add_column("events", sa.Column("tooltip_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false")))
+    op.add_column(
+        "events",
+        sa.Column("hero_header_sage", sa.Text(), nullable=False, server_default=""),
+    )
+    op.add_column(
+        "events",
+        sa.Column(
+            "tooltip_enabled",
+            sa.Boolean(),
+            nullable=False,
+            server_default=sa.text("false"),
+        ),
+    )
     op.add_column("events", sa.Column("tooltip_header", sa.Text(), nullable=True))
     op.add_column("events", sa.Column("tooltip_body", sa.Text(), nullable=True))
     op.add_column("events", sa.Column("tooltip_image_key", sa.Text(), nullable=True))
     op.add_column("events", sa.Column("hero_side_image_key", sa.Text(), nullable=True))
 
-    op.execute(sa.text("""
+    op.execute(
+        sa.text("""
         UPDATE events
         SET
             tooltip_enabled = true,
@@ -32,7 +44,8 @@ def upgrade() -> None:
             tooltip_body = 'Lamprais is a beloved Sri Lankan dish of rice cooked in stock, served with a variety of curries and accompaniments, all wrapped and baked in a banana leaf.',
             tooltip_image_key = 'tooltip-lamprais-how-its-made',
             hero_side_image_key = NULL
-    """))
+    """)
+    )
 
 
 def downgrade() -> None:

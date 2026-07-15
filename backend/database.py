@@ -3,6 +3,7 @@ from sqlalchemy.orm import sessionmaker, DeclarativeBase
 
 from config import settings
 
+
 def get_database_url() -> str:
     # Auto-map postgresql:// to postgresql+pg8000:// so env URLs work as-is.
     database_url = settings.database_url

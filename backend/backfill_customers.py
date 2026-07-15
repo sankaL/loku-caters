@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from database import SessionLocal
 from models import Order
-from services.customers import build_customer_backfill_rows, upsert_customer_backfill_row
+from services.customers import (
+    build_customer_backfill_rows,
+    upsert_customer_backfill_row,
+)
 
 
 def main() -> None:

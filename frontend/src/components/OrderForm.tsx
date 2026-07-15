@@ -1,13 +1,14 @@
 "use client";
 /* eslint-disable @next/next/no-img-element */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
 import ReactDOM from "react-dom";
 import { API_URL, CURRENCY, type ComboDeal, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
 import DescriptionPopover from "@/components/ui/DescriptionPopover";
 import Modal from "@/components/ui/Modal";
 import { effectiveMinimumOrderQuantityForItem } from "@/lib/comboDealUtils";
+import { useObjectState } from "@/hooks/useObjectState";
 
 export interface AppliedComboSummary {
   combo_id: string;
@@ -148,28 +149,23 @@ function formatComboPrimaryBadge(combo: AppliedComboSummary): string {
   return `Save ${formatCurrency(combo.savings_total)}`;
 }
 
-export default function OrderForm({ items, locations, comboDeals, onSuccess }: OrderFormProps) {
-  const [quantities, setQuantities] = useState<Record<string, number>>({});
-  const [form, setForm] = useState<ContactForm>({
-    name: "",
-    pickup_location: "",
-    pickup_time_slot: "",
-    phone_number: "",
-    email: "",
-  });
-  const [quote, setQuote] = useState<QuoteResult>(EMPTY_QUOTE);
-  const [quoteLoading, setQuoteLoading] = useState(false);
-  const [quoteError, setQuoteError] = useState("");
-  const [errors, setErrors] = useState<Record<string, string>>({});
-  const [submitting, setSubmitting] = useState(false);
-  const [serverError, setServerError] = useState("");
-  const [showErrorModal, setShowErrorModal] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickerSearch, setPickerSearch] = useState("");
-  const [openDescriptionItemId, setOpenDescriptionItemId] = useState<string | null>(null);
-  const [expandedDealIds, setExpandedDealIds] = useState<Set<string>>(new Set());
-  const searchInputRef = useRef<HTMLInputElement>(null);
-
+function useOrderFormDerived({
+  items,
+  locations,
+  comboDeals,
+  form,
+  quantities,
+  pickerSearch,
+  quote,
+}: {
+  items: Item[];
+  locations: Location[];
+  comboDeals: ComboDeal[];
+  form: ContactForm;
+  quantities: Record<string, number>;
+  pickerSearch: string;
+  quote: QuoteResult;
+}) {
   const timeSlots = form.pickup_location
     ? (locations.find((location) => location.name === form.pickup_location)?.timeSlots ?? [])
     : [];
@@ -195,17 +191,6 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
       (item.description ?? "").toLowerCase().includes(q)
     );
   }, [items, pickerSearch]);
-  useEffect(() => {
-    if (!pickerOpen) {
-      setOpenDescriptionItemId(null);
-      return;
-    }
-
-    if (openDescriptionItemId && !pickerItems.some((item) => item.id === openDescriptionItemId)) {
-      setOpenDescriptionItemId(null);
-    }
-  }, [openDescriptionItemId, pickerItems, pickerOpen]);
-
   const fallbackSubtotal = useMemo(
     () =>
       selectedLines.reduce((sum, { item, qty }) => {
@@ -217,13 +202,73 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
   const summarySubtotal = selectedLines.length > 0 ? (quote.lines.length > 0 ? quote.subtotal : fallbackSubtotal) : 0;
   const summaryDiscount = selectedLines.length > 0 ? quote.discount_total : 0;
   const summaryGrandTotal = selectedLines.length > 0 ? (quote.lines.length > 0 ? quote.grand_total : fallbackSubtotal) : 0;
+  return {
+    timeSlots, getMinimumOrderQuantity, selectedLines, pickerItems,
+    summarySubtotal, summaryDiscount, summaryGrandTotal,
+  };
+}
+
+function useOrderFormModel({ items, locations, comboDeals, onSuccess }: OrderFormProps) {
+  const [state, setState] = useObjectState({
+    quantities: {} as Record<string, number>,
+    form: {
+      name: "",
+      pickup_location: "",
+      pickup_time_slot: "",
+      phone_number: "",
+      email: "",
+    } as ContactForm,
+    quote: EMPTY_QUOTE,
+    quoteLoading: false,
+    quoteError: "",
+    errors: {} as Record<string, string>,
+    submitting: false,
+    serverError: "",
+    showErrorModal: false,
+    pickerOpen: false,
+    pickerSearch: "",
+    openDescriptionItemId: null as string | null,
+    expandedDealIds: new Set<string>(),
+  });
+  const {
+    quantities, form, quote, quoteLoading, quoteError, errors,
+    submitting, serverError, showErrorModal, pickerOpen, pickerSearch,
+    openDescriptionItemId, expandedDealIds,
+  } = state;
+  const setQuantities: Dispatch<SetStateAction<Record<string, number>>> = (value) => setState("quantities", value);
+  const setForm: Dispatch<SetStateAction<ContactForm>> = (value) => setState("form", value);
+  const setErrors: Dispatch<SetStateAction<Record<string, string>>> = (value) => setState("errors", value);
+  const setSubmitting = (value: boolean) => setState("submitting", value);
+  const setServerError = (value: string) => setState("serverError", value);
+  const setShowErrorModal = (value: boolean) => setState("showErrorModal", value);
+  const setPickerOpen = (value: boolean) => setState("pickerOpen", value);
+  const setPickerSearch = (value: string) => setState("pickerSearch", value);
+  const setOpenDescriptionItemId = (value: string | null) => setState("openDescriptionItemId", value);
+  const setExpandedDealIds: Dispatch<SetStateAction<Set<string>>> = (value) => setState("expandedDealIds", value);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const {
+    timeSlots, getMinimumOrderQuantity, selectedLines, pickerItems,
+    summarySubtotal, summaryDiscount, summaryGrandTotal,
+  } = useOrderFormDerived({
+    items, locations, comboDeals, form, quantities, pickerSearch, quote,
+  });
+  useEffect(() => {
+    if (!pickerOpen) {
+      setState("openDescriptionItemId", null);
+      return;
+    }
+    if (openDescriptionItemId && !pickerItems.some((item) => item.id === openDescriptionItemId)) {
+      setState("openDescriptionItemId", null);
+    }
+  }, [openDescriptionItemId, pickerItems, pickerOpen, setState]);
 
   useEffect(() => {
     if (!pickerOpen) return;
 
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") {
-        setPickerOpen(false);
+        setState("pickerOpen", false);
       }
     }
 
@@ -237,20 +282,20 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
     };
-  }, [pickerOpen]);
+  }, [pickerOpen, setState]);
 
   useEffect(() => {
     const controller = new AbortController();
     if (selectedLines.length === 0) {
-      setQuote(EMPTY_QUOTE);
-      setQuoteLoading(false);
-      setQuoteError("");
+      setState("quote", EMPTY_QUOTE);
+      setState("quoteLoading", false);
+      setState("quoteError", "");
       return () => controller.abort();
     }
 
-    setQuoteLoading(true);
-    setQuoteError("");
-    setQuote(EMPTY_QUOTE);
+    setState("quoteLoading", true);
+    setState("quoteError", "");
+    setState("quote", EMPTY_QUOTE);
     const timeoutId = window.setTimeout(async () => {
       try {
         const res = await fetch(`${API_URL}/api/orders/quote`, {
@@ -266,13 +311,13 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
           const detail = Array.isArray(data?.detail) ? data.detail.map((entry: { msg: string }) => entry.msg).join(", ") : (data?.detail || "Failed to price cart");
           throw new Error(detail);
         }
-        setQuote(data);
+        setState("quote", data);
       } catch (error) {
         if ((error as Error).name === "AbortError") return;
-        setQuote(EMPTY_QUOTE);
-        setQuoteError(error instanceof Error ? error.message : "Failed to price cart");
+        setState("quote", EMPTY_QUOTE);
+        setState("quoteError", error instanceof Error ? error.message : "Failed to price cart");
       } finally {
-        setQuoteLoading(false);
+        setState("quoteLoading", false);
       }
     }, 250);
 
@@ -280,7 +325,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
       controller.abort();
       window.clearTimeout(timeoutId);
     };
-  }, [selectedLines]);
+  }, [selectedLines, setState]);
 
   function changeQty(itemId: string, delta: number) {
     setQuantities((prev) => {
@@ -413,7 +458,27 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
       : "border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:ring-opacity-40 focus:border-[var(--color-sage)]"
     }`;
 
-  const pickerModal = pickerOpen
+  return {
+    pickerOpen, setPickerOpen, errors, selectedLines, changeQty,
+    form, handleChange, inputClass, locations, handleSelectChange,
+    timeSlots, quote, summarySubtotal, summaryDiscount,
+    summaryGrandTotal, submitting, quoteLoading, quoteError,
+    expandedDealIds, setExpandedDealIds, addUpsellOption,
+    showErrorModal, setShowErrorModal, serverError, handleSubmit,
+    closePicker, pickerSearch, setPickerSearch, searchInputRef,
+    pickerItems, quantities, getMinimumOrderQuantity,
+    openDescriptionItemId, setOpenDescriptionItemId,
+  };
+}
+
+type OrderFormModel = ReturnType<typeof useOrderFormModel>;
+
+function OrderItemPicker({ model }: { model: OrderFormModel }) {
+  const {
+    pickerOpen, setPickerOpen, closePicker, pickerSearch, setPickerSearch,
+    searchInputRef, pickerItems, selectedLines,
+  } = model;
+  return pickerOpen
     ? ReactDOM.createPortal(
       <div
         className="animate-fade-in"
@@ -481,14 +546,83 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
               <p className="text-sm py-4 text-center" style={{ color: "var(--color-muted)" }}>No items match your search.</p>
             ) : (
               <div className="space-y-3">
-                {pickerItems.map((item) => {
-                  const qty = quantities[item.id] ?? 0;
-                  const inCart = qty > 0;
-                  const price = item.discounted_price ?? item.price;
-                  const minimumOrderQuantity = getMinimumOrderQuantity(item);
+                {pickerItems.map((item) => (
+                  <OrderPickerItem key={item.id} item={item} model={model} />
+                ))}
+              </div>
+            )}
+          </div>
 
-                  if (item.image_path) {
-                    return (
+          <div className="px-4 py-3 md:px-5 md:py-4 border-t shrink-0 flex items-center justify-between gap-3" style={{ borderColor: "var(--color-border)" }}>
+            <p className="text-sm" style={{ color: "var(--color-muted)" }}>
+              {selectedLines.length} item{selectedLines.length !== 1 ? "s" : ""} selected
+            </p>
+            <button
+              type="button"
+              onClick={() => setPickerOpen(false)}
+              className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
+              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>,
+      document.body
+    )
+    : null;
+}
+
+function OrderPickerItem({ item, model }: { item: Item; model: OrderFormModel }) {
+  return item.image_path
+    ? <ImageOrderPickerItem item={item} model={model} />
+    : <CompactOrderPickerItem item={item} model={model} />;
+}
+
+function getOrderPickerItemState(item: Item, model: OrderFormModel) {
+  const qty = model.quantities[item.id] ?? 0;
+  return {
+    qty,
+    inCart: qty > 0,
+    price: item.discounted_price ?? item.price,
+    minimumOrderQuantity: model.getMinimumOrderQuantity(item),
+    changeQty: model.changeQty,
+    openDescriptionItemId: model.openDescriptionItemId,
+    setOpenDescriptionItemId: model.setOpenDescriptionItemId,
+  };
+}
+
+function OrderPickerItemPrice({ item, price, minimumOrderQuantity, className = "" }: {
+  item: Item;
+  price: number;
+  minimumOrderQuantity: number;
+  className?: string;
+}) {
+  return (
+    <div className={`${className} flex items-center gap-2 flex-wrap`}>
+      <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
+        {formatCurrency(price)}
+      </span>
+      {item.discounted_price != null && (
+        <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
+          {formatCurrency(item.price)}
+        </span>
+      )}
+      {minimumOrderQuantity > 1 && (
+        <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
+          Min {minimumOrderQuantity}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function ImageOrderPickerItem({ item, model }: { item: Item; model: OrderFormModel }) {
+  const {
+    qty, inCart, price, minimumOrderQuantity, changeQty,
+    openDescriptionItemId, setOpenDescriptionItemId,
+  } = getOrderPickerItemState(item, model);
+  return (
                       <div
                         key={item.id}
                         role="button"
@@ -511,7 +645,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                       >
                         <div className="relative aspect-[4/3] overflow-hidden" style={{ background: "var(--color-cream)" }}>
                           <img
-                            src={item.image_path}
+                            src={item.image_path ?? undefined}
                             alt={item.name}
                             className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
                           />
@@ -540,21 +674,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                               </div>
                             )}
                           </div>
-                          <div className="flex min-h-5 items-center gap-2 flex-wrap">
-                            <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
-                              {formatCurrency(price)}
-                            </span>
-                            {item.discounted_price != null && (
-                              <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
-                                {formatCurrency(item.price)}
-                              </span>
-                            )}
-                            {minimumOrderQuantity > 1 && (
-                              <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
-                                Min {minimumOrderQuantity}
-                              </span>
-                            )}
-                          </div>
+                          <OrderPickerItemPrice item={item} price={price} minimumOrderQuantity={minimumOrderQuantity} className="min-h-5" />
                           {inCart ? (
                             <div className="mt-auto flex items-center gap-0" onClick={(event) => event.stopPropagation()}>
                               <button
@@ -594,10 +714,15 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                           )}
                         </div>
                       </div>
-                    );
-                  }
+  );
+}
 
-                  return (
+function CompactOrderPickerItem({ item, model }: { item: Item; model: OrderFormModel }) {
+  const {
+    qty, inCart, price, minimumOrderQuantity, changeQty,
+    openDescriptionItemId, setOpenDescriptionItemId,
+  } = getOrderPickerItemState(item, model);
+  return (
                     <div
                       key={item.id}
                       className="flex items-center gap-2 md:gap-3 rounded-2xl px-3 py-2 md:px-4 md:py-3 transition-all"
@@ -618,21 +743,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                             className="text-xs mt-0.5"
                           />
                         )}
-                        <div className="mt-0.5 flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-bold" style={{ color: "var(--color-forest)" }}>
-                            {formatCurrency(price)}
-                          </span>
-                          {item.discounted_price != null && (
-                            <span className="text-xs line-through font-medium" style={{ color: "var(--color-muted)" }}>
-                              {formatCurrency(item.price)}
-                            </span>
-                          )}
-                          {minimumOrderQuantity > 1 && (
-                            <span className="text-xs font-semibold" style={{ color: "var(--color-sage)" }}>
-                              Min {minimumOrderQuantity}
-                            </span>
-                          )}
-                        </div>
+                        <OrderPickerItemPrice item={item} price={price} minimumOrderQuantity={minimumOrderQuantity} className="mt-0.5" />
                       </div>
 
                       {inCart ? (
@@ -670,31 +781,18 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                         </button>
                       )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+  );
+}
 
-          <div className="px-4 py-3 md:px-5 md:py-4 border-t shrink-0 flex items-center justify-between gap-3" style={{ borderColor: "var(--color-border)" }}>
-            <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-              {selectedLines.length} item{selectedLines.length !== 1 ? "s" : ""} selected
-            </p>
-            <button
-              type="button"
-              onClick={() => setPickerOpen(false)}
-              className="px-5 py-2.5 rounded-xl text-sm font-semibold transition-all"
-              style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      </div>,
-      document.body
-    )
-    : null;
-
+function OrderFormView({ model }: { model: OrderFormModel }) {
+  const {
+    setPickerOpen, setPickerSearch, setOpenDescriptionItemId,
+    errors, selectedLines, changeQty,
+    form, handleChange, inputClass, locations, handleSelectChange,
+    timeSlots, submitting, quoteLoading,
+    showErrorModal, setShowErrorModal, serverError, handleSubmit,
+    getMinimumOrderQuantity,
+  } = model;
   return (
     <section className="w-full max-w-2xl mx-auto px-6 pb-16">
       <div className="rounded-3xl p-8 md:p-10 shadow-sm animate-scale-in" style={{ background: "white", border: "1px solid var(--color-border)" }}>
@@ -742,7 +840,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                     <div
                       key={item.id}
                       className="grid min-h-[5.75rem] grid-cols-[3.5rem_minmax(0,1fr)_auto] grid-rows-[auto_auto] gap-x-3 gap-y-2 rounded-xl px-3 py-3 sm:flex sm:min-h-20 sm:items-center sm:px-4 sm:py-2.5"
-                      style={{ border: "1px solid var(--color-sage)", background: "#f0fdf4" }}
+                      style={{ border: "1px solid var(--color-sage)", background: "var(--color-success-bg)" }}
                     >
                       {item.image_path && (
                         <img
@@ -867,6 +965,38 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
             {errors.email && <p className="mt-1 text-xs text-red-500">{errors.email}</p>}
           </div>
 
+          <OrderSummary model={model} />
+
+          <button
+            type="submit"
+            disabled={submitting || quoteLoading || selectedLines.length === 0}
+            className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+          >
+            {submitting ? "Submitting..." : quoteLoading ? "Refreshing Deals..." : "Submit Pre-Order"}
+          </button>
+
+          <OrderDeals model={model} />
+        </form>
+      </div>
+
+      <OrderItemPicker model={model} />
+
+      <Modal isOpen={showErrorModal} onClose={() => setShowErrorModal(false)} title="Unable to submit order">
+        <p className="text-sm leading-relaxed" style={{ color: "var(--color-muted)" }}>
+          {serverError || "Something went wrong. Please try again."}
+        </p>
+      </Modal>
+    </section>
+  );
+}
+
+function OrderSummary({ model }: { model: OrderFormModel }) {
+  const {
+    selectedLines, quote, summarySubtotal, summaryDiscount,
+    summaryGrandTotal,
+  } = model;
+  return (
           <div className="rounded-2xl p-5 mt-2" style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}>
             <p className="text-xs uppercase tracking-widest font-semibold mb-3" style={{ color: "var(--color-sage)" }}>
               Order Summary
@@ -897,7 +1027,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                       </span>
                     </div>
                     {line.discount_total > 0 && (
-                      <p className="text-xs text-right" style={{ color: "#2d6a2d" }}>
+                      <p className="text-xs text-right" style={{ color: "var(--color-success-text)" }}>
                         Includes {formatCurrency(line.discount_total)} combo savings
                       </p>
                     )}
@@ -914,7 +1044,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                             {formatComboDiscountLabel(combo)}
                           </div>
                         </div>
-                        <span style={{ color: "#2d6a2d", fontWeight: 600 }}>-{formatCurrency(combo.savings_total)}</span>
+                        <span style={{ color: "var(--color-success-text)", fontWeight: 600 }}>-{formatCurrency(combo.savings_total)}</span>
                       </div>
                     ))}
                   </div>
@@ -927,7 +1057,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
                   </div>
                   <div className="flex justify-between text-sm">
                     <span style={{ color: "var(--color-muted)" }}>Combo savings</span>
-                    <span className="font-semibold" style={{ color: summaryDiscount > 0 ? "#2d6a2d" : "var(--color-text)" }}>
+                    <span className="font-semibold" style={{ color: summaryDiscount > 0 ? "var(--color-success-text)" : "var(--color-text)" }}>
                       -{formatCurrency(summaryDiscount)}
                     </span>
                   </div>
@@ -941,18 +1071,18 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
               </div>
             )}
           </div>
+  );
+}
 
-          <button
-            type="submit"
-            disabled={submitting || quoteLoading || selectedLines.length === 0}
-            className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-          >
-            {submitting ? "Submitting..." : quoteLoading ? "Refreshing Deals..." : "Submit Pre-Order"}
-          </button>
-
+function OrderDeals({ model }: { model: OrderFormModel }) {
+  const {
+    selectedLines, quote, quoteLoading, quoteError,
+    expandedDealIds, setExpandedDealIds, addUpsellOption,
+  } = model;
+  return (
+    <>
           {selectedLines.length > 0 && (
-            <div className="rounded-3xl overflow-hidden" style={{ background: "linear-gradient(135deg, #12270F 0%, #1a3316 50%, #203b19 100%)", color: "white", boxShadow: "0 4px 24px rgba(18,39,15,0.25)" }}>
+            <div className="rounded-3xl overflow-hidden" style={{ background: "linear-gradient(135deg, var(--color-forest) 0%, var(--color-text) 100%)", color: "white", boxShadow: "0 4px 24px rgba(18,39,15,0.25)" }}>
               {/* Section header */}
               <div className="flex items-center justify-between gap-4 px-5 md:px-6 pt-5 md:pt-6 pb-3">
                 <div className="flex items-center gap-2">
@@ -969,7 +1099,7 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
               </div>
 
               {quoteError && (
-                <p className="text-sm px-5 md:px-6 pb-3" style={{ color: "#fbd5d5" }}>
+                <p className="text-sm px-5 md:px-6 pb-3" style={{ color: "var(--color-error-border)" }}>
                   {quoteError}
                 </p>
               )}
@@ -1027,10 +1157,10 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
 
                         {/* Savings callout */}
                         <div className="flex items-center flex-wrap gap-x-2 gap-y-1 mt-3 pt-3" style={{ borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                          <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8bc34a" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <svg className="shrink-0" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-sage)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M12 2l2.4 7.4H22l-6.2 4.5 2.4 7.4L12 16.8l-6.2 4.5 2.4-7.4L2 9.4h7.6z" />
                           </svg>
-                          <span className="text-sm font-semibold shrink-0" style={{ color: "#8bc34a" }}>
+                          <span className="text-sm font-semibold shrink-0" style={{ color: "var(--color-sage)" }}>
                             Saved {formatCurrency(combo.savings_total)}
                           </span>
                           <span
@@ -1146,16 +1276,10 @@ export default function OrderForm({ items, locations, comboDeals, onSuccess }: O
               )}
             </div>
           )}
-        </form>
-      </div>
-
-      {pickerModal}
-
-      <Modal isOpen={showErrorModal} onClose={() => setShowErrorModal(false)} title="Unable to submit order">
-        <p className="text-sm leading-relaxed" style={{ color: "var(--color-muted)" }}>
-          {serverError || "Something went wrong. Please try again."}
-        </p>
-      </Modal>
-    </section>
+    </>
   );
+}
+
+export default function OrderForm(props: OrderFormProps) {
+  return <OrderFormView model={useOrderFormModel(props)} />;
 }

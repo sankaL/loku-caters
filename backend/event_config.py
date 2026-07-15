@@ -25,6 +25,7 @@ class EventNotFoundError(RuntimeError):
 if TYPE_CHECKING:
     from models import Item
 
+
 def get_currency() -> str:
     currency = _file_config.get("currency")
     if not currency:
@@ -37,8 +38,13 @@ CURRENCY = get_currency()
 
 def get_config_from_db(db: Session) -> dict:
     """Load event config with items and locations from the active event."""
-    from models import Event, Item, Location
-    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+    from models import Event
+
+    event = (
+        db.query(Event)
+        .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+        .first()
+    )
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return _build_config_from_event(db, event)
@@ -65,24 +71,34 @@ def _build_config_from_event(db: Session, event) -> dict:
         location_ids = event.location_ids or []
 
         items = (
-            db.query(Item)
-            .filter(Item.id.in_(item_ids))
-            .order_by(Item.sort_order)
-            .all()
-        ) if item_ids else []
+            (
+                db.query(Item)
+                .filter(Item.id.in_(item_ids))
+                .order_by(Item.sort_order)
+                .all()
+            )
+            if item_ids
+            else []
+        )
         item_order = {}
         for index, item_id in enumerate(item_ids):
             item_order.setdefault(item_id, index)
         items = sorted(items, key=lambda item: item_order.get(item.id, len(item_order)))
 
         locations = (
-            db.query(Location)
-            .filter(Location.id.in_(location_ids))
-            .order_by(Location.sort_order)
-            .all()
-        ) if location_ids else []
+            (
+                db.query(Location)
+                .filter(Location.id.in_(location_ids))
+                .order_by(Location.sort_order)
+                .all()
+            )
+            if location_ids
+            else []
+        )
 
-    normalized_combo_deals = serialize_combo_deals(normalize_combo_deals(event.combo_deals or []))
+    normalized_combo_deals = serialize_combo_deals(
+        normalize_combo_deals(event.combo_deals or [])
+    )
 
     return {
         "event": {
@@ -109,10 +125,16 @@ def _build_config_from_event(db: Session, event) -> dict:
                 "name": item.name,
                 "description": item.description,
                 "price": float(item.price),
-                "discounted_price": float(item.discounted_price) if item.discounted_price is not None else None,
-                "minimum_order_quantity": max(1, int(getattr(item, "minimum_order_quantity", 1) or 1)),
+                "discounted_price": float(item.discounted_price)
+                if item.discounted_price is not None
+                else None,
+                "minimum_order_quantity": max(
+                    1, int(getattr(item, "minimum_order_quantity", 1) or 1)
+                ),
                 "image_key": getattr(item, "image_key", None),
-                "image_path": resolve_event_image_path(getattr(item, "image_key", None)),
+                "image_path": resolve_event_image_path(
+                    getattr(item, "image_key", None)
+                ),
             }
             for item in items
         ],
@@ -131,7 +153,12 @@ def _build_config_from_event(db: Session, event) -> dict:
 def get_item_from_db(db: Session, item_id: str) -> Optional["Item"]:
     """Look up an item only if it belongs to the active event."""
     from models import Event, Item
-    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+
+    event = (
+        db.query(Event)
+        .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+        .first()
+    )
     if event is None or item_id not in (event.item_ids or []):
         return None
     return db.query(Item).filter(Item.id == item_id).first()
@@ -140,7 +167,12 @@ def get_item_from_db(db: Session, item_id: str) -> Optional["Item"]:
 def get_event_date_from_db(db: Session) -> str:
     """Lightweight helper that only reads event_date from the active event."""
     from models import Event
-    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+
+    event = (
+        db.query(Event)
+        .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+        .first()
+    )
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return event.event_date
@@ -150,7 +182,11 @@ def get_active_event_id_from_db(db: Session) -> int:
     """Return the current active event id."""
     from models import Event
 
-    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+    event = (
+        db.query(Event)
+        .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+        .first()
+    )
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return int(event.id)
@@ -169,7 +205,12 @@ def get_event_date_for_event_id_from_db(db: Session, event_id: int) -> str:
 def get_etransfer_config_from_db(db: Session) -> dict:
     """Read optional e-transfer settings from the active event."""
     from models import Event
-    event = db.query(Event).filter(Event.is_active == True, Event.kind != RANDOM_REQUESTS_EVENT_KIND).first()
+
+    event = (
+        db.query(Event)
+        .filter(Event.is_active.is_(True), Event.kind != RANDOM_REQUESTS_EVENT_KIND)
+        .first()
+    )
     if event is None:
         raise NoActiveEventError("No active event found in database")
     return {

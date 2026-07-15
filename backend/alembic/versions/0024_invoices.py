@@ -45,26 +45,52 @@ def upgrade() -> None:
     op.create_table(
         "invoice_settings",
         sa.Column("id", sa.Integer(), nullable=False),
-        sa.Column("business_name", sa.Text(), nullable=False, server_default=sa.text("'Loku Caters'")),
+        sa.Column(
+            "business_name",
+            sa.Text(),
+            nullable=False,
+            server_default=sa.text("'Loku Caters'"),
+        ),
         sa.Column("business_address", sa.Text(), nullable=True),
         sa.Column("business_email", sa.Text(), nullable=True),
         sa.Column("business_phone", sa.Text(), nullable=True),
-        sa.Column("payment_method", sa.String(), nullable=False, server_default=sa.text("'none'")),
+        sa.Column(
+            "payment_method",
+            sa.String(),
+            nullable=False,
+            server_default=sa.text("'none'"),
+        ),
         sa.Column("payment_email", sa.Text(), nullable=True),
         sa.Column("payment_instructions", sa.Text(), nullable=True),
         sa.Column("default_footer_note", sa.Text(), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("NOW()"),
+        ),
         sa.CheckConstraint("id = 1", name="ck_invoice_settings_singleton"),
-        sa.CheckConstraint("payment_method IN ('none', 'etransfer', 'cash', 'other')", name="ck_invoice_settings_payment_method"),
+        sa.CheckConstraint(
+            "payment_method IN ('none', 'etransfer', 'cash', 'other')",
+            name="ck_invoice_settings_payment_method",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.execute(sa.text("INSERT INTO invoice_settings (id, business_name) VALUES (1, 'Loku Caters')"))
+    op.execute(
+        sa.text(
+            "INSERT INTO invoice_settings (id, business_name) VALUES (1, 'Loku Caters')"
+        )
+    )
 
     op.create_table(
         "invoice_number_counters",
         sa.Column("year", sa.Integer(), nullable=False),
-        sa.Column("last_value", sa.Integer(), nullable=False, server_default=sa.text("0")),
-        sa.CheckConstraint("last_value >= 0", name="ck_invoice_number_counters_nonnegative"),
+        sa.Column(
+            "last_value", sa.Integer(), nullable=False, server_default=sa.text("0")
+        ),
+        sa.CheckConstraint(
+            "last_value >= 0", name="ck_invoice_number_counters_nonnegative"
+        ),
         sa.PrimaryKeyConstraint("year"),
     )
 
@@ -85,17 +111,42 @@ def upgrade() -> None:
         sa.Column("memo", sa.Text(), nullable=True),
         sa.Column("currency", sa.String(), nullable=False),
         sa.Column("subtotal", sa.Numeric(10, 2), nullable=False),
-        sa.Column("discount_total", sa.Numeric(10, 2), nullable=False, server_default=sa.text("0")),
+        sa.Column(
+            "discount_total",
+            sa.Numeric(10, 2),
+            nullable=False,
+            server_default=sa.text("0"),
+        ),
         sa.Column("total", sa.Numeric(10, 2), nullable=False),
-        sa.Column("snapshot", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("NOW()")),
+        sa.Column(
+            "snapshot",
+            postgresql.JSONB(astext_type=sa.Text()),
+            nullable=False,
+            server_default=sa.text("'{}'::jsonb"),
+        ),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("NOW()"),
+        ),
+        sa.Column(
+            "updated_at",
+            sa.DateTime(timezone=True),
+            nullable=False,
+            server_default=sa.text("NOW()"),
+        ),
         sa.CheckConstraint("due_date >= issue_date", name="ck_invoices_due_date"),
-        sa.CheckConstraint("subtotal >= 0 AND discount_total >= 0 AND total >= 0", name="ck_invoices_amounts_nonnegative"),
+        sa.CheckConstraint(
+            "subtotal >= 0 AND discount_total >= 0 AND total >= 0",
+            name="ck_invoices_amounts_nonnegative",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("invoice_number"),
         sa.UniqueConstraint("source_bundle_id"),
-        sa.UniqueConstraint("number_year", "number_sequence", name="uq_invoices_year_sequence"),
+        sa.UniqueConstraint(
+            "number_year", "number_sequence", name="uq_invoices_year_sequence"
+        ),
     )
     op.create_index("ix_invoices_invoice_number", "invoices", ["invoice_number"])
     op.create_index("ix_invoices_number_year", "invoices", ["number_year"])
@@ -103,7 +154,9 @@ def upgrade() -> None:
     op.create_index("ix_invoices_source_event_id", "invoices", ["source_event_id"])
 
     for table in ("invoice_settings", "invoice_number_counters", "invoices"):
-        op.execute(sa.text(f"ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY"))
+        op.execute(
+            sa.text(f"ALTER TABLE IF EXISTS public.{table} ENABLE ROW LEVEL SECURITY")
+        )
         _revoke_api_role_access(table)
 
 

@@ -95,12 +95,24 @@ class InvoiceServiceTests(unittest.TestCase):
         self.assertEqual(default_due_date(issue, None), issue)
 
     def test_invoice_data_aggregates_order_amounts_and_discounts(self):
-        snapshot, lines, amounts = make_document([
-            make_order(),
-            make_order(id="order-2", item_id="rolls", item_name="Rolls", quantity=5, base_total_price=15, discount_total=0, total_price=15),
-        ])
+        snapshot, lines, amounts = make_document(
+            [
+                make_order(),
+                make_order(
+                    id="order-2",
+                    item_id="rolls",
+                    item_name="Rolls",
+                    quantity=5,
+                    base_total_price=15,
+                    discount_total=0,
+                    total_price=15,
+                ),
+            ]
+        )
 
-        self.assertEqual(amounts, {"subtotal": 47.0, "discount_total": 2.0, "total": 45.0})
+        self.assertEqual(
+            amounts, {"subtotal": 47.0, "discount_total": 2.0, "total": 45.0}
+        )
         self.assertEqual(len(lines), 2)
         self.assertEqual(snapshot["order"]["reference"], "ORDER-12")
         self.assertEqual(snapshot["vendor"]["payment_email"], "pay@example.com")
@@ -144,7 +156,11 @@ class InvoiceServiceTests(unittest.TestCase):
     def test_number_counter_resets_by_year_and_never_reuses_prior_values(self):
         engine = create_engine("sqlite:///:memory:")
         with engine.begin() as connection:
-            connection.execute(text("CREATE TABLE invoice_number_counters (year INTEGER PRIMARY KEY, last_value INTEGER NOT NULL)"))
+            connection.execute(
+                text(
+                    "CREATE TABLE invoice_number_counters (year INTEGER PRIMARY KEY, last_value INTEGER NOT NULL)"
+                )
+            )
         with Session(engine) as session:
             self.assertEqual(next_invoice_number(session, 2026), ("INV-2026-0001", 1))
             self.assertEqual(next_invoice_number(session, 2026), ("INV-2026-0002", 2))
@@ -161,7 +177,9 @@ class InvoiceServiceTests(unittest.TestCase):
 
     def test_settings_require_email_for_etransfer(self):
         with self.assertRaises(ValidationError):
-            InvoiceSettingsUpdate(business_name="Loku Caters", payment_method="etransfer")
+            InvoiceSettingsUpdate(
+                business_name="Loku Caters", payment_method="etransfer"
+            )
 
     def test_pdf_contains_professional_invoice_document(self):
         snapshot, lines, amounts = make_document()
