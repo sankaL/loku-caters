@@ -6,7 +6,7 @@ import Modal from "@/components/ui/Modal";
 import { API_URL, fetchEventConfig, type EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
-import { runAdminBulkBatches } from "@/lib/adminBulk";
+import { postAdminBulkBatches, removeSelectedIds, toggleSelectedId } from "@/lib/adminBulk";
 import type { Customer } from "@/lib/customers";
 
 const EVENT_REMINDER_SEND_INTERVAL_MS = 500;
@@ -286,12 +286,7 @@ export default function AdminCustomersPage() {
   }
 
   function toggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelectedIds((prev) => toggleSelectedId(prev, id));
   }
 
   async function handleBulkDelete() {
@@ -307,37 +302,18 @@ export default function AdminCustomersPage() {
         return;
       }
 
-      await runAdminBulkBatches(
+      const result = await postAdminBulkBatches({
         ids,
-        async (batch) => {
-          const res = await fetch(`${API_URL}/api/admin/customers/bulk-delete`, {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({ ids: batch }),
-          });
-
-          if (res.status === 401) {
-            router.push("/admin/login");
-            throw new Error("Administrator session expired");
-          }
-          if (!res.ok) {
-            throw new Error(await getApiErrorMessage(res, "Failed to delete customers"));
-          }
-        },
-        (batch) => {
-          const batchSet = new Set(batch);
-          setCustomers((prev) => prev.filter((customer) => !batchSet.has(customer.id)));
-          setSelectedIds((prev) => {
-            const next = new Set(prev);
-            for (const id of batch) next.delete(id);
-            return next;
-          });
-          deleted += batch.length;
-        },
-      );
+        url: `${API_URL}/api/admin/customers/bulk-delete`,
+        headers: { Authorization: `Bearer ${token}` },
+        onUnauthorized: () => router.push("/admin/login"),
+        getErrorMessage: (response) => getApiErrorMessage(response, "Failed to delete customers"),
+      });
+      const deletedSet = new Set(result.completedIds);
+      setCustomers((prev) => prev.filter((customer) => !deletedSet.has(customer.id)));
+      setSelectedIds((prev) => removeSelectedIds(prev, result.completedIds));
+      deleted = result.completedIds.length;
+      if (result.error) throw result.error;
 
       setShowBulkDeleteModal(false);
       showToast(`${ids.length} customer${ids.length === 1 ? "" : "s"} deleted`, "success");
@@ -466,12 +442,7 @@ export default function AdminCustomersPage() {
   }, [allVisibleEventReminderSelected, someVisibleEventReminderSelected]);
 
   function toggleEventReminderCustomer(id: string) {
-    setEventReminderSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setEventReminderSelectedIds((prev) => toggleSelectedId(prev, id));
   }
 
   function selectAllVisibleEventReminderCustomers() {
@@ -523,21 +494,11 @@ export default function AdminCustomersPage() {
   }
 
   function toggleLocationSelection(id: string) {
-    setEventReminderLocationIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setEventReminderLocationIds((prev) => toggleSelectedId(prev, id));
   }
 
   function toggleItemSelection(id: string) {
-    setEventReminderItemIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setEventReminderItemIds((prev) => toggleSelectedId(prev, id));
   }
 
   function buildQueueItems(customerIds: string[]): EventReminderQueueItem[] {

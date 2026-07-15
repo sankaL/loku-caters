@@ -7,7 +7,20 @@ import { CompactMetricCard, CompactMetricRail } from "@/components/admin/Compact
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
-import { runAdminBulkBatches } from "@/lib/adminBulk";
+import {
+  postAdminBulkDelete,
+  postAdminBulkStatus,
+  removeItemsByIds,
+  removeSelectedIds,
+  runAdminBulkAction,
+  toggleSelectedId,
+  updateItemStatuses,
+} from "@/lib/adminBulk";
+import {
+  ADMIN_BUTTON_BASE_STYLE,
+  ADMIN_BUTTON_DANGER_STYLE,
+  ADMIN_BUTTON_PRIMARY_STYLE,
+} from "@/lib/adminStyles";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -946,12 +959,7 @@ export default function AdminFeedbackPage() {
   }
 
   function toggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelectedIds((prev) => toggleSelectedId(prev, id));
   }
 
   // ---------------------------------------------------------------------------
@@ -1180,102 +1188,69 @@ export default function AdminFeedbackPage() {
     }
   }
 
+  function applyBulkFeedbackDeletion(completedIds: string[]) {
+    setData((prev) => {
+      if (!prev) return prev;
+      return rebuildFeedbackData(prev, removeItemsByIds(prev.items, completedIds));
+    });
+    setSelectedIds((prev) => removeSelectedIds(prev, completedIds));
+    if (selectedFeedbackId && completedIds.includes(selectedFeedbackId)) {
+      setSelectedFeedbackId(null);
+    }
+  }
+
+  function applyBulkFeedbackStatus(completedIds: string[]) {
+    setData((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        items: updateItemStatuses(prev.items, completedIds, bulkStatusTarget),
+      };
+    });
+  }
+
   async function handleBulkDelete() {
     const ids = Array.from(selectedIds);
-    const headers = await getAuthHeader();
-    let deleted = 0;
-    try {
-      await runAdminBulkBatches(ids, async (batch) => {
-        const res = await fetch(`${API_URL}/api/admin/feedback/bulk-delete`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: batch }),
-        });
-        if (!res.ok) throw new Error("Failed");
-      }, (batch) => {
-        const batchSet = new Set(batch);
-        setData((prev) => {
-          if (!prev) return prev;
-          return rebuildFeedbackData(prev, prev.items.filter((item) => !batchSet.has(item.id)));
-        });
-        setSelectedIds((prev) => {
-          const next = new Set(prev);
-          for (const id of batch) next.delete(id);
-          return next;
-        });
-        if (selectedFeedbackId && batchSet.has(selectedFeedbackId)) setSelectedFeedbackId(null);
-        deleted += batch.length;
-      });
-      setShowBulkDeleteModal(false);
-      showToast(`${ids.length} entr${ids.length === 1 ? "y" : "ies"} deleted`, "success");
-    } catch {
-      showToast(deleted > 0 ? `Deleted ${deleted}; ${ids.length - deleted} failed` : "Failed to delete entries", "error");
-    }
+    await runAdminBulkAction({
+      ids,
+      request: async () => postAdminBulkDelete(
+        `${API_URL}/api/admin/feedback/bulk-delete`, ids, await getAuthHeader(),
+      ),
+      applyCompleted: applyBulkFeedbackDeletion,
+      closeModal: () => setShowBulkDeleteModal(false),
+      notify: showToast,
+      successMessage: `${ids.length} entr${ids.length === 1 ? "y" : "ies"} deleted`,
+      failureAction: "Deleted",
+      failureMessage: "Failed to delete entries",
+    });
   }
 
   async function handleBulkStatus() {
     const ids = Array.from(selectedIds);
-    const headers = await getAuthHeader();
-    let updated = 0;
-    try {
-      await runAdminBulkBatches(ids, async (batch) => {
-        const res = await fetch(`${API_URL}/api/admin/feedback/bulk-status`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: batch, status: bulkStatusTarget }),
-        });
-        if (!res.ok) throw new Error("Failed");
-      }, (batch) => {
-        const batchSet = new Set(batch);
-        setData((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            items: prev.items.map((item) =>
-              batchSet.has(item.id) ? { ...item, status: bulkStatusTarget } : item
-            ),
-          };
-        });
-        updated += batch.length;
-      });
-      setShowBulkStatusModal(false);
-      showToast(`${ids.length} entr${ids.length === 1 ? "y" : "ies"} updated`, "success");
-    } catch {
-      showToast(updated > 0 ? `Updated ${updated}; ${ids.length - updated} failed` : "Failed to update status", "error");
-    }
+    await runAdminBulkAction({
+      ids,
+      request: async () => postAdminBulkStatus(
+        `${API_URL}/api/admin/feedback/bulk-status`,
+        ids,
+        await getAuthHeader(),
+        bulkStatusTarget,
+      ),
+      applyCompleted: applyBulkFeedbackStatus,
+      closeModal: () => setShowBulkStatusModal(false),
+      notify: showToast,
+      successMessage: `${ids.length} entr${ids.length === 1 ? "y" : "ies"} updated`,
+      failureAction: "Updated",
+      failureMessage: "Failed to update status",
+    });
   }
 
   // ---------------------------------------------------------------------------
   // Button styles
   // ---------------------------------------------------------------------------
 
-  const btnBase: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "8px 14px",
-    borderRadius: 10,
-    fontSize: 13,
-    fontWeight: 500,
-    cursor: "pointer",
-    border: "1px solid var(--color-border)",
-    background: "white",
-    color: "var(--color-text)",
-  };
-
-  const btnDanger: React.CSSProperties = {
-    ...btnBase,
-    border: "1px solid #fecaca",
-    background: "#fef2f2",
-    color: "#c53030",
-  };
-
-  const btnPrimary: React.CSSProperties = {
-    ...btnBase,
-    border: "none",
-    background: "var(--color-forest)",
-    color: "white",
-  };
+  const btnBase = ADMIN_BUTTON_BASE_STYLE;
+  const btnDanger = ADMIN_BUTTON_DANGER_STYLE;
+  const btnPrimary = ADMIN_BUTTON_PRIMARY_STYLE;
 
   // ---------------------------------------------------------------------------
   // Render

@@ -6,7 +6,20 @@ import { API_URL } from "@/config/event";
 import { CompactMetricCard, CompactMetricRail } from "@/components/admin/CompactMetricRail";
 import Modal from "@/components/ui/Modal";
 import { getAdminToken } from "@/lib/auth";
-import { runAdminBulkBatches } from "@/lib/adminBulk";
+import {
+  postAdminBulkDelete,
+  postAdminBulkStatus,
+  removeItemsByIds,
+  removeSelectedIds,
+  runAdminBulkAction,
+  toggleSelectedId,
+  updateItemStatuses,
+} from "@/lib/adminBulk";
+import {
+  ADMIN_BUTTON_BASE_STYLE,
+  ADMIN_BUTTON_DANGER_STYLE,
+  ADMIN_BUTTON_PRIMARY_STYLE,
+} from "@/lib/adminStyles";
 import {
   CATERING_BUDGET_RANGES,
   CATERING_EVENT_TYPES,
@@ -681,12 +694,7 @@ export default function AdminCateringRequestsPage() {
   }
 
   function toggleSelect(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+    setSelectedIds((prev) => toggleSelectedId(prev, id));
   }
 
   function rebuildData(previous: CateringRequestsResponse, items: CateringRequestItem[]): CateringRequestsResponse {
@@ -793,96 +801,53 @@ export default function AdminCateringRequestsPage() {
 
   async function handleBulkDelete() {
     const ids = Array.from(selectedIds);
-    const headers = await getAuthHeader();
-    let deleted = 0;
-
-    try {
-      await runAdminBulkBatches(ids, async (batch) => {
-        const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-delete`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: batch }),
-        });
-        if (!res.ok) throw new Error("Failed");
-      }, (batch) => {
-        const batchSet = new Set(batch);
+    await runAdminBulkAction({
+      ids,
+      request: async () => postAdminBulkDelete(
+        `${API_URL}/api/admin/catering-requests/bulk-delete`, ids, await getAuthHeader(),
+      ),
+      applyCompleted: (completedIds) => {
         setData((prev) => {
           if (!prev) return prev;
-          return rebuildData(prev, prev.items.filter((item) => !batchSet.has(item.id)));
+          return rebuildData(prev, removeItemsByIds(prev.items, completedIds));
         });
-        setSelectedIds((prev) => {
-          const next = new Set(prev);
-          for (const id of batch) next.delete(id);
-          return next;
-        });
-        if (expandedId && batchSet.has(expandedId)) setExpandedId(null);
-        deleted += batch.length;
-      });
-      setShowBulkDeleteModal(false);
-      showToast(`${ids.length} request${ids.length === 1 ? "" : "s"} deleted`, "success");
-    } catch {
-      showToast(deleted > 0 ? `Deleted ${deleted}; ${ids.length - deleted} failed` : "Failed to delete requests", "error");
-    }
+        setSelectedIds((prev) => removeSelectedIds(prev, completedIds));
+        if (expandedId && completedIds.includes(expandedId)) setExpandedId(null);
+      },
+      closeModal: () => setShowBulkDeleteModal(false),
+      notify: showToast,
+      successMessage: `${ids.length} request${ids.length === 1 ? "" : "s"} deleted`,
+      failureAction: "Deleted",
+      failureMessage: "Failed to delete requests",
+    });
   }
 
   async function handleBulkStatus() {
     const ids = Array.from(selectedIds);
-    const headers = await getAuthHeader();
-    let updated = 0;
-
-    try {
-      await runAdminBulkBatches(ids, async (batch) => {
-        const res = await fetch(`${API_URL}/api/admin/catering-requests/bulk-status`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/json" },
-          body: JSON.stringify({ ids: batch, status: bulkStatusTarget }),
-        });
-        if (!res.ok) throw new Error("Failed");
-      }, (batch) => {
-        const batchSet = new Set(batch);
-        setData((prev) => {
-          if (!prev) return prev;
-          const nextItems = prev.items.map((item) => (
-            batchSet.has(item.id) ? { ...item, status: bulkStatusTarget } : item
-          ));
-          return rebuildData(prev, nextItems);
-        });
-        updated += batch.length;
-      });
-      setShowBulkStatusModal(false);
-      showToast(`${ids.length} request${ids.length === 1 ? "" : "s"} updated`, "success");
-    } catch {
-      showToast(updated > 0 ? `Updated ${updated}; ${ids.length - updated} failed` : "Failed to update requests", "error");
-    }
+    await runAdminBulkAction({
+      ids,
+      request: async () => postAdminBulkStatus(
+        `${API_URL}/api/admin/catering-requests/bulk-status`,
+        ids,
+        await getAuthHeader(),
+        bulkStatusTarget,
+      ),
+      applyCompleted: (completedIds) => setData((prev) => {
+        if (!prev) return prev;
+        const nextItems = updateItemStatuses(prev.items, completedIds, bulkStatusTarget);
+        return rebuildData(prev, nextItems);
+      }),
+      closeModal: () => setShowBulkStatusModal(false),
+      notify: showToast,
+      successMessage: `${ids.length} request${ids.length === 1 ? "" : "s"} updated`,
+      failureAction: "Updated",
+      failureMessage: "Failed to update requests",
+    });
   }
 
-  const btnBase: React.CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 6,
-    padding: "8px 14px",
-    borderRadius: 10,
-    fontSize: 13,
-    fontWeight: 500,
-    cursor: "pointer",
-    border: "1px solid var(--color-border)",
-    background: "white",
-    color: "var(--color-text)",
-  };
-
-  const btnDanger: React.CSSProperties = {
-    ...btnBase,
-    border: "1px solid #fecaca",
-    background: "#fef2f2",
-    color: "#c53030",
-  };
-
-  const btnPrimary: React.CSSProperties = {
-    ...btnBase,
-    border: "none",
-    background: "var(--color-forest)",
-    color: "white",
-  };
+  const btnBase = ADMIN_BUTTON_BASE_STYLE;
+  const btnDanger = ADMIN_BUTTON_DANGER_STYLE;
+  const btnPrimary = ADMIN_BUTTON_PRIMARY_STYLE;
 
   return (
     <div style={{ padding: "clamp(20px, 2vw, 32px) clamp(16px, 1.25vw, 24px) 56px", maxWidth: 1320, margin: "0 auto" }}>
