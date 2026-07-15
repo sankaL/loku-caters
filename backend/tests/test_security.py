@@ -8,6 +8,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("RESEND_API_KEY", "test-key")
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 import jwt
 from starlette.requests import Request as StarletteRequest
@@ -16,6 +17,7 @@ from config import Settings, settings
 from routers import admin as admin_router
 from routers.admin import verify_admin_token
 from security import (
+    RATE_LIMIT_RULES,
     RateLimitMiddleware,
     RateLimitRule,
     RequestSecurityMiddleware,
@@ -57,10 +59,10 @@ class AdminTokenSecurityTests(unittest.TestCase):
     JWT_SECRET = "test-secret-that-is-at-least-32-bytes-long"
 
     def setUp(self):
-        admin_router._fetch_jwks.cache_clear()
-        admin_router._jwks_last_refresh.clear()
+        admin_router._jwks_last_success.clear()
         admin_router._jwks_failure_until.clear()
         admin_router._jwks_last_good.clear()
+        admin_router._jwks_refreshing.clear()
 
     def _token(self, **overrides):
         issuer = "https://trusted-project.supabase.co/auth/v1"
@@ -123,7 +125,7 @@ class AdminTokenSecurityTests(unittest.TestCase):
             patch.object(
                 settings, "supabase_url", "https://trusted-project.supabase.co"
             ),
-            patch.object(settings, "admin_emails", ""),
+            patch.object(settings, "admin_emails", "admin@example.com"),
             patch(
                 "routers.admin.jwt.get_unverified_header",
                 return_value={"alg": "RS256", "kid": "key-1"},
@@ -176,20 +178,194 @@ class AdminTokenSecurityTests(unittest.TestCase):
 
     def test_unknown_jwt_kid_refresh_is_rate_bounded(self):
         issuer = "https://trusted-project.supabase.co/auth/v1"
-        admin_router._jwks_last_refresh.clear()
         with (
             patch("routers.admin._load_jwks", return_value={"keys": []}) as load_jwks,
-            patch.object(admin_router._fetch_jwks, "cache_clear") as cache_clear,
             patch("routers.admin.time.monotonic", return_value=100.0),
         ):
             self.assertIsNone(admin_router._find_jwk(issuer, "unknown-1"))
             self.assertIsNone(admin_router._find_jwk(issuer, "unknown-2"))
 
-        cache_clear.assert_called_once_with()
-        self.assertEqual(load_jwks.call_count, 3)
+        load_jwks.assert_called_once_with(issuer)
+
+    def test_cached_signing_key_is_evicted_after_refresh_interval(self):
+        issuer = "https://trusted-project.supabase.co/auth/v1"
+        with (
+            patch(
+                "routers.admin._load_jwks",
+                side_effect=[
+                    {"keys": [{"kid": "retired-key"}]},
+                    {"keys": [{"kid": "replacement-key"}]},
+                ],
+            ) as load_jwks,
+            patch("routers.admin.time.monotonic", side_effect=[100.0, 161.0]),
+        ):
+            self.assertEqual(
+                admin_router._find_jwk(issuer, "retired-key"),
+                {"kid": "retired-key"},
+            )
+            self.assertIsNone(admin_router._find_jwk(issuer, "retired-key"))
+
+        self.assertEqual(load_jwks.call_count, 2)
+
+    def test_cached_key_remains_available_during_single_flight_refresh(self):
+        issuer = "https://trusted-project.supabase.co/auth/v1"
+        admin_router._jwks_last_good[issuer] = {"keys": [{"kid": "cached-key"}]}
+        admin_router._jwks_last_success[issuer] = 100.0
+        admin_router._jwks_refreshing.add(issuer)
+
+        with (
+            patch("routers.admin._load_jwks") as load_jwks,
+            patch("routers.admin.time.monotonic", return_value=161.0),
+        ):
+            self.assertEqual(
+                admin_router._find_jwk(issuer, "cached-key"),
+                {"kid": "cached-key"},
+            )
+
+        load_jwks.assert_not_called()
+
+    def test_empty_admin_allowlist_fails_closed(self):
+        with (
+            patch.object(settings, "admin_emails", ""),
+            patch.object(settings, "allow_all_authenticated_admins", False),
+        ):
+            with self.assertRaises(HTTPException) as exc:
+                admin_router._validate_admin_claims(
+                    {"role": "authenticated", "email": "admin@example.com"}
+                )
+
+        self.assertEqual(exc.exception.status_code, 503)
+
+    def test_empty_admin_allowlist_requires_explicit_opt_in(self):
+        claims = {"role": "authenticated", "email": "admin@example.com"}
+        with (
+            patch.object(settings, "admin_emails", ""),
+            patch.object(settings, "allow_all_authenticated_admins", True),
+        ):
+            self.assertEqual(admin_router._validate_admin_claims(claims), claims)
 
 
 class RequestSecurityTests(unittest.TestCase):
+    @staticmethod
+    def _request(method: str, path: str) -> StarletteRequest:
+        return StarletteRequest(
+            {
+                "type": "http",
+                "method": method,
+                "path": path,
+                "headers": [],
+                "client": ("127.0.0.1", 1234),
+                "scheme": "https",
+                "server": ("testserver", 443),
+                "query_string": b"",
+            }
+        )
+
+    def test_production_rate_rules_cover_sensitive_routes(self):
+        expected_rules = {
+            ("POST", "/api/orders"): "public-order-write",
+            ("POST", "/api/orders/quote"): "public-order-quote",
+            ("POST", "/api/feedback"): "public-feedback-write",
+            ("POST", "/api/catering-requests"): "public-catering-write",
+            ("POST", "/api/admin/dev-login"): "admin-dev-login",
+            ("POST", "/api/admin/orders/order-1/remind"): "admin-email-actions",
+            (
+                "POST",
+                "/api/admin/customers/customer-1/event-reminder",
+            ): "admin-email-actions",
+            ("DELETE", "/api/admin/orders/order-1"): "admin-api",
+        }
+        for (method, path), expected_name in expected_rules.items():
+            request = self._request(method, path)
+            matching_rule = next(
+                (rule for rule in RATE_LIMIT_RULES if rule.matches(request)), None
+            )
+            with self.subTest(method=method, path=path):
+                self.assertIsNotNone(matching_rule)
+                self.assertEqual(matching_rule.name, expected_name)
+
+        email_rule = next(
+            rule for rule in RATE_LIMIT_RULES if rule.name == "admin-email-actions"
+        )
+        self.assertGreaterEqual(email_rule.requests, 500)
+
+    def test_production_app_uses_security_middleware_in_safe_order(self):
+        from main import app as production_app
+
+        middleware_names = [
+            middleware.cls.__name__ for middleware in production_app.user_middleware
+        ]
+        self.assertEqual(
+            middleware_names[:3],
+            ["CORSMiddleware", "RateLimitMiddleware", "RequestSecurityMiddleware"],
+        )
+
+        request_security = next(
+            middleware
+            for middleware in production_app.user_middleware
+            if middleware.cls is RequestSecurityMiddleware
+        )
+        rate_limit = next(
+            middleware
+            for middleware in production_app.user_middleware
+            if middleware.cls is RateLimitMiddleware
+        )
+        self.assertEqual(
+            request_security.kwargs["max_request_body_bytes"],
+            settings.max_request_body_bytes,
+        )
+        self.assertEqual(rate_limit.kwargs["enabled"], settings.rate_limit_enabled)
+        self.assertEqual(
+            rate_limit.kwargs["trusted_proxy_hops"],
+            settings.rate_limit_trusted_proxy_hops,
+        )
+
+    def test_every_production_admin_route_requires_admin_authentication(self):
+        from main import app as production_app
+
+        def dependency_calls(route: APIRoute) -> set[object]:
+            pending = list(route.dependant.dependencies)
+            calls: set[object] = set()
+            while pending:
+                dependency = pending.pop()
+                if dependency.call is not None:
+                    calls.add(dependency.call)
+                pending.extend(dependency.dependencies)
+            return calls
+
+        unprotected_routes = []
+        for route in production_app.routes:
+            if not isinstance(route, APIRoute):
+                continue
+            if not route.path.startswith("/api/admin"):
+                continue
+            if route.path == "/api/admin/dev-login":
+                continue
+            if admin_router.verify_admin_token not in dependency_calls(route):
+                unprotected_routes.append(f"{sorted(route.methods)} {route.path}")
+
+        self.assertEqual(unprotected_routes, [])
+
+    def test_declared_body_size_validation_rejects_bad_headers(self):
+        app = FastAPI()
+
+        @app.post("/echo")
+        async def echo(request: Request):
+            return {"size": len(await request.body())}
+
+        app.add_middleware(RequestSecurityMiddleware, max_request_body_bytes=8)
+        client = TestClient(app)
+
+        invalid = client.post(
+            "/echo", content=b"a", headers={"content-length": "invalid"}
+        )
+        negative = client.post("/echo", content=b"a", headers={"content-length": "-1"})
+        oversized = client.post("/echo", content=b"a", headers={"content-length": "9"})
+
+        self.assertEqual(invalid.status_code, 400)
+        self.assertEqual(negative.status_code, 400)
+        self.assertEqual(oversized.status_code, 413)
+
     def test_trusted_proxy_hops_ignore_spoofed_leftmost_address(self):
         request = StarletteRequest(
             {

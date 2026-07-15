@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import AdminToast from "@/components/admin/AdminToast";
-import { useAdminToast } from "@/components/admin/useAdminToast";
+import { useAdminToast } from "@/hooks/useAdminToast";
 import { runAdminDeleteAction, runAdminSaveAction } from "@/lib/adminCrud";
 import {
   ADMIN_FORM_INPUT_CLASS,

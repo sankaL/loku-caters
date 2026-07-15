@@ -71,7 +71,7 @@ RATE_LIMIT_RULES = (
             r"|customers/[^/]+/event-reminder)"
         ),
         frozenset({"POST"}),
-        30,
+        600,
         600,
     ),
     RateLimitRule(

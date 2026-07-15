@@ -20,7 +20,7 @@ import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { loadAdminResource } from "@/lib/adminCrud";
 import AdminToast from "@/components/admin/AdminToast";
-import { useAdminToast } from "@/components/admin/useAdminToast";
+import { useAdminToast } from "@/hooks/useAdminToast";
 import Modal from "@/components/ui/Modal";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import {

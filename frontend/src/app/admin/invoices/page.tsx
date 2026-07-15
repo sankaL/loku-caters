@@ -7,7 +7,7 @@ import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import AdminToast from "@/components/admin/AdminToast";
-import { useAdminToast } from "@/components/admin/useAdminToast";
+import { useAdminToast } from "@/hooks/useAdminToast";
 import {
   InvoicePicker,
   InvoicesContent,
@@ -127,7 +127,7 @@ export default function InvoicesPage() {
   const updateState = useCallback((patch: Partial<InvoicesPageState>) => {
     setState((current) => ({ ...current, ...patch }));
   }, []);
-  const { toast, showToast } = useAdminToast();
+  const { toast, showToast } = useAdminToast(4200);
 
   const loadData = useCallback(async () => {
     updateState({ loading: true });

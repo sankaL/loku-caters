@@ -385,7 +385,7 @@ alembic upgrade head
 | `0023_event_plans` | adds `orders.updated_at`, creates backend-managed `event_plans`, enables RLS, and revokes direct API-role access |
 | `0024_invoices` | creates `invoices`, `invoice_settings`, and `invoice_number_counters` with RLS and revoked direct API-role access |
 | `0025_decouple_invoices` | makes invoices independent snapshots with owned line items and payment state |
-| `0026_harden_rls` | enables RLS across every application table, revokes direct API-role table and sequence access, and adds explicit restrictive deny policies |
+| `0026_harden_rls` | enables RLS across every application table, revokes direct API-role table and sequence access, revokes matching default privileges for future objects created by the migration role, and adds explicit restrictive deny policies |
 
 ---
 

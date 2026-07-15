@@ -11,6 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
+from event_config import get_currency
+
 revision = "0006_normalize_items_locations"
 down_revision = "0005_feedback_type_and_message"
 branch_labels = None
@@ -98,7 +100,7 @@ def downgrade() -> None:
     # Re-add JSONB columns
     op.add_column(
         "event_config",
-        sa.Column("currency", sa.Text(), nullable=False, server_default="CAD"),
+        sa.Column("currency", sa.Text(), nullable=False, server_default=get_currency()),
     )
     op.add_column(
         "event_config",

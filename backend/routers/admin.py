@@ -9,7 +9,6 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import urlopen
 from typing import Any, Optional, Union, Literal
-from functools import lru_cache
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Response
 import jwt
@@ -103,10 +102,12 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 logger = logging.getLogger(__name__)
 
 _JWKS_REFRESH_INTERVAL_SECONDS = 60
+_JWKS_OUTAGE_GRACE_SECONDS = 300
 _jwks_refresh_lock = Lock()
-_jwks_last_refresh: dict[str, float] = {}
+_jwks_last_success: dict[str, float] = {}
 _jwks_failure_until: dict[str, float] = {}
 _jwks_last_good: dict[str, dict] = {}
+_jwks_refreshing: set[str] = set()
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +115,6 @@ _jwks_last_good: dict[str, dict] = {}
 # ---------------------------------------------------------------------------
 
 
-@lru_cache(maxsize=8)
 def _fetch_jwks(issuer: str) -> dict:
     url = issuer.rstrip("/") + "/.well-known/jwks.json"
     # The issuer is canonical server configuration, never request-controlled input.
@@ -150,58 +150,66 @@ def _load_jwks(issuer: str) -> dict:
 
 def _find_jwk(issuer: str, kid: Optional[str]) -> Optional[dict]:
     now = time.monotonic()
+
     with _jwks_refresh_lock:
+        jwks = _jwks_last_good.get(issuer)
+        last_success = _jwks_last_success.get(issuer, 0.0)
+        cached_key = _find_key_in_jwks(jwks, kid)
+
         if _jwks_failure_until.get(issuer, 0.0) > now:
-            jwks = _jwks_last_good.get(issuer)
-            if jwks is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Admin authentication is temporarily unavailable",
-                )
-        else:
-            try:
-                jwks = _load_jwks(issuer)
-            except HTTPException:
-                _jwks_failure_until[issuer] = now + _JWKS_REFRESH_INTERVAL_SECONDS
-                jwks = _jwks_last_good.get(issuer)
-                if jwks is None:
-                    raise
-            else:
-                _jwks_last_good[issuer] = jwks
-                _jwks_failure_until.pop(issuer, None)
+            if jwks is not None and now - last_success <= _JWKS_OUTAGE_GRACE_SECONDS:
+                return cached_key
+            raise HTTPException(
+                status_code=503,
+                detail="Admin authentication is temporarily unavailable",
+            )
 
-        key_data = next(
-            (
-                key
-                for key in jwks["keys"]
-                if isinstance(key, dict) and key.get("kid") == kid
-            ),
-            None,
+        refresh_due = (
+            jwks is None or now - last_success >= _JWKS_REFRESH_INTERVAL_SECONDS
         )
-        if key_data is not None:
-            return key_data
+        if not refresh_due:
+            return cached_key
 
-        last_refresh = _jwks_last_refresh.get(issuer, 0.0)
-        if now - last_refresh < _JWKS_REFRESH_INTERVAL_SECONDS:
-            return None
+        if issuer in _jwks_refreshing:
+            if jwks is not None and now - last_success <= _JWKS_OUTAGE_GRACE_SECONDS:
+                return cached_key
+            raise HTTPException(
+                status_code=503,
+                detail="Admin authentication is temporarily unavailable",
+            )
+        _jwks_refreshing.add(issuer)
 
-        _jwks_last_refresh[issuer] = now
-        _fetch_jwks.cache_clear()
-        try:
-            jwks = _load_jwks(issuer)
-        except HTTPException:
+    try:
+        refreshed_jwks = _load_jwks(issuer)
+    except HTTPException:
+        with _jwks_refresh_lock:
+            _jwks_refreshing.discard(issuer)
             _jwks_failure_until[issuer] = now + _JWKS_REFRESH_INTERVAL_SECONDS
-            return None
-        _jwks_last_good[issuer] = jwks
+            jwks = _jwks_last_good.get(issuer)
+            last_success = _jwks_last_success.get(issuer, 0.0)
+            if jwks is not None and now - last_success <= _JWKS_OUTAGE_GRACE_SECONDS:
+                return _find_key_in_jwks(jwks, kid)
+        raise
+
+    with _jwks_refresh_lock:
+        _jwks_refreshing.discard(issuer)
+        _jwks_last_good[issuer] = refreshed_jwks
+        _jwks_last_success[issuer] = now
         _jwks_failure_until.pop(issuer, None)
-        return next(
-            (
-                key
-                for key in jwks["keys"]
-                if isinstance(key, dict) and key.get("kid") == kid
-            ),
-            None,
-        )
+    return _find_key_in_jwks(refreshed_jwks, kid)
+
+
+def _find_key_in_jwks(jwks: Optional[dict], kid: Optional[str]) -> Optional[dict]:
+    if jwks is None:
+        return None
+    return next(
+        (
+            key
+            for key in jwks["keys"]
+            if isinstance(key, dict) and key.get("kid") == kid
+        ),
+        None,
+    )
 
 
 def _validate_admin_claims(claims: dict) -> dict:
@@ -210,6 +218,10 @@ def _validate_admin_claims(claims: dict) -> dict:
 
     admin_emails = settings.get_admin_email_allowlist()
     token_email = str(claims.get("email") or "").strip().lower()
+    if not admin_emails and not settings.allow_all_authenticated_admins:
+        raise HTTPException(
+            status_code=503, detail="Administrator access is not configured"
+        )
     if admin_emails and token_email not in admin_emails:
         raise HTTPException(status_code=403, detail="Administrator access required")
     return claims

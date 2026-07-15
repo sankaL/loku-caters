@@ -5,7 +5,7 @@ alembic==1.14.1
 pg8000==1.31.5
 pydantic[email]==2.10.3
 pydantic-settings==2.7.0
-resend==2.4.0
+resend==2.33.0
 python-dotenv==1.2.2
 python-multipart==0.0.31
 PyJWT[crypto]==2.13.0

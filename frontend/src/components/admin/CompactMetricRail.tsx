@@ -4,7 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 
 const COMPACT_METRIC_MIN_WIDTH = 120;
 const COMPACT_METRIC_GAP = 14;
-const COMPACT_METRIC_RADIUS = 20;
+const COMPACT_METRIC_RADIUS = 24;
 
 interface CompactMetricRailProps {
   children: ReactNode;
@@ -105,7 +105,8 @@ export function CompactMetricCard({
     ...sharedStyle,
     background: "white",
     color: "var(--color-text)",
-    border: `2px solid ${selected ? "var(--color-sage)" : "var(--color-border)"}`,
+    border: "1px solid var(--color-border)",
+    boxShadow: selected ? "0 0 0 1px var(--color-sage)" : "none",
   };
 
   if (onClick) {

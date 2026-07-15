@@ -26,7 +26,7 @@ import TopEventsRevenueTile, {
   type DashboardEventSummary,
 } from "@/components/admin/dashboard/TopEventsRevenueTile";
 import AdminToast from "@/components/admin/AdminToast";
-import { useAdminToast } from "@/components/admin/useAdminToast";
+import { useAdminToast } from "@/hooks/useAdminToast";
 
 type Range = "7d" | "30d" | "1y";
 const TOP_METRIC_HEIGHT = 160;

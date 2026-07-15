@@ -6,6 +6,9 @@ from config import settings
 from event_config import CURRENCY
 
 resend.api_key = settings.resend_api_key
+resend.default_http_client = resend.RequestsClient(
+    timeout=settings.email_request_timeout_seconds
+)
 logger = logging.getLogger(__name__)
 
 

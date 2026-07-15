@@ -6,7 +6,7 @@ import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import AdminToast from "@/components/admin/AdminToast";
-import { useAdminToast } from "@/components/admin/useAdminToast";
+import { useAdminToast } from "@/hooks/useAdminToast";
 import { loadAdminResource } from "@/lib/adminCrud";
 
 interface ComboDeal {

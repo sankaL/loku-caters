@@ -4,7 +4,7 @@
 
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
-        docker-ready db-up db-down db-migrate db-seed db-seed-if-empty db-reset test-backend quality-backend audit-backend \
+        docker-ready db-up db-down db-api-roles db-migrate db-seed db-seed-if-empty db-reset test-backend quality-backend audit-backend \
         stop stop-backend-port stop-frontend-port logs-backend help
 
 # ----------------------------------------------------------------------------
@@ -164,7 +164,12 @@ db-down:
 	docker compose -f docker-compose.dev.yml down
 
 ## Run Alembic migrations against the local DB
-db-migrate: sync-config
+db-api-roles: db-up
+	@docker compose -f docker-compose.dev.yml exec -T db \
+	    psql -U $(LOCAL_DB_USER) -d $(LOCAL_DB_NAME) \
+	    -c "DO \$$$$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF; END \$$$$;" >/dev/null
+
+db-migrate: sync-config db-api-roles
 	@cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
 
 ## Seed the local DB with comprehensive test data (removes existing orders first)

@@ -98,6 +98,14 @@ def upgrade() -> None:
                             'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM %I',
                             role_name
                         );
+                        EXECUTE format(
+                            'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON TABLES FROM %I',
+                            role_name
+                        );
+                        EXECUTE format(
+                            'ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE ALL ON SEQUENCES FROM %I',
+                            role_name
+                        );
                     END IF;
                 END LOOP;
             END

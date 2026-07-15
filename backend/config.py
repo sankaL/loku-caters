@@ -22,9 +22,11 @@ class Settings(BaseSettings):
     # Optional comma-separated allowlist. Leave empty only when Supabase sign-up
     # is disabled and every authenticated account is an administrator.
     admin_emails: str = ""
+    allow_all_authenticated_admins: bool = False
     from_email: str = "orders@lokucaters.com"
     reply_to_email: str | None = None
     email_enabled: bool = True
+    email_request_timeout_seconds: int = 15
     frontend_url: str = "http://localhost:3000"
     dev_mode: bool = False
     rate_limit_enabled: bool = True

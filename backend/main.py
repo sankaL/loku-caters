@@ -11,9 +11,14 @@ from security import RateLimitMiddleware, RequestSecurityMiddleware
 logger = logging.getLogger(__name__)
 
 if not settings.dev_mode and not settings.get_admin_email_allowlist():
-    logger.warning(
-        "ADMIN_EMAILS is empty. Every authenticated Supabase account can access the admin API; disable public signup or configure the allowlist."
-    )
+    if settings.allow_all_authenticated_admins:
+        logger.warning(
+            "ADMIN_EMAILS is empty and unrestricted authenticated admin access is explicitly enabled."
+        )
+    else:
+        logger.warning(
+            "ADMIN_EMAILS is empty. The production admin API will reject access until an allowlist is configured."
+        )
 
 app = FastAPI(
     title="Loku Caters API",
