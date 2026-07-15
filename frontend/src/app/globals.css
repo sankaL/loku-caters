@@ -2,6 +2,7 @@
 
 :root {
   --color-forest: #12270F;
+  --color-forest-hover: #1e3d18;
   --color-sage: #729152;
   --color-cream: #F7F5F0;
   --color-cream-dark: #EAE6DC;
@@ -33,6 +34,7 @@
 
 @theme {
   --color-forest: #12270F;
+  --color-forest-hover: #1e3d18;
   --color-sage: #729152;
   --color-cream: #F7F5F0;
   --color-cream-dark: #EAE6DC;

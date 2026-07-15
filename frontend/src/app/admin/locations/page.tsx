@@ -3,7 +3,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
-import { getApiErrorMessage } from "@/lib/apiError";
+import AdminToast from "@/components/admin/AdminToast";
+import { useAdminToast } from "@/components/admin/useAdminToast";
+import { runAdminDeleteAction, runAdminSaveAction } from "@/lib/adminCrud";
+import {
+  ADMIN_FORM_INPUT_CLASS,
+  ADMIN_FORM_LABEL_CLASS,
+  AdminCrudContent,
+  AdminCrudPageHeader,
+  AdminCrudRowActions,
+  AdminModalActions,
+} from "@/components/admin/AdminCrudParts";
 
 interface Location {
   id: string;
@@ -19,19 +29,37 @@ const EMPTY_FORM = {
   time_slots: [] as string[],
 };
 
-export default function AdminLocationsPage() {
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [newSlot, setNewSlot] = useState("");
-  const [saving, setSaving] = useState(false);
+type LocationForm = typeof EMPTY_FORM;
 
-  const showToast = useCallback((message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+interface LocationsPageState {
+  locations: Location[];
+  loading: boolean;
+  showModal: boolean;
+  editingId: string | null;
+  form: LocationForm;
+  newSlot: string;
+  saving: boolean;
+}
+
+const INITIAL_STATE: LocationsPageState = {
+  locations: [],
+  loading: true,
+  showModal: false,
+  editingId: null,
+  form: EMPTY_FORM,
+  newSlot: "",
+  saving: false,
+};
+
+export default function AdminLocationsPage() {
+  const [state, setState] = useState<LocationsPageState>(INITIAL_STATE);
+  const { locations, loading, showModal, editingId, form, newSlot, saving } = state;
+  const { toast, showToast } = useAdminToast(4000);
+  const updateState = useCallback((patch: Partial<LocationsPageState>) => {
+    setState((current) => ({ ...current, ...patch }));
+  }, []);
+  const updateForm = useCallback((patch: Partial<LocationForm>) => {
+    setState((current) => ({ ...current, form: { ...current.form, ...patch } }));
   }, []);
 
   const loadLocations = useCallback(async () => {
@@ -42,160 +70,66 @@ export default function AdminLocationsPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error("Failed to load locations");
-      setLocations(await res.json());
+      updateState({ locations: await res.json() });
     } catch {
       showToast("Failed to load locations", "error");
     } finally {
-      setLoading(false);
+      updateState({ loading: false });
     }
-  }, [showToast]);
+  }, [showToast, updateState]);
 
   useEffect(() => { loadLocations(); }, [loadLocations]);
 
   function openCreate() {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setNewSlot("");
-    setShowModal(true);
+    updateState({ editingId: null, form: EMPTY_FORM, newSlot: "", showModal: true });
   }
 
   function openEdit(loc: Location) {
-    setEditingId(loc.id);
-    setForm({ name: loc.name, address: loc.address, time_slots: [...loc.time_slots] });
-    setNewSlot("");
-    setShowModal(true);
+    updateState({
+      editingId: loc.id,
+      form: { name: loc.name, address: loc.address, time_slots: [...loc.time_slots] },
+      newSlot: "",
+      showModal: true,
+    });
   }
 
   function addSlot() {
     const slot = newSlot.trim();
     if (!slot) return;
-    setForm((p) => ({ ...p, time_slots: [...p.time_slots, slot] }));
-    setNewSlot("");
+    updateState({ form: { ...form, time_slots: [...form.time_slots, slot] }, newSlot: "" });
   }
 
   function removeSlot(idx: number) {
-    setForm((p) => ({ ...p, time_slots: p.time_slots.filter((_, i) => i !== idx) }));
+    updateForm({ time_slots: form.time_slots.filter((_, index) => index !== idx) });
   }
 
   async function handleSave() {
     if (!form.name.trim()) return;
-    setSaving(true);
-    try {
-      const token = await getAdminToken();
-      if (!token) return;
-
-      const body: Record<string, unknown> = {
-        name: form.name.trim(),
-        address: form.address.trim(),
-        time_slots: form.time_slots,
-      };
-
-      let res: Response;
-      if (editingId) {
-        res = await fetch(`${API_URL}/api/admin/locations/${editingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(body),
-        });
-      } else {
-        res = await fetch(`${API_URL}/api/admin/locations`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(body),
-        });
-      }
-
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Save failed"));
-      }
-
-      setShowModal(false);
-      showToast(editingId ? "Location updated." : "Location created.", "success");
-      await loadLocations();
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Save failed", "error");
-    } finally {
-      setSaving(false);
-    }
+    await runAdminSaveAction({
+      resourcePath: "/api/admin/locations",
+      id: editingId,
+      body: { name: form.name.trim(), address: form.address.trim(), time_slots: form.time_slots },
+      successMessage: editingId ? "Location updated." : "Location created.",
+      onSaved: async () => {
+        updateState({ showModal: false });
+        await loadLocations();
+      },
+      setSaving: (next) => updateState({ saving: next }),
+      notify: showToast,
+    });
   }
 
   async function handleDelete(id: string) {
-    if (!confirm(`Delete location "${id}"?`)) return;
-    try {
-      const token = await getAdminToken();
-      if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/locations/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Delete failed");
-      showToast("Location deleted.", "success");
-      await loadLocations();
-    } catch {
-      showToast("Failed to delete location", "error");
-    }
+    await runAdminDeleteAction({ resourcePath: "/api/admin/locations", id, entityLabel: "location", successMessage: "Location deleted.", onDeleted: loadLocations, notify: showToast });
   }
-
-  const inputClass =
-    "w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]";
-  const labelClass = "block text-sm font-medium mb-1.5";
 
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      {toast && (
-        <div
-          className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
-          style={{
-            background: toast.type === "success" ? "#d1fae5" : "#fee2e2",
-            color: toast.type === "success" ? "#065f46" : "#991b1b",
-            border: `1px solid ${toast.type === "success" ? "#6ee7b7" : "#fca5a5"}`,
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
 
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1
-            className="text-2xl font-bold mb-1"
-            style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
-          >
-            Pickup Locations
-          </h1>
-          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            Manage pickup locations and their available time slots.
-          </p>
-        </div>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all"
-          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)"; }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-          Add Location
-        </button>
-      </div>
+      <AdminCrudPageHeader title="Pickup Locations" description="Manage pickup locations and their available time slots." actionLabel="Add Location" onAction={openCreate} />
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" opacity="0.3" />
-            <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
-          </svg>
-        </div>
-      ) : locations.length === 0 ? (
-        <div
-          className="rounded-2xl p-10 text-center"
-          style={{ background: "white", border: "1px solid var(--color-border)" }}
-        >
-          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            No locations yet. Add one above.
-          </p>
-        </div>
-      ) : (
+      <AdminCrudContent loading={loading} empty={locations.length === 0} emptyMessage="No locations yet. Add one above.">
         <div className="space-y-4">
           {locations.map((loc) => (
             <div
@@ -211,23 +145,7 @@ export default function AdminLocationsPage() {
                     <p className="text-xs mt-1" style={{ color: "var(--color-muted)" }}>{loc.address}</p>
                   )}
                 </div>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => openEdit(loc)}
-                    className="text-xs font-medium transition-colors"
-                    style={{ color: "var(--color-sage)" }}
-                    onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "var(--color-forest)"; }}
-                    onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "var(--color-sage)"; }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(loc.id)}
-                    className="text-xs font-medium text-red-400 hover:text-red-600 transition-colors"
-                  >
-                    Delete
-                  </button>
-                </div>
+                <AdminCrudRowActions onEdit={() => openEdit(loc)} onDelete={() => handleDelete(loc.id)} />
               </div>
               <div className="flex flex-wrap gap-2">
                 {loc.time_slots.length === 0 ? (
@@ -245,14 +163,14 @@ export default function AdminLocationsPage() {
             </div>
           ))}
         </div>
-      )}
+      </AdminCrudContent>
 
       {/* Modal */}
       {showModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.4)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}
+          onClick={(event) => { if (event.target === event.currentTarget) updateState({ showModal: false }); }}
         >
           <div
             className="w-full max-w-md rounded-2xl p-6 space-y-4 max-h-[90vh] overflow-y-auto"
@@ -263,33 +181,33 @@ export default function AdminLocationsPage() {
             </h2>
 
             <div>
-              <label className={labelClass} style={{ color: "var(--color-text)" }}>Name</label>
+              <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Name</label>
               <input
                 type="text"
                 value={form.name}
-                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                onChange={(event) => updateForm({ name: event.target.value })}
                 placeholder="e.g. Woodbridge"
-                className={inputClass}
+                className={ADMIN_FORM_INPUT_CLASS}
                 style={{ color: "var(--color-text)" }}
               />
             </div>
 
             <div>
-              <label className={labelClass} style={{ color: "var(--color-text)" }}>
+              <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>
                 Address <span className="font-normal" style={{ color: "var(--color-muted)" }}>(shown in confirmation email)</span>
               </label>
               <input
                 type="text"
                 value={form.address}
-                onChange={(e) => setForm((p) => ({ ...p, address: e.target.value }))}
+                onChange={(event) => updateForm({ address: event.target.value })}
                 placeholder="e.g. 123 Main St, Woodbridge, ON"
-                className={inputClass}
+                className={ADMIN_FORM_INPUT_CLASS}
                 style={{ color: "var(--color-text)" }}
               />
             </div>
 
             <div>
-              <label className={labelClass} style={{ color: "var(--color-text)" }}>Time Slots</label>
+              <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Time Slots</label>
               <div className="flex flex-wrap gap-2 mb-2">
                 {form.time_slots.map((slot, i) => (
                   <span
@@ -315,7 +233,7 @@ export default function AdminLocationsPage() {
                 <input
                   type="text"
                   value={newSlot}
-                  onChange={(e) => setNewSlot(e.target.value)}
+                  onChange={(event) => updateState({ newSlot: event.target.value })}
                   onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSlot(); } }}
                   placeholder="e.g. 12:00 PM - 1:00 PM"
                   className="flex-1 px-3 py-2 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]"
@@ -331,23 +249,7 @@ export default function AdminLocationsPage() {
               </div>
             </div>
 
-            <div className="flex gap-3 justify-end pt-2">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium"
-                style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-60"
-                style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-            </div>
+            <AdminModalActions saving={saving} onCancel={() => updateState({ showModal: false })} onSave={handleSave} />
           </div>
         </div>
       )}

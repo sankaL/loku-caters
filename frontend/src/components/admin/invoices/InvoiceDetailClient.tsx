@@ -6,6 +6,7 @@ import { ArrowLeft, DownloadSimple, NotePencil, Trash, X } from "@phosphor-icons
 import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
+import { downloadResponseBlob } from "@/lib/browserDownload";
 import { formatInvoiceDate, InvoiceDetail } from "@/lib/invoices";
 import {
   invoiceFormFromDetail,
@@ -356,14 +357,7 @@ export default function InvoiceDetailClient({ invoiceId }: { invoiceId: string }
       if (!token) return;
       const res = await fetch(`${API_URL}/api/admin/invoices/${invoice.id}/pdf`, { headers: { Authorization: `Bearer ${token}` } });
       if (!res.ok) throw new Error(await getApiErrorMessage(res, "Failed to export PDF"));
-      const url = URL.createObjectURL(await res.blob());
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${invoice.invoice_number}.pdf`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      await downloadResponseBlob(res, `${invoice.invoice_number}.pdf`);
       showToast("PDF exported", "success");
     } catch (error) {
       showToast(error instanceof Error ? error.message : "Failed to export PDF", "error");

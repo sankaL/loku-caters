@@ -4,7 +4,17 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
-import { getApiErrorMessage } from "@/lib/apiError";
+import AdminToast from "@/components/admin/AdminToast";
+import { useAdminToast } from "@/components/admin/useAdminToast";
+import { runAdminDeleteAction, runAdminSaveAction } from "@/lib/adminCrud";
+import {
+  ADMIN_FORM_INPUT_CLASS,
+  ADMIN_FORM_LABEL_CLASS,
+  AdminCrudContent,
+  AdminCrudPageHeader,
+  AdminCrudRowActions,
+  AdminModalActions,
+} from "@/components/admin/AdminCrudParts";
 
 interface Item {
   id: string;
@@ -35,6 +45,28 @@ const EMPTY_FORM = {
   image_key: "",
 };
 
+type ItemForm = typeof EMPTY_FORM;
+
+interface ItemsPageState {
+  items: Item[];
+  menuImages: EventImage[];
+  loading: boolean;
+  showModal: boolean;
+  editingId: string | null;
+  form: ItemForm;
+  saving: boolean;
+}
+
+const INITIAL_STATE: ItemsPageState = {
+  items: [],
+  menuImages: [],
+  loading: true,
+  showModal: false,
+  editingId: null,
+  form: EMPTY_FORM,
+  saving: false,
+};
+
 function normalizeMenuImages(data: unknown): EventImage[] {
   if (!data || typeof data !== "object") return [];
   const raw = data as { images?: unknown[] };
@@ -52,18 +84,14 @@ function normalizeMenuImages(data: unknown): EventImage[] {
 }
 
 export default function AdminItemsPage() {
-  const [items, setItems] = useState<Item[]>([]);
-  const [menuImages, setMenuImages] = useState<EventImage[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  const [showModal, setShowModal] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [saving, setSaving] = useState(false);
-
-  const showToast = useCallback((message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
+  const [state, setState] = useState<ItemsPageState>(INITIAL_STATE);
+  const { items, menuImages, loading, showModal, editingId, form, saving } = state;
+  const { toast, showToast } = useAdminToast(4000);
+  const updateState = useCallback((patch: Partial<ItemsPageState>) => {
+    setState((current) => ({ ...current, ...patch }));
+  }, []);
+  const updateForm = useCallback((patch: Partial<ItemForm>) => {
+    setState((current) => ({ ...current, form: { ...current.form, ...patch } }));
   }, []);
 
   const selectedFormImage = useMemo(
@@ -86,34 +114,33 @@ export default function AdminItemsPage() {
         itemsRes.json() as Promise<Item[]>,
         imagesRes.json() as Promise<unknown>,
       ]);
-      setItems(itemsData);
-      setMenuImages(normalizeMenuImages(imagesData));
+      updateState({ items: itemsData, menuImages: normalizeMenuImages(imagesData) });
     } catch {
       showToast("Failed to load items", "error");
     } finally {
-      setLoading(false);
+      updateState({ loading: false });
     }
-  }, [showToast]);
+  }, [showToast, updateState]);
 
   useEffect(() => { loadItems(); }, [loadItems]);
 
   function openCreate() {
-    setEditingId(null);
-    setForm(EMPTY_FORM);
-    setShowModal(true);
+    updateState({ editingId: null, form: EMPTY_FORM, showModal: true });
   }
 
   function openEdit(item: Item) {
-    setEditingId(item.id);
-    setForm({
+    updateState({
+      editingId: item.id,
+      showModal: true,
+      form: {
       name: item.name,
       description: item.description,
       price: String(item.price),
       discounted_price: item.discounted_price != null ? String(item.discounted_price) : "",
       minimum_order_quantity: String(item.minimum_order_quantity ?? 1),
       image_key: item.image_key ?? "",
+      },
     });
-    setShowModal(true);
   }
 
   async function handleSave() {
@@ -123,126 +150,38 @@ export default function AdminItemsPage() {
       showToast("Minimum order must be at least 1.", "error");
       return;
     }
-    setSaving(true);
-    try {
-      const token = await getAdminToken();
-      if (!token) return;
-
-      const body: Record<string, unknown> = {
+    await runAdminSaveAction({
+      resourcePath: "/api/admin/items",
+      id: editingId,
+      body: {
         name: form.name.trim(),
         description: form.description.trim(),
         price: parseFloat(form.price) || 0,
         discounted_price: form.discounted_price ? parseFloat(form.discounted_price) : null,
         minimum_order_quantity: minimumOrderQuantity,
         image_key: form.image_key || null,
-      };
-
-      let res: Response;
-      if (editingId) {
-        res = await fetch(`${API_URL}/api/admin/items/${editingId}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(body),
-        });
-      } else {
-        res = await fetch(`${API_URL}/api/admin/items`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(body),
-        });
-      }
-
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Save failed"));
-      }
-
-      setShowModal(false);
-      showToast(editingId ? "Item updated." : "Item created.", "success");
-      await loadItems();
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Save failed", "error");
-    } finally {
-      setSaving(false);
-    }
+      },
+      successMessage: editingId ? "Item updated." : "Item created.",
+      onSaved: async () => {
+        updateState({ showModal: false });
+        await loadItems();
+      },
+      setSaving: (next) => updateState({ saving: next }),
+      notify: showToast,
+    });
   }
 
   async function handleDelete(id: string) {
-    if (!confirm(`Delete item "${id}"?`)) return;
-    try {
-      const token = await getAdminToken();
-      if (!token) return;
-      const res = await fetch(`${API_URL}/api/admin/items/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Delete failed");
-      showToast("Item deleted.", "success");
-      await loadItems();
-    } catch {
-      showToast("Failed to delete item", "error");
-    }
+    await runAdminDeleteAction({ resourcePath: "/api/admin/items", id, entityLabel: "item", successMessage: "Item deleted.", onDeleted: loadItems, notify: showToast });
   }
-
-  const inputClass =
-    "w-full px-4 py-3 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]";
-  const labelClass = "block text-sm font-medium mb-1.5";
 
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      {toast && (
-        <div
-          className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
-          style={{
-            background: toast.type === "success" ? "#d1fae5" : "#fee2e2",
-            color: toast.type === "success" ? "#065f46" : "#991b1b",
-            border: `1px solid ${toast.type === "success" ? "#6ee7b7" : "#fca5a5"}`,
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
 
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1
-            className="text-2xl font-bold mb-1"
-            style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}
-          >
-            Menu Items
-          </h1>
-          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            Manage the items available on the order form.
-          </p>
-        </div>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all"
-          style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-          onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18"; }}
-          onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)"; }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
-          Add Item
-        </button>
-      </div>
+      <AdminCrudPageHeader title="Menu Items" description="Manage the items available on the order form." actionLabel="Add Item" onAction={openCreate} />
 
-      {loading ? (
-        <div className="flex justify-center py-16">
-          <svg className="animate-spin" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" opacity="0.3" />
-            <path d="M12 2a10 10 0 0 1 10 10" stroke="var(--color-sage)" />
-          </svg>
-        </div>
-      ) : items.length === 0 ? (
-        <div
-          className="rounded-2xl p-10 text-center"
-          style={{ background: "white", border: "1px solid var(--color-border)" }}
-        >
-          <p className="text-sm" style={{ color: "var(--color-muted)" }}>
-            No items yet. Add one above.
-          </p>
-        </div>
-      ) : (
+      <AdminCrudContent loading={loading} empty={items.length === 0} emptyMessage="No items yet. Add one above.">
         <div
           className="rounded-2xl"
           style={{ background: "white", border: "1px solid var(--color-border)" }}
@@ -293,30 +232,14 @@ export default function AdminItemsPage() {
                     )}
                   </td>
                   <td className="px-5 py-3" style={{ color: "var(--color-text)" }}>${item.price.toFixed(2)}</td>
-                  <td className="px-5 py-3" style={{ color: item.discounted_price != null ? "#12270F" : "var(--color-muted)" }}>
+                  <td className="px-5 py-3" style={{ color: item.discounted_price != null ? "var(--color-forest)" : "var(--color-muted)" }}>
                     {item.discounted_price != null ? `$${item.discounted_price.toFixed(2)}` : "-"}
                   </td>
                   <td className="px-5 py-3" style={{ color: "var(--color-text)" }}>
                     {item.minimum_order_quantity ?? 1}
                   </td>
                   <td className="px-5 py-3">
-                    <div className="flex items-center gap-3 justify-end">
-                      <button
-                        onClick={() => openEdit(item)}
-                        className="text-xs font-medium transition-colors"
-                        style={{ color: "var(--color-sage)" }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "var(--color-forest)"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "var(--color-sage)"; }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => handleDelete(item.id)}
-                        className="text-xs font-medium text-red-400 hover:text-red-600 transition-colors"
-                      >
-                        Delete
-                      </button>
-                    </div>
+                    <AdminCrudRowActions onEdit={() => openEdit(item)} onDelete={() => handleDelete(item.id)} />
                   </td>
                 </tr>
               ))}
@@ -324,14 +247,14 @@ export default function AdminItemsPage() {
             </table>
           </div>
         </div>
-      )}
+      </AdminCrudContent>
 
       {/* Modal */}
       {showModal && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
           style={{ background: "rgba(0,0,0,0.4)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowModal(false); }}
+          onClick={(event) => { if (event.target === event.currentTarget) updateState({ showModal: false }); }}
         >
           <div
             className="w-full max-w-2xl rounded-2xl p-6 space-y-4"
@@ -342,36 +265,36 @@ export default function AdminItemsPage() {
             </h2>
 
             <div>
-              <label className={labelClass} style={{ color: "var(--color-text)" }}>Name</label>
+              <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Name</label>
               <input
                 type="text"
                 value={form.name}
-                onChange={(e) => setForm((p) => ({ ...p, name: e.target.value }))}
+                onChange={(event) => updateForm({ name: event.target.value })}
                 placeholder="e.g. Lamprais"
-                className={inputClass}
+                className={ADMIN_FORM_INPUT_CLASS}
                 style={{ color: "var(--color-text)" }}
               />
             </div>
 
             <div>
-              <label className={labelClass} style={{ color: "var(--color-text)" }}>Description</label>
+              <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Description</label>
               <input
                 type="text"
                 value={form.description}
-                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
+                onChange={(event) => updateForm({ description: event.target.value })}
                 placeholder="Short description"
-                className={inputClass}
+                className={ADMIN_FORM_INPUT_CLASS}
                 style={{ color: "var(--color-text)" }}
               />
             </div>
 
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-[1fr_10rem] sm:items-end">
               <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>Menu Image</label>
+                <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Menu Image</label>
                 <select
                   value={form.image_key}
-                  onChange={(e) => setForm((p) => ({ ...p, image_key: e.target.value }))}
-                  className={inputClass}
+                  onChange={(event) => updateForm({ image_key: event.target.value })}
+                  className={ADMIN_FORM_INPUT_CLASS}
                   style={{ color: "var(--color-text)" }}
                 >
                   <option value="">None</option>
@@ -400,63 +323,47 @@ export default function AdminItemsPage() {
 
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:items-end">
               <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>Price ({CURRENCY})</label>
+                <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Price ({CURRENCY})</label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
                   value={form.price}
-                  onChange={(e) => setForm((p) => ({ ...p, price: e.target.value }))}
+                  onChange={(event) => updateForm({ price: event.target.value })}
                   placeholder="23.00"
-                  className={inputClass}
+                  className={ADMIN_FORM_INPUT_CLASS}
                   style={{ color: "var(--color-text)" }}
                 />
               </div>
               <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>Sale Price (optional)</label>
+                <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Sale Price (optional)</label>
                 <input
                   type="number"
                   step="0.01"
                   min="0"
                   value={form.discounted_price}
-                  onChange={(e) => setForm((p) => ({ ...p, discounted_price: e.target.value }))}
+                  onChange={(event) => updateForm({ discounted_price: event.target.value })}
                   placeholder="Leave blank"
-                  className={inputClass}
+                  className={ADMIN_FORM_INPUT_CLASS}
                   style={{ color: "var(--color-text)" }}
                 />
               </div>
               <div>
-                <label className={labelClass} style={{ color: "var(--color-text)" }}>Min Order</label>
+                <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Min Order</label>
                 <input
                   type="number"
                   min="1"
                   step="1"
                   value={form.minimum_order_quantity}
-                  onChange={(e) => setForm((p) => ({ ...p, minimum_order_quantity: e.target.value }))}
+                  onChange={(event) => updateForm({ minimum_order_quantity: event.target.value })}
                   placeholder="1"
-                  className={inputClass}
+                  className={ADMIN_FORM_INPUT_CLASS}
                   style={{ color: "var(--color-text)" }}
                 />
               </div>
             </div>
 
-            <div className="flex gap-3 justify-end pt-2">
-              <button
-                onClick={() => setShowModal(false)}
-                className="px-4 py-2.5 rounded-xl text-sm font-medium"
-                style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSave}
-                disabled={saving}
-                className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-60"
-                style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-              >
-                {saving ? "Saving..." : "Save"}
-              </button>
-            </div>
+            <AdminModalActions saving={saving} onCancel={() => updateState({ showModal: false })} onSave={handleSave} />
           </div>
         </div>
       )}
