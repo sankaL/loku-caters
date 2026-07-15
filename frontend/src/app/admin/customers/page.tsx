@@ -1,14 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, type CSSProperties, type Dispatch, type FormEvent, type RefObject, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
 import Modal from "@/components/ui/Modal";
 import { AdminCrudContent, AdminSelectableTable } from "@/components/admin/AdminCrudParts";
+import AdminToast from "@/components/admin/AdminToast";
 import { API_URL, fetchEventConfig, type EventConfig } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import { postAdminBulkBatches, removeSelectedIds, toggleSelectedId } from "@/lib/adminBulk";
 import type { Customer } from "@/lib/customers";
+import { useObjectState } from "@/hooks/useObjectState";
+import { usePageSelection } from "@/hooks/usePageSelection";
+import { useAdminToast } from "@/hooks/useAdminToast";
 
 const EVENT_REMINDER_SEND_INTERVAL_MS = 500;
 const EVENT_REMINDER_RETRY_BACKOFF_MS = [1000, 2000];
@@ -285,45 +289,30 @@ function CustomersTable({
   );
 }
 
-export default function AdminCustomersPage() {
-  const router = useRouter();
-  const headerCheckboxRef = useRef<HTMLInputElement | null>(null);
-  const modalHeaderCheckboxRef = useRef<HTMLInputElement | null>(null);
+type AdminToastHandler = ReturnType<typeof useAdminToast>["showToast"];
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [activeEventConfig, setActiveEventConfig] = useState<EventConfig | null>(null);
-  const [activeEventLoading, setActiveEventLoading] = useState(true);
+function filterCustomers(customers: Customer[], search: string, pickupLocation: string): Customer[] {
+  const normalizedSearch = search.trim().toLowerCase();
+  return customers.filter((customer) => {
+    const matchesSearch = !normalizedSearch || [
+      customer.name,
+      customer.email,
+      customer.phone_number ?? "",
+      ...(customer.pickup_locations || []),
+    ].some((value) => value.toLowerCase().includes(normalizedSearch));
+    const matchesPickupLocation = pickupLocation === "all"
+      || (customer.pickup_locations || []).includes(pickupLocation);
+    return matchesSearch && matchesPickupLocation;
+  });
+}
 
-  const [search, setSearch] = useState("");
-  const [pickupLocation, setPickupLocation] = useState("all");
-  const [page, setPage] = useState(1);
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-
-  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
-  const [showBulkDeleteModal, setShowBulkDeleteModal] = useState(false);
-  const [bulkDeleting, setBulkDeleting] = useState(false);
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
-  const [editName, setEditName] = useState("");
-  const [editEmail, setEditEmail] = useState("");
-  const [editPhoneNumber, setEditPhoneNumber] = useState("");
-  const [savingCustomer, setSavingCustomer] = useState(false);
-  const [editError, setEditError] = useState<string | null>(null);
-
-  const [showEventReminderModal, setShowEventReminderModal] = useState(false);
-  const [showEventReminderConfirm, setShowEventReminderConfirm] = useState(false);
-  const [eventReminderSearch, setEventReminderSearch] = useState("");
-  const [eventReminderPickupLocation, setEventReminderPickupLocation] = useState("all");
-  const [eventReminderSelectedIds, setEventReminderSelectedIds] = useState<Set<string>>(new Set());
-  const [eventReminderLocationIds, setEventReminderLocationIds] = useState<Set<string>>(new Set());
-  const [eventReminderItemIds, setEventReminderItemIds] = useState<Set<string>>(new Set());
-  const [eventReminderRun, setEventReminderRun] = useState<EventReminderRunState>(EMPTY_EVENT_REMINDER_RUN);
-
-  const showToast = useCallback((message: string, type: "success" | "error") => {
-    setToast({ message, type });
-    setTimeout(() => setToast(null), 4000);
-  }, []);
+function useCustomerResources(router: ReturnType<typeof useRouter>, showToast: AdminToastHandler) {
+  const [resource, setResource] = useObjectState({
+    customers: [] as Customer[],
+    loading: true,
+    activeEventConfig: null as EventConfig | null,
+    activeEventLoading: true,
+  });
 
   const loadCustomers = useCallback(async () => {
     try {
@@ -332,43 +321,50 @@ export default function AdminCustomersPage() {
         router.push("/admin/login");
         return;
       }
-
-      const res = await fetch(`${API_URL}/api/admin/customers`, {
+      const response = await fetch(`${API_URL}/api/admin/customers`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (res.status === 401) {
+      if (response.status === 401) {
         router.push("/admin/login");
         return;
       }
-      if (!res.ok) {
-        throw new Error(await getApiErrorMessage(res, "Failed to load customers"));
+      if (!response.ok) {
+        throw new Error(await getApiErrorMessage(response, "Failed to load customers"));
       }
-
-      setCustomers(await res.json());
-    } catch (err: unknown) {
-      showToast(err instanceof Error ? err.message : "Failed to load customers", "error");
+      setResource("customers", await response.json());
+    } catch (error: unknown) {
+      showToast(error instanceof Error ? error.message : "Failed to load customers", "error");
     } finally {
-      setLoading(false);
+      setResource("loading", false);
     }
-  }, [router, showToast]);
+  }, [router, setResource, showToast]);
 
   const loadActiveEventConfig = useCallback(async () => {
     try {
-      const config = await fetchEventConfig();
-      setActiveEventConfig(config);
-    } catch (err: unknown) {
-      setActiveEventConfig(null);
-      showToast(err instanceof Error ? err.message : "Failed to load active event", "error");
+      setResource("activeEventConfig", await fetchEventConfig());
+    } catch (error: unknown) {
+      setResource("activeEventConfig", null);
+      showToast(error instanceof Error ? error.message : "Failed to load active event", "error");
     } finally {
-      setActiveEventLoading(false);
+      setResource("activeEventLoading", false);
     }
-  }, [showToast]);
+  }, [setResource, showToast]);
 
   useEffect(() => {
-    loadCustomers();
-    loadActiveEventConfig();
-  }, [loadCustomers, loadActiveEventConfig]);
+    void loadCustomers();
+    void loadActiveEventConfig();
+  }, [loadActiveEventConfig, loadCustomers]);
+
+  const setCustomers: Dispatch<SetStateAction<Customer[]>> = (value) => setResource("customers", value);
+  return { ...resource, setCustomers, loadCustomers };
+}
+
+function useCustomerFilters(customers: Customer[]) {
+  const [filters, setFilter] = useObjectState({ search: "", pickupLocation: "all", page: 1 });
+  const { search, pickupLocation, page } = filters;
+  const setSearch = (value: string) => setFilter("search", value);
+  const setPickupLocation = (value: string) => setFilter("pickupLocation", value);
+  const setPage: Dispatch<SetStateAction<number>> = (value) => setFilter("page", value);
 
   const pickupLocationOptions = useMemo(() => {
     const values = new Set<string>();
@@ -380,27 +376,14 @@ export default function AdminCustomersPage() {
     return Array.from(values).sort((a, b) => a.localeCompare(b));
   }, [customers]);
 
-  const filteredCustomers = useMemo(() => {
-    const normalizedSearch = search.trim().toLowerCase();
-
-    return customers.filter((customer) => {
-      const matchesSearch = !normalizedSearch || [
-        customer.name,
-        customer.email,
-        customer.phone_number ?? "",
-        ...(customer.pickup_locations || []),
-      ].some((value) => value.toLowerCase().includes(normalizedSearch));
-
-      const matchesPickupLocation = pickupLocation === "all"
-        || (customer.pickup_locations || []).includes(pickupLocation);
-
-      return matchesSearch && matchesPickupLocation;
-    });
-  }, [customers, pickupLocation, search]);
+  const filteredCustomers = useMemo(
+    () => filterCustomers(customers, search, pickupLocation),
+    [customers, pickupLocation, search],
+  );
 
   useEffect(() => {
-    setPage(1);
-  }, [pickupLocation, search]);
+    setFilter("page", 1);
+  }, [pickupLocation, search, setFilter]);
 
   const totalPages = Math.max(1, Math.ceil(filteredCustomers.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -408,51 +391,78 @@ export default function AdminCustomersPage() {
   const pageEnd = filteredCustomers.length === 0 ? 0 : Math.min(currentPage * PAGE_SIZE, filteredCustomers.length);
 
   useEffect(() => {
-    setPage((current) => {
-      const next = Math.min(Math.max(current, 1), totalPages);
-      return next;
-    });
-  }, [totalPages]);
+    setFilter("page", (current) => Math.min(Math.max(current, 1), totalPages));
+  }, [setFilter, totalPages]);
 
   const visibleCustomers = useMemo(() => {
     const start = (currentPage - 1) * PAGE_SIZE;
     return filteredCustomers.slice(start, start + PAGE_SIZE);
   }, [currentPage, filteredCustomers]);
 
+  return {
+    search, setSearch, pickupLocation, setPickupLocation, setPage,
+    pickupLocationOptions, filteredCustomers, visibleCustomers,
+    totalPages, currentPage, pageStart, pageEnd,
+  };
+}
+
+function useVisibleCustomerSelection(visibleCustomers: Customer[], filteredCustomers: Customer[]) {
+  const selection = usePageSelection(visibleCustomers, null);
+  const { setSelectedIds } = selection;
   useEffect(() => {
-    setSelectedIds((prev) => {
-      const next = new Set<string>();
-      const visibleIds = new Set(filteredCustomers.map((customer) => customer.id));
-      for (const id of prev) {
-        if (visibleIds.has(id)) next.add(id);
-      }
-      return next;
+    setSelectedIds((previous) => {
+      const filteredIds = new Set(filteredCustomers.map((customer) => customer.id));
+      return new Set(Array.from(previous).filter((id) => filteredIds.has(id)));
     });
-  }, [filteredCustomers]);
+  }, [filteredCustomers, setSelectedIds]);
+  return selection;
+}
 
-  const allVisibleSelected = visibleCustomers.length > 0 && visibleCustomers.every((customer) => selectedIds.has(customer.id));
-  const someVisibleSelected = visibleCustomers.some((customer) => selectedIds.has(customer.id));
+function useReminderCustomerSelection(customers: Customer[], search: string, pickupLocation: string) {
+  const filteredCustomers = useMemo(
+    () => filterCustomers(customers, search, pickupLocation),
+    [customers, pickupLocation, search],
+  );
+  return { filteredCustomers, selection: usePageSelection(filteredCustomers, null) };
+}
 
-  useEffect(() => {
-    if (!headerCheckboxRef.current) return;
-    headerCheckboxRef.current.indeterminate = !allVisibleSelected && someVisibleSelected;
-  }, [allVisibleSelected, someVisibleSelected]);
+function useCustomerPageModel() {
+  const router = useRouter();
+  const { toast, showToast } = useAdminToast();
+  const resources = useCustomerResources(router, showToast);
+  const customerFilters = useCustomerFilters(resources.customers);
+  const [bulkState, setBulkState] = useObjectState({ showBulkDeleteModal: false, bulkDeleting: false });
+  const [editState, setEditState] = useObjectState({ showEditModal: false, editingCustomer: null as Customer | null, editName: "", editEmail: "", editPhoneNumber: "", savingCustomer: false, editError: null as string | null });
+  const [reminderState, setReminderState] = useObjectState({ showEventReminderModal: false, showEventReminderConfirm: false, eventReminderSearch: "", eventReminderPickupLocation: "all", eventReminderLocationIds: new Set<string>(), eventReminderItemIds: new Set<string>(), eventReminderRun: EMPTY_EVENT_REMINDER_RUN });
 
-  function toggleSelectAll() {
-    setSelectedIds((prev) => {
-      const next = new Set(prev);
-      if (allVisibleSelected) {
-        for (const customer of visibleCustomers) next.delete(customer.id);
-      } else {
-        for (const customer of visibleCustomers) next.add(customer.id);
-      }
-      return next;
-    });
-  }
+  const { customers, loading, activeEventConfig, activeEventLoading, setCustomers, loadCustomers } = resources;
+  const {
+    search, setSearch, pickupLocation, setPickupLocation, setPage,
+    pickupLocationOptions, filteredCustomers, visibleCustomers,
+    totalPages, currentPage, pageStart, pageEnd,
+  } = customerFilters;
+  const { showBulkDeleteModal, bulkDeleting } = bulkState;
+  const { showEditModal, editingCustomer, editName, editEmail, editPhoneNumber, savingCustomer, editError } = editState;
+  const { showEventReminderModal, showEventReminderConfirm, eventReminderSearch, eventReminderPickupLocation, eventReminderLocationIds, eventReminderItemIds, eventReminderRun } = reminderState;
+  const setShowBulkDeleteModal = (value: boolean) => setBulkState("showBulkDeleteModal", value);
+  const setBulkDeleting = (value: boolean) => setBulkState("bulkDeleting", value);
+  const setShowEditModal = (value: boolean) => setEditState("showEditModal", value);
+  const setEditingCustomer = (value: Customer | null) => setEditState("editingCustomer", value);
+  const setEditName = (value: string) => setEditState("editName", value);
+  const setEditEmail = (value: string) => setEditState("editEmail", value);
+  const setEditPhoneNumber = (value: string) => setEditState("editPhoneNumber", value);
+  const setSavingCustomer = (value: boolean) => setEditState("savingCustomer", value);
+  const setEditError = (value: string | null) => setEditState("editError", value);
+  const setShowEventReminderModal = (value: boolean) => setReminderState("showEventReminderModal", value);
+  const setShowEventReminderConfirm = (value: boolean) => setReminderState("showEventReminderConfirm", value);
+  const setEventReminderSearch = (value: string) => setReminderState("eventReminderSearch", value);
+  const setEventReminderPickupLocation = (value: string) => setReminderState("eventReminderPickupLocation", value);
+  const setEventReminderLocationIds: Dispatch<SetStateAction<Set<string>>> = (value) => setReminderState("eventReminderLocationIds", value);
+  const setEventReminderItemIds: Dispatch<SetStateAction<Set<string>>> = (value) => setReminderState("eventReminderItemIds", value);
+  const setEventReminderRun: Dispatch<SetStateAction<EventReminderRunState>> = (value) => setReminderState("eventReminderRun", value);
 
-  function toggleSelect(id: string) {
-    setSelectedIds((prev) => toggleSelectedId(prev, id));
-  }
+  const customerSelection = useVisibleCustomerSelection(visibleCustomers, filteredCustomers);
+  const { selectedIds, setSelectedIds, headerCheckboxRef, allOnPageSelected: allVisibleSelected, toggleAll: toggleSelectAll, toggleOne: toggleSelect } = customerSelection;
 
   async function handleBulkDelete() {
     const ids = Array.from(selectedIds);
@@ -579,36 +589,12 @@ export default function AdminCustomersPage() {
     return null;
   }, [activeEventConfig, activeEventItems.length, activeEventLoading, activeEventLocations.length]);
 
-  const filteredEventReminderCustomers = useMemo(() => {
-    const normalizedSearch = eventReminderSearch.trim().toLowerCase();
-
-    return customers.filter((customer) => {
-      const matchesSearch = !normalizedSearch || [
-        customer.name,
-        customer.email,
-        customer.phone_number ?? "",
-        ...(customer.pickup_locations || []),
-      ].some((value) => value.toLowerCase().includes(normalizedSearch));
-
-      const matchesPickupLocation = eventReminderPickupLocation === "all"
-        || (customer.pickup_locations || []).includes(eventReminderPickupLocation);
-
-      return matchesSearch && matchesPickupLocation;
-    });
-  }, [customers, eventReminderPickupLocation, eventReminderSearch]);
-
-  const allVisibleEventReminderSelected = filteredEventReminderCustomers.length > 0
-    && filteredEventReminderCustomers.every((customer) => eventReminderSelectedIds.has(customer.id));
-  const someVisibleEventReminderSelected = filteredEventReminderCustomers.some((customer) => eventReminderSelectedIds.has(customer.id));
-
-  useEffect(() => {
-    if (!modalHeaderCheckboxRef.current) return;
-    modalHeaderCheckboxRef.current.indeterminate = !allVisibleEventReminderSelected && someVisibleEventReminderSelected;
-  }, [allVisibleEventReminderSelected, someVisibleEventReminderSelected]);
-
-  function toggleEventReminderCustomer(id: string) {
-    setEventReminderSelectedIds((prev) => toggleSelectedId(prev, id));
-  }
+  const { filteredCustomers: filteredEventReminderCustomers, selection: reminderSelection } = useReminderCustomerSelection(
+    customers,
+    eventReminderSearch,
+    eventReminderPickupLocation,
+  );
+  const { selectedIds: eventReminderSelectedIds, setSelectedIds: setEventReminderSelectedIds, headerCheckboxRef: modalHeaderCheckboxRef, allOnPageSelected: allVisibleEventReminderSelected, toggleOne: toggleEventReminderCustomer } = reminderSelection;
 
   function selectAllVisibleEventReminderCustomers() {
     setEventReminderSelectedIds((prev) => {
@@ -871,20 +857,52 @@ export default function AdminCustomersPage() {
 
   const failedEventReminderItems = eventReminderRun.items.filter((item) => item.status === "failed");
 
+  return {
+    toast, eventReminderDisabledReason, openEventReminderModal,
+    search, setSearch, pickupLocation, setPickupLocation, pickupLocationOptions,
+    selectedIds, setSelectedIds, setShowBulkDeleteModal,
+    btnPrimary, btnBase, btnDanger, btnIcon,
+    loading, filteredCustomers, visibleCustomers, allVisibleSelected,
+    headerCheckboxRef, toggleSelectAll, toggleSelect, openEditModal,
+    pageStart, pageEnd, currentPage, totalPages, setPage,
+    showBulkDeleteModal, bulkDeleting, handleBulkDelete,
+    showEditModal, closeEditModal, editingCustomer, savingCustomer,
+    handleSaveCustomer, editError, editName, setEditName, editEmail,
+    setEditEmail, editPhoneNumber, setEditPhoneNumber,
+    showEventReminderModal, closeEventReminderModal, eventReminderRun,
+    failedEventReminderItems, handleRetryFailedEventReminders,
+    eventReminderLoading, openEventReminderConfirm,
+    eventReminderActionDisabled, eventReminderSelectedIds,
+    eventReminderProgressPercent, eventReminderSearch,
+    setEventReminderSearch, eventReminderPickupLocation,
+    setEventReminderPickupLocation, filteredEventReminderCustomers,
+    selectAllVisibleEventReminderCustomers,
+    unselectAllVisibleEventReminderCustomers, modalHeaderCheckboxRef,
+    allVisibleEventReminderSelected, toggleEventReminderCustomer,
+    activeEventDate, activeEventLocations, eventReminderLocationIds,
+    toggleLocationSelection, activeEventItems, eventReminderItemIds,
+    toggleItemSelection, showEventReminderConfirm,
+    closeEventReminderConfirm, setShowEventReminderConfirm,
+    setShowEventReminderModal, handleSendEventReminders,
+  };
+}
+
+type CustomerPageModel = ReturnType<typeof useCustomerPageModel>;
+
+function CustomersPageView({ model }: { model: CustomerPageModel }) {
+  const {
+    pageStart, pageEnd, currentPage, totalPages, setPage,
+    headerCheckboxRef, allVisibleSelected, visibleCustomers, filteredCustomers,
+    toggleSelectAll, toggleSelect, openEditModal, loading,
+    btnIcon, btnDanger, btnBase, btnPrimary,
+    selectedIds, setSelectedIds, setShowBulkDeleteModal,
+    pickupLocationOptions, pickupLocation, setPickupLocation, search, setSearch,
+    openEventReminderModal, eventReminderDisabledReason, toast,
+  } = model;
+
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      {toast && (
-        <div
-          className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
-          style={{
-            background: toast.type === "success" ? "var(--color-success-bg)" : "var(--color-error-bg)",
-            color: toast.type === "success" ? "var(--color-success-text)" : "var(--color-error-text)",
-            border: `1px solid ${toast.type === "success" ? "var(--color-success-border)" : "var(--color-error-border)"}`,
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
 
       <div className="mb-8 flex flex-col gap-4">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -1025,6 +1043,29 @@ export default function AdminCustomersPage() {
         </div>
       )}
 
+      <CustomerDialogs model={model} />
+
+    </div>
+  );
+}
+
+function CustomerDialogs({ model }: { model: CustomerPageModel }) {
+  return (
+    <>
+      <CustomerBulkDeleteDialog model={model} />
+      <CustomerEditDialog model={model} />
+      <EventReminderDialog model={model} />
+      <EventReminderConfirmDialog model={model} />
+    </>
+  );
+}
+
+function CustomerBulkDeleteDialog({ model }: { model: CustomerPageModel }) {
+  const {
+    showBulkDeleteModal, bulkDeleting, setShowBulkDeleteModal,
+    selectedIds, btnBase, btnDanger, handleBulkDelete,
+  } = model;
+  return (
       <Modal
         isOpen={showBulkDeleteModal}
         onClose={() => !bulkDeleting && setShowBulkDeleteModal(false)}
@@ -1043,7 +1084,17 @@ export default function AdminCustomersPage() {
       >
         {selectedIds.size} customer record{selectedIds.size === 1 ? "" : "s"} will be permanently deleted from the customer list. Orders will not be changed.
       </Modal>
+  );
+}
 
+function CustomerEditDialog({ model }: { model: CustomerPageModel }) {
+  const {
+    showEditModal, closeEditModal, editingCustomer, btnBase,
+    savingCustomer, btnPrimary, handleSaveCustomer, editError,
+    editName, setEditName, editEmail, setEditEmail,
+    editPhoneNumber, setEditPhoneNumber,
+  } = model;
+  return (
       <Modal
         isOpen={showEditModal}
         onClose={closeEditModal}
@@ -1170,13 +1221,34 @@ export default function AdminCustomersPage() {
           </div>
         </form>
       </Modal>
+  );
+}
 
+function EventReminderDialog({ model }: { model: CustomerPageModel }) {
+  const { showEventReminderModal, closeEventReminderModal, eventReminderRun } = model;
+  return (
       <Modal
         isOpen={showEventReminderModal}
         onClose={closeEventReminderModal}
         title="Event Reminder"
         size="xl"
-        actions={
+        actions={<EventReminderDialogActions model={model} />}
+      >
+        {eventReminderRun.total > 0
+          ? <EventReminderProgress model={model} />
+          : <EventReminderComposer model={model} />}
+      </Modal>
+  );
+}
+
+function EventReminderDialogActions({ model }: { model: CustomerPageModel }) {
+  const {
+    eventReminderRun, failedEventReminderItems,
+    handleRetryFailedEventReminders, eventReminderLoading, btnBase,
+    btnPrimary, closeEventReminderModal, openEventReminderConfirm,
+    eventReminderActionDisabled, eventReminderSelectedIds,
+  } = model;
+  return (
           eventReminderRun.total > 0 ? (
             <>
               {failedEventReminderItems.length > 0 && (
@@ -1214,9 +1286,12 @@ export default function AdminCustomersPage() {
               </button>
             </>
           )
-        }
-      >
-        {eventReminderRun.total > 0 ? (
+  );
+}
+
+function EventReminderProgress({ model }: { model: CustomerPageModel }) {
+  const { eventReminderRun, eventReminderProgressPercent } = model;
+  return (
           <div>
             <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
               Progress updates appear here while reminder emails are sent one at a time through Resend at a maximum rate of two emails per second.
@@ -1331,7 +1406,22 @@ export default function AdminCustomersPage() {
               })}
             </div>
           </div>
-        ) : (
+  );
+}
+
+function EventReminderComposer({ model }: { model: CustomerPageModel }) {
+  const {
+    eventReminderSearch, setEventReminderSearch, eventReminderPickupLocation,
+    setEventReminderPickupLocation, pickupLocationOptions,
+    filteredEventReminderCustomers, eventReminderSelectedIds, btnBase,
+    selectAllVisibleEventReminderCustomers,
+    unselectAllVisibleEventReminderCustomers, modalHeaderCheckboxRef,
+    allVisibleEventReminderSelected, toggleEventReminderCustomer,
+    eventReminderDisabledReason, activeEventDate, activeEventLocations,
+    eventReminderLocationIds, toggleLocationSelection, activeEventItems,
+    eventReminderItemIds, toggleItemSelection,
+  } = model;
+  return (
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.9fr)]">
             <div style={{ minWidth: 0 }}>
               <p className="text-sm mb-4" style={{ color: "var(--color-muted)" }}>
@@ -1585,10 +1675,18 @@ export default function AdminCustomersPage() {
               </div>
             </div>
           </div>
-        )}
-      </Modal>
+  );
+}
 
-      {/* Event Reminder Confirmation Modal */}
+
+function EventReminderConfirmDialog({ model }: { model: CustomerPageModel }) {
+  const {
+    showEventReminderConfirm, closeEventReminderConfirm, btnBase,
+    setShowEventReminderConfirm, setShowEventReminderModal,
+    handleSendEventReminders, eventReminderLoading, btnPrimary,
+    eventReminderSelectedIds,
+  } = model;
+  return (
       <Modal
         isOpen={showEventReminderConfirm}
         onClose={closeEventReminderConfirm}
@@ -1619,6 +1717,10 @@ export default function AdminCustomersPage() {
           Send event reminder emails to <span className="font-semibold" style={{ color: "var(--color-text)" }}>{eventReminderSelectedIds.size} customer{eventReminderSelectedIds.size !== 1 ? "s" : ""}</span>?
         </p>
       </Modal>
-    </div>
   );
+}
+
+
+export default function AdminCustomersPage() {
+  return <CustomersPageView model={useCustomerPageModel()} />;
 }
