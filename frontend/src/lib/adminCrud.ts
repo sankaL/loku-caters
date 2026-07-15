@@ -31,6 +31,16 @@ async function deleteAdminResource(resourcePath: string, id: string): Promise<bo
 
 type AdminNotifier = (message: string, type: "success" | "error") => void;
 
+export async function loadAdminResource<T>(resourcePath: string, failureMessage: string): Promise<T | null> {
+  const token = await getAdminToken();
+  if (!token) return null;
+  const response = await fetch(`${API_URL}${resourcePath}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!response.ok) throw new Error(await getApiErrorMessage(response, failureMessage));
+  return response.json() as Promise<T>;
+}
+
 export async function runAdminSaveAction(options: {
   resourcePath: string;
   id: string | null;

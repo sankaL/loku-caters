@@ -18,6 +18,7 @@ import {
 import { API_URL } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
+import { loadAdminResource } from "@/lib/adminCrud";
 import Modal from "@/components/ui/Modal";
 import SearchableSelect from "@/components/ui/SearchableSelect";
 import {
@@ -121,13 +122,8 @@ export default function EventPlanningPage() {
   }, [includeArchived]);
 
   const loadEvents = useCallback(async () => {
-    const token = await getAdminToken();
-    if (!token) return;
-    const res = await fetch(`${API_URL}/api/admin/events`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) throw new Error(await getApiErrorMessage(res, "Failed to load events"));
-    setEvents((await res.json()) as AdminEventSummary[]);
+    const events = await loadAdminResource<AdminEventSummary[]>("/api/admin/events", "Failed to load events");
+    if (events) setEvents(events);
   }, []);
 
   useEffect(() => {
