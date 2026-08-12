@@ -1,4 +1,5 @@
 export interface AdminToastMessage {
+  id?: number;
   message: string;
   type: "success" | "error";
 }
@@ -8,7 +9,11 @@ export default function AdminToast({ toast }: { toast: AdminToastMessage | null 
   const success = toast.type === "success";
   return (
     <div
-      className="fixed right-6 top-6 z-50 rounded-2xl px-5 py-3 text-sm font-semibold shadow-xl"
+      key={toast.id ?? `${toast.type}-${toast.message}`}
+      role={success ? "status" : "alert"}
+      aria-live={success ? "polite" : "assertive"}
+      aria-atomic="true"
+      className="admin-toast fixed left-4 right-4 top-4 z-[300] rounded-2xl px-5 py-3 text-sm font-semibold shadow-xl sm:left-auto sm:right-6 sm:top-6 sm:max-w-md"
       style={{
         background: success ? "var(--color-success-bg)" : "var(--color-error-bg)",
         color: success ? "var(--color-success-text)" : "var(--color-error-text)",

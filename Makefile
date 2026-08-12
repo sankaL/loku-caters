@@ -18,6 +18,9 @@ LOCAL_DB_URL   = postgresql://$(LOCAL_DB_USER):$(LOCAL_DB_PASS)@localhost:$(LOCA
 LOCAL_BACKEND_PORT = 8001
 LOCAL_FRONTEND_PORT = 3000
 
+# Prefer the project virtual environment when it exists.
+PYTHON ?= $(if $(wildcard $(CURDIR)/.venv/bin/python),$(CURDIR)/.venv/bin/python,python3)
+
 # Pull real Resend credentials from the root .env so emails still go through
 # Resend's actual service (read-only, nothing is written back)
 RESEND_API_KEY  ?= $(shell grep -m1 '^RESEND_API_KEY=' .env 2>/dev/null | cut -d= -f2-)
@@ -61,7 +64,7 @@ sync-config:
 restart-backend:
 	-lsof -ti :8000 | xargs kill -9 2>/dev/null
 	sleep 1
-	cd backend && python3 -m uvicorn main:app --reload --port 8000 &
+	cd backend && $(PYTHON) -m uvicorn main:app --reload --port 8000 &
 	@echo "Backend restarting on http://localhost:8000"
 
 ## Sync config then restart backend (production .env)
@@ -75,7 +78,7 @@ dev: sync-config db-up db-migrate db-seed-if-empty
 	@echo "  Backend logs: /tmp/loku-backend.log"
 	@echo "  Admin auth: disabled for local development"
 	@echo ""
-	@(cd backend; $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
+	@(cd backend; $(BACKEND_DEV_ENV) $(PYTHON) -m uvicorn main:app \
 	    --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT) > /tmp/loku-backend.log 2>&1 \
 	    & echo $$! > /tmp/loku-backend.pid)
 	@attempts=0; until curl -fsS http://127.0.0.1:$(LOCAL_BACKEND_PORT)/api/health >/dev/null 2>&1; do \
@@ -102,7 +105,7 @@ dev-local: sync-config db-up db-migrate db-seed
 	@echo "  Backend logs: /tmp/loku-backend.log"
 	@echo "  Admin auth: disabled for local development"
 	@echo ""
-	@(cd backend; $(BACKEND_DEV_ENV) python3 -m uvicorn main:app \
+	@(cd backend; $(BACKEND_DEV_ENV) $(PYTHON) -m uvicorn main:app \
 	    --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT) > /tmp/loku-backend.log 2>&1 \
 	    & echo $$! > /tmp/loku-backend.pid)
 	@attempts=0; until curl -fsS http://127.0.0.1:$(LOCAL_BACKEND_PORT)/api/health >/dev/null 2>&1; do \
@@ -117,7 +120,7 @@ dev-local: sync-config db-up db-migrate db-seed
 
 ## Start just the backend with local DB settings (foreground, with reload)
 dev-backend: sync-config stop-backend-port
-	@cd backend && $(BACKEND_DEV_ENV) python3 -m uvicorn main:app --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT)
+	@cd backend && $(BACKEND_DEV_ENV) $(PYTHON) -m uvicorn main:app --reload --host 127.0.0.1 --port $(LOCAL_BACKEND_PORT)
 
 ## Start just the frontend
 dev-frontend: stop-frontend-port
@@ -170,15 +173,15 @@ db-api-roles: db-up
 	    -c "DO \$$$$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN CREATE ROLE anon NOLOGIN; END IF; IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN CREATE ROLE authenticated NOLOGIN; END IF; END \$$$$;" >/dev/null
 
 db-migrate: sync-config db-api-roles
-	@cd backend && $(BACKEND_DEV_ENV) python3 -m alembic upgrade head
+	@cd backend && $(BACKEND_DEV_ENV) $(PYTHON) -m alembic upgrade head
 
 ## Seed the local DB with comprehensive test data (removes existing orders first)
 db-seed:
-	@cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py
+	@cd backend && $(BACKEND_DEV_ENV) $(PYTHON) seed_comprehensive.py
 
 ## Seed the local DB with comprehensive test data only if it is empty
 db-seed-if-empty:
-	@cd backend && $(BACKEND_DEV_ENV) python3 seed_comprehensive.py --only-if-empty
+	@cd backend && $(BACKEND_DEV_ENV) $(PYTHON) seed_comprehensive.py --only-if-empty
 
 ## Drop all tables, re-run migrations, and seed fresh test data
 db-reset: db-up
@@ -192,20 +195,20 @@ db-reset: db-up
 
 ## Run backend tests against the migrated local database
 test-backend: sync-config db-up db-migrate
-	@cd backend && $(BACKEND_DEV_ENV) python3 -m pytest -q
+	@cd backend && $(BACKEND_DEV_ENV) $(PYTHON) -m pytest -q
 
 ## Run backend lint, bytecode compilation, and unit tests
 quality-backend:
-	@cd backend && python3 -m ruff check .
-	@cd backend && python3 -m ruff format --check .
-	@cd backend && python3 -m compileall -q .
-	@cd backend && python3 -m pytest -q
+	@cd backend && $(PYTHON) -m ruff check .
+	@cd backend && $(PYTHON) -m ruff format --check .
+	@cd backend && $(PYTHON) -m compileall -q .
+	@cd backend && $(PYTHON) -m pytest -q
 
 ## Scan production backend code and Python dependencies for security issues
 audit-backend:
-	@cd backend && python3 -m bandit -q -r . \
+	@cd backend && $(PYTHON) -m bandit -q -r . \
 		-x ./tests,./alembic,./seed.py,./seed_dev.py,./seed_comprehensive.py,./backfill_customers.py
-	@cd backend && python3 -m pip_audit -r requirements.txt
+	@cd backend && $(PYTHON) -m pip_audit -r requirements.txt
 
 # ============================================================================
 # Process management

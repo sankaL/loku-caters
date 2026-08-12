@@ -564,6 +564,19 @@ class EventUpdate(EventBase):
     pass
 
 
+class EventDuplicateRequest(BaseModel):
+    name: str
+    event_date: str
+
+    @field_validator("name", "event_date")
+    @classmethod
+    def required_text_fields(cls, v: str) -> str:
+        stripped = v.strip()
+        if not stripped:
+            raise ValueError("Field cannot be empty")
+        return stripped
+
+
 FEEDBACK_REASONS = {
     "price_too_high",
     "location_not_convenient",

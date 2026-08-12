@@ -15,6 +15,10 @@ import {
 } from "@/components/admin/invoices/InvoicesPageView";
 import { InvoiceSummary } from "@/lib/invoices";
 import { downloadResponseBlob } from "@/lib/browserDownload";
+import GroupedMultiFilterDropdown, {
+  parseMultiFilter,
+  serializeMultiFilter,
+} from "@/components/admin/GroupedMultiFilterDropdown";
 
 interface AdminEvent {
   id: number;
@@ -79,11 +83,12 @@ function filterInvoices(
   filters: { bundle: string; event: string; payment: string; search: string },
 ): InvoiceSummary[] {
   const query = filters.search.trim().toLowerCase();
+  const selectedEvents = new Set(parseMultiFilter(filters.event));
+  const selectedPayments = new Set(parseMultiFilter(filters.payment));
   return invoices.filter((invoice) => {
     if (filters.bundle && invoice.source_bundle_id !== filters.bundle) return false;
-    if (filters.event !== "all" && String(invoice.source_event_id) !== filters.event) return false;
-    if (filters.payment === "paid" && !invoice.payment.paid) return false;
-    if (filters.payment === "due" && invoice.payment.paid) return false;
+    if (selectedEvents.size > 0 && !selectedEvents.has(String(invoice.source_event_id))) return false;
+    if (selectedPayments.size > 0 && !selectedPayments.has(invoice.payment.paid ? "paid" : "due")) return false;
     if (!query) return true;
     return `${invoice.invoice_number} ${invoice.customer_name} ${invoice.customer_email ?? ""} ${invoice.order_reference ?? ""} ${invoice.event_name ?? ""}`.toLowerCase().includes(query);
   });
@@ -201,20 +206,35 @@ export default function InvoicesPage() {
         </div>
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-2">
-        <label className="relative min-w-60 flex-1">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <label className="relative min-w-[320px] flex-[1_1_720px]">
           <MagnifyingGlass size={15} style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", color: "var(--color-muted)" }} />
-          <input value={search} onChange={(event) => updateState({ search: event.target.value })} placeholder="Search invoice, customer, or order" className="w-full rounded-xl border bg-white py-2 pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-[color:var(--color-sage)]" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />
+          <input value={search} onChange={(event) => updateState({ search: event.target.value })} placeholder="Search invoice, customer, order, or event" className="h-10 w-full rounded-xl border bg-white pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-[color:var(--color-sage)]" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }} />
         </label>
-        <select value={eventFilter} onChange={(event) => updateState({ eventFilter: event.target.value })} className="rounded-xl border bg-white px-3 py-2 text-sm" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}>
-          <option value="all">All events</option>
-          {events.map((event) => <option key={event.id} value={event.id}>{event.name}</option>)}
-        </select>
-        <select value={paymentFilter} onChange={(event) => updateState({ paymentFilter: event.target.value })} className="rounded-xl border bg-white px-3 py-2 text-sm" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}>
-          <option value="all">All payments</option>
-          <option value="paid">Paid</option>
-          <option value="due">Payment due</option>
-        </select>
+        <GroupedMultiFilterDropdown
+          groups={[
+            {
+              id: "event",
+              label: "Event",
+              options: events.map((event) => ({ value: String(event.id), label: event.name })),
+            },
+            {
+              id: "payment",
+              label: "Payment",
+              options: [
+                { value: "paid", label: "Paid" },
+                { value: "due", label: "Payment due" },
+              ],
+            },
+          ]}
+          selections={{
+            event: parseMultiFilter(eventFilter),
+            payment: parseMultiFilter(paymentFilter),
+          }}
+          onChange={(groupId, values) => updateState({
+            [groupId === "event" ? "eventFilter" : "paymentFilter"]: serializeMultiFilter(values),
+          })}
+        />
       </div>
       {bundleFilter && <div className="mb-4 flex items-center justify-between gap-3 rounded-xl px-4 py-3 text-sm" style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}><span>Showing invoices linked to the selected order.</span><button onClick={clearBundleFilter} className="font-semibold underline" style={{ color: "var(--color-forest)" }}>Show all invoices</button></div>}
 

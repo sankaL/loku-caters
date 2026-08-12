@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
 import { CompactMetricCard, CompactMetricRail, CompactMetricSkeletonRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
 import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDateCell, AdminDeleteIconButton, AdminPagination, AdminRowCheckboxCell, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
+import GroupedMultiFilterDropdown, { parseMultiFilter, serializeMultiFilter } from "@/components/admin/GroupedMultiFilterDropdown";
 import AdminToast from "@/components/admin/AdminToast";
 import { usePendingStatusChange } from "@/hooks/usePendingStatusChange";
 import { useObjectState } from "@/hooks/useObjectState";
@@ -593,8 +594,48 @@ function FeedbackReasonBreakdown({ visible, metrics, activeReason, onReasonChang
 
 function FeedbackFilters({ filters, loading, resultCount, onChange, onClear }: { filters: { originFilter: string; typeFilter: string; preOrderReasonFilter: string; statusFilter: string; searchQuery: string }; loading: boolean; resultCount: number; onChange: (field: "originFilter" | "typeFilter" | "preOrderReasonFilter" | "statusFilter" | "searchQuery", value: string) => void; onClear: () => void }) {
   const hasFilters = filters.originFilter !== "all" || filters.typeFilter !== "all" || filters.preOrderReasonFilter !== "all" || filters.statusFilter !== "all" || Boolean(filters.searchQuery);
-  const selectStyle = { padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" };
-  return <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}><AdminSearchInput value={filters.searchQuery} onChange={(value) => onChange("searchQuery", value)} placeholder="Search origin, type, name, contact, message..." /><select value={filters.originFilter} onChange={(event) => onChange("originFilter", event.target.value)} style={selectStyle}><option value="all">All origins</option><option value="contact_us">Contact Us</option><option value="events_page_non_customer">Events Page (Non-customer)</option><option value="events_page_customer">Events Page (Customer)</option><option value="event_reminder_email">Event Reminder Email</option><option value="reviews_page">Reviews Page</option><option value="admin_submission">Admin Submission</option></select><select value={filters.typeFilter} onChange={(event) => onChange("typeFilter", event.target.value)} style={selectStyle}><option value="all">All types</option><option value="general_question">General Question</option><option value="feedback">Feedback</option><option value="collaboration">Collaboration</option><option value="other">Other</option></select><select value={filters.preOrderReasonFilter} onChange={(event) => onChange("preOrderReasonFilter", event.target.value)} style={selectStyle}><option value="all">All pre-order reasons</option>{PRE_ORDER_REASON_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select><select value={filters.statusFilter} onChange={(event) => onChange("statusFilter", event.target.value)} style={selectStyle}><option value="all">All statuses</option><option value="new">New</option><option value="in_progress">In Progress</option><option value="resolved">Resolved</option></select>{hasFilters && <AdminClearFiltersButton onClick={onClear} />}{!loading && <span style={{ fontSize: 13, color: "var(--color-muted)", marginLeft: "auto" }}>{resultCount} result{resultCount === 1 ? "" : "s"}</span>}</div>;
+  const groups = [
+    { id: "originFilter", label: "Origin", options: [
+      { value: "contact_us", label: "Contact Us" },
+      { value: "events_page_non_customer", label: "Events Page (Non-customer)" },
+      { value: "events_page_customer", label: "Events Page (Customer)" },
+      { value: "event_reminder_email", label: "Event Reminder Email" },
+      { value: "reviews_page", label: "Reviews Page" },
+      { value: "admin_submission", label: "Admin Submission" },
+    ] },
+    { id: "typeFilter", label: "Type", options: [
+      { value: "general_question", label: "General Question" },
+      { value: "feedback", label: "Feedback" },
+      { value: "collaboration", label: "Collaboration" },
+      { value: "other", label: "Other" },
+    ] },
+    { id: "preOrderReasonFilter", label: "Pre-order reason", options: PRE_ORDER_REASON_OPTIONS },
+    { id: "statusFilter", label: "Status", options: [
+      { value: "new", label: "New" },
+      { value: "in_progress", label: "In Progress" },
+      { value: "resolved", label: "Resolved" },
+    ] },
+  ];
+  const selections = {
+    originFilter: parseMultiFilter(filters.originFilter),
+    typeFilter: parseMultiFilter(filters.typeFilter),
+    preOrderReasonFilter: parseMultiFilter(filters.preOrderReasonFilter),
+    statusFilter: parseMultiFilter(filters.statusFilter),
+  };
+  return (
+    <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="min-w-[320px] flex-[1_1_640px]">
+        <AdminSearchInput value={filters.searchQuery} onChange={(value) => onChange("searchQuery", value)} placeholder="Search origin, type, name, contact, message..." />
+      </div>
+      <GroupedMultiFilterDropdown
+        groups={groups}
+        selections={selections}
+        onChange={(groupId, values) => onChange(groupId as "originFilter" | "typeFilter" | "preOrderReasonFilter" | "statusFilter", serializeMultiFilter(values))}
+      />
+      {hasFilters && <AdminClearFiltersButton onClick={onClear} />}
+      {!loading && <span className="ml-auto text-[13px]" style={{ color: "var(--color-muted)" }}>{resultCount} result{resultCount === 1 ? "" : "s"}</span>}
+    </div>
+  );
 }
 
 function FeedbackDetailsModal({
@@ -809,10 +850,14 @@ async function getFeedbackAuthHeader(): Promise<Record<string, string>> {
 function filterFeedbackItems(data: FeedbackResponse | null, origin: string, type: string, reason: string, status: string, search: string): FeedbackItem[] {
   if (!data) return [];
   let items = data.items;
-  if (origin !== "all") items = items.filter((item) => item.origin === origin);
-  if (type !== "all") items = items.filter((item) => item.feedback_type === type);
-  if (reason !== "all") items = items.filter((item) => item.reason === reason);
-  if (status !== "all") items = items.filter((item) => item.status === status);
+  const origins = parseMultiFilter(origin);
+  const types = parseMultiFilter(type);
+  const reasons = parseMultiFilter(reason);
+  const statuses = parseMultiFilter(status);
+  if (origins.length > 0) items = items.filter((item) => origins.includes(item.origin));
+  if (types.length > 0) items = items.filter((item) => types.includes(item.feedback_type));
+  if (reasons.length > 0) items = items.filter((item) => item.reason !== null && reasons.includes(item.reason));
+  if (statuses.length > 0) items = items.filter((item) => statuses.includes(item.status));
   return filterAdminItemsBySearch(items, search, (item) => [item.origin_label, item.feedback_type_label, item.name, item.contact, item.reason_label, item.other_details, item.message].filter(Boolean).join(" "));
 }
 
@@ -1250,7 +1295,7 @@ export default function AdminFeedbackPage() {
   // ---------------------------------------------------------------------------
 
   return (
-    <div style={{ padding: "clamp(20px, 2vw, 32px) clamp(16px, 1.25vw, 24px) 56px", maxWidth: 1200, margin: "0 auto" }}>
+    <div style={{ width: "100%", padding: "clamp(20px, 2vw, 32px) clamp(16px, 2vw, 32px) 56px" }}>
 
       {/* Header */}
       <div style={{ marginBottom: 28, display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>

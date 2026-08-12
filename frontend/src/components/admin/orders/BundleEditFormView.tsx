@@ -229,7 +229,7 @@ function ModalActions({ saving, onClose }: Pick<BundleEditFormViewProps, "saving
       <button
         type="button"
         onClick={onClose}
-        className="px-4 py-2 rounded-xl text-sm font-medium"
+        className="interactive-secondary px-4 py-2 rounded-xl text-sm font-medium"
         style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
         disabled={saving}
       >
@@ -238,7 +238,8 @@ function ModalActions({ saving, onClose }: Pick<BundleEditFormViewProps, "saving
       <button
         type="submit"
         disabled={saving}
-        className="px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
+        aria-busy={saving}
+        className="interactive-primary px-4 py-2 rounded-xl text-sm font-semibold disabled:opacity-60"
         style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
       >
         {saving ? "Saving..." : "Save Changes"}

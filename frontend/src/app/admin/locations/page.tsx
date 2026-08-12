@@ -6,6 +6,7 @@ import { getAdminToken } from "@/lib/auth";
 import AdminToast from "@/components/admin/AdminToast";
 import { useAdminToast } from "@/hooks/useAdminToast";
 import { runAdminDeleteAction, runAdminSaveAction } from "@/lib/adminCrud";
+import MultiSelectDropdown from "@/components/ui/MultiSelectDropdown";
 import {
   ADMIN_FORM_INPUT_CLASS,
   ADMIN_FORM_LABEL_CLASS,
@@ -29,6 +30,14 @@ const EMPTY_FORM = {
   time_slots: [] as string[],
 };
 
+const TIME_SLOT_OPTIONS = Array.from({ length: 12 }, (_, index) => {
+  const startHour = 8 + index;
+  const endHour = startHour + 1;
+  const formatHour = (hour: number) => `${hour > 12 ? hour - 12 : hour}:00 ${hour >= 12 ? "PM" : "AM"}`;
+  const label = `${formatHour(startHour)} - ${formatHour(endHour)}`;
+  return { value: label, label };
+});
+
 type LocationForm = typeof EMPTY_FORM;
 
 interface LocationsPageState {
@@ -37,7 +46,6 @@ interface LocationsPageState {
   showModal: boolean;
   editingId: string | null;
   form: LocationForm;
-  newSlot: string;
   saving: boolean;
 }
 
@@ -47,13 +55,12 @@ const INITIAL_STATE: LocationsPageState = {
   showModal: false,
   editingId: null,
   form: EMPTY_FORM,
-  newSlot: "",
   saving: false,
 };
 
 export default function AdminLocationsPage() {
   const [state, setState] = useState<LocationsPageState>(INITIAL_STATE);
-  const { locations, loading, showModal, editingId, form, newSlot, saving } = state;
+  const { locations, loading, showModal, editingId, form, saving } = state;
   const { toast, showToast } = useAdminToast(4000);
   const updateState = useCallback((patch: Partial<LocationsPageState>) => {
     setState((current) => ({ ...current, ...patch }));
@@ -81,26 +88,15 @@ export default function AdminLocationsPage() {
   useEffect(() => { loadLocations(); }, [loadLocations]);
 
   function openCreate() {
-    updateState({ editingId: null, form: EMPTY_FORM, newSlot: "", showModal: true });
+    updateState({ editingId: null, form: EMPTY_FORM, showModal: true });
   }
 
   function openEdit(loc: Location) {
     updateState({
       editingId: loc.id,
       form: { name: loc.name, address: loc.address, time_slots: [...loc.time_slots] },
-      newSlot: "",
       showModal: true,
     });
-  }
-
-  function addSlot() {
-    const slot = newSlot.trim();
-    if (!slot) return;
-    updateState({ form: { ...form, time_slots: [...form.time_slots, slot] }, newSlot: "" });
-  }
-
-  function removeSlot(idx: number) {
-    updateForm({ time_slots: form.time_slots.filter((_, index) => index !== idx) });
   }
 
   async function handleSave() {
@@ -208,45 +204,16 @@ export default function AdminLocationsPage() {
 
             <div>
               <label className={ADMIN_FORM_LABEL_CLASS} style={{ color: "var(--color-text)" }}>Time Slots</label>
-              <div className="flex flex-wrap gap-2 mb-2">
-                {form.time_slots.map((slot, i) => (
-                  <span
-                    key={i}
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium"
-                    style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)", color: "var(--color-text)" }}
-                  >
-                    {slot}
-                    <button
-                      onClick={() => removeSlot(i)}
-                      className="text-red-400 hover:text-red-600 transition-colors leading-none"
-                      aria-label="Remove time slot"
-                    >
-                      x
-                    </button>
-                  </span>
-                ))}
-                {form.time_slots.length === 0 && (
-                  <p className="text-xs" style={{ color: "var(--color-muted)" }}>No time slots yet.</p>
-                )}
-              </div>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={newSlot}
-                  onChange={(event) => updateState({ newSlot: event.target.value })}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSlot(); } }}
-                  placeholder="e.g. 12:00 PM - 1:00 PM"
-                  className="flex-1 px-3 py-2 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all border-[var(--color-border)] focus:ring-[var(--color-sage)] focus:border-[var(--color-sage)]"
-                  style={{ color: "var(--color-text)" }}
-                />
-                <button
-                  onClick={addSlot}
-                  className="px-3 py-2 rounded-xl text-sm font-medium transition-all"
-                  style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-                >
-                  Add
-                </button>
-              </div>
+              <MultiSelectDropdown
+                options={TIME_SLOT_OPTIONS}
+                value={form.time_slots}
+                onChange={(timeSlots) => updateForm({ time_slots: timeSlots })}
+                placeholder="Select hourly time slots"
+                selectedLabel={(count) => `${count} time slot${count === 1 ? "" : "s"} selected`}
+              />
+              <p className="mt-2 text-xs" style={{ color: "var(--color-muted)" }}>
+                Choose one or more one-hour pickup windows from 8:00 AM to 8:00 PM.
+              </p>
             </div>
 
             <AdminModalActions saving={saving} onCancel={() => updateState({ showModal: false })} onSave={handleSave} />

@@ -34,7 +34,7 @@ function FeedbackActions({
 }) {
   if (submitted) {
     return (
-      <button type="button" onClick={onClose} style={primaryButtonStyle(false)}>
+      <button type="button" onClick={onClose} className="interactive-primary" style={primaryButtonStyle(false)}>
         Close
       </button>
     );
@@ -44,11 +44,12 @@ function FeedbackActions({
       <button
         type="button"
         onClick={onClose}
+        className="interactive-secondary rounded-xl px-3 py-2"
         style={{ color: "var(--color-muted)", fontSize: "14px", fontWeight: 500, cursor: "pointer" }}
       >
         Cancel
       </button>
-      <button type="button" onClick={onSubmit} disabled={submitting} style={primaryButtonStyle(submitting)}>
+      <button type="button" onClick={onSubmit} disabled={submitting} aria-busy={submitting} className="interactive-primary" style={primaryButtonStyle(submitting)}>
         {submitting ? "Sending..." : "Send Feedback"}
       </button>
     </>
@@ -71,7 +72,7 @@ function primaryButtonStyle(disabled: boolean): CSSProperties {
 
 function FeedbackThankYou() {
   return (
-    <div style={{ textAlign: "center", padding: "8px 0 4px" }}>
+    <div role="status" aria-live="polite" aria-atomic="true" style={{ textAlign: "center", padding: "8px 0 4px" }}>
       <div style={{ display: "flex", justifyContent: "center", marginBottom: "16px" }}>
         <svg
           width="48"

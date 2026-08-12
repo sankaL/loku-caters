@@ -47,7 +47,7 @@ export default function Navigation() {
                     <Link href="/catering-request" className={linkStyle("/catering-request")}>Catering Request</Link>
                     <Link
                         href="/orders"
-                        className="bg-[color:var(--color-accent)] text-white px-5 py-2.5 rounded-full text-sm font-bold hover:bg-[color:var(--color-forest)] transition-colors duration-200 shadow-md transform hover:-translate-y-0.5"
+                        className="interactive-primary bg-[color:var(--color-accent)] text-white px-5 py-2.5 rounded-full text-sm font-bold hover:bg-[color:var(--color-forest)] shadow-md transform hover:-translate-y-0.5"
                     >
                         Order Now
                     </Link>
@@ -55,9 +55,11 @@ export default function Navigation() {
 
                 {/* Mobile Nav Toggle */}
                 <button
-                    className="md:hidden text-[color:var(--color-forest)] p-2 -mr-2"
+                    className="interactive-icon interactive-secondary -mr-2 inline-flex text-[color:var(--color-forest)] md:hidden"
                     onClick={() => setIsMenuOpen(!isMenuOpen)}
                     aria-label="Toggle menu"
+                    aria-expanded={isMenuOpen}
+                    aria-controls="public-mobile-navigation"
                 >
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         {isMenuOpen ? (
@@ -79,7 +81,7 @@ export default function Navigation() {
             {/* Mobile Nav Menu */}
             {isMenuOpen && (
                 <div className="md:hidden absolute top-20 inset-x-0 bg-[color:var(--color-cream)] border-b border-[color:var(--color-border)] shadow-lg animate-slide-up">
-                    <nav className="flex flex-col p-6 gap-6">
+                    <nav id="public-mobile-navigation" className="flex flex-col p-6 gap-6">
                         <Link href="/menu" className={linkStyle("/menu")} onClick={() => setIsMenuOpen(false)}>Menu</Link>
                         <Link href="/flyer" className={linkStyle("/flyer")} onClick={() => setIsMenuOpen(false)}>Flyers</Link>
                         <Link href="/about" className={linkStyle("/about")} onClick={() => setIsMenuOpen(false)}>About Us</Link>
@@ -88,7 +90,7 @@ export default function Navigation() {
                         <Link href="/catering-request" className={linkStyle("/catering-request")} onClick={() => setIsMenuOpen(false)}>Catering Request</Link>
                         <Link
                             href="/orders"
-                            className="bg-[color:var(--color-accent)] text-white px-5 py-3 rounded-xl text-center font-bold mt-2"
+                            className="interactive-primary bg-[color:var(--color-accent)] text-white px-5 py-3 rounded-xl text-center font-bold mt-2"
                             onClick={() => setIsMenuOpen(false)}
                         >
                             Order Now

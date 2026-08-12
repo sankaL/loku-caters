@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from html import escape
 import logging
 
@@ -22,10 +24,13 @@ def _subject_text(value) -> str:
     ]
 
 
-def _send_html_email(*, to_email: str, subject: str, html_body: str) -> None:
+def _send_html_email(
+    *, to_email: str | list[str], subject: str, html_body: str
+) -> None:
+    recipients = [to_email] if isinstance(to_email, str) else to_email
     message_payload = {
         "from": f"Loku Caters <{settings.from_email}>",
-        "to": [to_email],
+        "to": recipients,
         "subject": _subject_text(subject),
         "html": html_body,
     }
@@ -34,6 +39,206 @@ def _send_html_email(*, to_email: str, subject: str, html_body: str) -> None:
         message_payload["reply_to"] = settings.reply_to_email
 
     resend.Emails.send(message_payload)
+
+
+def _display_label(value) -> str:
+    return str(value or "").replace("_", " ").strip().title()
+
+
+def _notification_detail_rows(details: list[tuple[str, object]]) -> str:
+    rows = []
+    for label, value in details:
+        if value is None or value == "":
+            continue
+        rows.append(
+            f"""
+                <tr>
+                  <td style="padding:11px 0;border-bottom:1px solid #E7E5DF;color:#6B6B65;font-size:13px;vertical-align:top;width:36%;">{_html_text(label)}</td>
+                  <td style="padding:11px 0;border-bottom:1px solid #E7E5DF;color:#1C1C1A;font-size:14px;font-weight:600;vertical-align:top;">{_html_text(value)}</td>
+                </tr>
+"""
+        )
+    return "".join(rows)
+
+
+def _notification_message_block(label: str, message: object) -> str:
+    if message is None or message == "":
+        return ""
+    message_html = _html_text(message).replace("\n", "<br />")
+    return f"""
+              <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;border-left:4px solid #729152;border-radius:10px;margin:24px 0;">
+                <tr>
+                  <td style="padding:20px 22px;">
+                    <p style="margin:0 0 8px;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:#729152;font-weight:700;">{_html_text(label)}</p>
+                    <p style="margin:0;font-size:14px;color:#1C1C1A;line-height:1.65;">{message_html}</p>
+                  </td>
+                </tr>
+              </table>
+"""
+
+
+def _send_submission_notification(
+    *,
+    title: str,
+    eyebrow: str,
+    intro: str,
+    details: list[tuple[str, object]],
+    admin_path: str,
+    subject: str,
+    message_label: str | None = None,
+    message: object = None,
+) -> None:
+    if not settings.email_enabled:
+        logger.info("Email delivery disabled by configuration")
+        return
+
+    recipients = settings.get_notification_email_recipients()
+    if not recipients:
+        logger.info(
+            "Submission notification skipped because no recipients are configured"
+        )
+        return
+
+    admin_url = f"{settings.frontend_url.rstrip('/')}{admin_path}"
+    safe_admin_url = _html_text(admin_url)
+    detail_rows = _notification_detail_rows(details)
+    message_block = (
+        _notification_message_block(message_label, message) if message_label else ""
+    )
+    html_body = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{_html_text(title)} - Loku Caters</title>
+</head>
+<body style="margin:0;padding:0;background:#F7F5F0;font-family:'Inter',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#F7F5F0;padding:40px 12px;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(18,39,15,0.08);">
+          <tr>
+            <td style="background:#12270F;padding:34px 40px;text-align:center;">
+              <p style="margin:0;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:#729152;font-weight:700;">{_html_text(eyebrow)}</p>
+              <h1 style="margin:9px 0 0;font-size:27px;font-weight:700;color:#F7F5F0;font-family:Georgia,serif;">{_html_text(title)}</h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:38px 40px 40px;">
+              <p style="margin:0 0 24px;font-size:15px;color:#4A4A46;line-height:1.65;">{_html_text(intro)}</p>
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin:0;">
+                {detail_rows}
+              </table>
+              {message_block}
+              <table width="100%" cellpadding="0" cellspacing="0" style="margin-top:28px;">
+                <tr>
+                  <td align="center">
+                    <a href="{safe_admin_url}" style="display:inline-block;background:#729152;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;padding:13px 24px;border-radius:999px;">Open in Admin</a>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="background:#12270F;padding:22px 40px;text-align:center;">
+              <p style="margin:0;font-size:13px;color:#729152;">Loku Caters - Internal Notification</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+"""
+    _send_html_email(to_email=recipients, subject=subject, html_body=html_body)
+
+
+def send_new_order_notification(order_data: dict) -> None:
+    lines = order_data.get("lines") or order_data.get("items") or []
+    item_summary = ", ".join(
+        f"{line.get('quantity', 0)} x {line.get('item_name', '')}"
+        for line in lines
+        if isinstance(line, dict)
+    )
+    if not item_summary and order_data.get("item_name"):
+        item_summary = f"{order_data.get('quantity', 0)} x {order_data['item_name']}"
+    total = float(order_data.get("total_price", 0) or 0)
+    currency = order_data.get("currency") or CURRENCY
+    name = str(order_data.get("name") or "Customer")
+    _send_submission_notification(
+        title="New Order Received",
+        eyebrow="Order Notification",
+        intro="A new pre-order has been submitted and is ready for review.",
+        details=[
+            ("Customer", name),
+            ("Email", order_data.get("email")),
+            ("Phone", order_data.get("phone_number")),
+            ("Items", item_summary),
+            ("Total", f"{currency} {total:,.2f}"),
+            ("Pickup location", order_data.get("pickup_location")),
+            ("Pickup time", order_data.get("pickup_time_slot")),
+            (
+                "Order reference",
+                order_data.get("group_id") or order_data.get("order_id"),
+            ),
+        ],
+        admin_path="/admin/orders",
+        subject=f"New order from {_subject_text(name)}",
+    )
+
+
+def send_new_feedback_notification(feedback_data: dict) -> None:
+    name = str(feedback_data.get("name") or "Anonymous visitor")
+    rating = feedback_data.get("rating")
+    _send_submission_notification(
+        title="New Feedback Received",
+        eyebrow="Feedback Notification",
+        intro="New feedback has been submitted and is ready for review.",
+        details=[
+            ("From", name),
+            ("Contact", feedback_data.get("contact")),
+            ("Type", _display_label(feedback_data.get("feedback_type"))),
+            ("Source", _display_label(feedback_data.get("origin"))),
+            ("Reason", _display_label(feedback_data.get("reason"))),
+            ("Rating", f"{rating} / 5" if rating else None),
+            ("Order reference", feedback_data.get("order_id")),
+        ],
+        message_label="Feedback",
+        message=feedback_data.get("message") or feedback_data.get("other_details"),
+        admin_path="/admin/feedback",
+        subject=f"New feedback from {_subject_text(name)}",
+    )
+
+
+def send_new_catering_request_notification(request_data: dict) -> None:
+    name = (
+        " ".join(
+            part
+            for part in [request_data.get("first_name"), request_data.get("last_name")]
+            if part
+        )
+        or "Customer"
+    )
+    _send_submission_notification(
+        title="New Catering Request",
+        eyebrow="Catering Notification",
+        intro="A new catering inquiry has arrived and is ready for follow-up.",
+        details=[
+            ("Customer", name),
+            ("Email", request_data.get("email")),
+            ("Phone", request_data.get("phone_number")),
+            ("Event date", request_data.get("event_date")),
+            ("Event type", request_data.get("event_type")),
+            ("Guest count", request_data.get("guest_count")),
+            ("Budget", request_data.get("budget_range")),
+        ],
+        message_label="Special requests",
+        message=request_data.get("special_requests"),
+        admin_path="/admin/catering-requests",
+        subject=f"New catering request from {_subject_text(name)}",
+    )
 
 
 def _normalize_order_lines(order_data: dict) -> list[dict]:

@@ -36,6 +36,7 @@ function SearchableSelectMenu({
   if (!open) return null;
   return (
     <div
+      className="dropdown-surface"
       style={{
         position: "absolute",
         top: "calc(100% + 4px)",
@@ -59,7 +60,7 @@ function SearchableSelectMenu({
           style={{ color: "var(--color-text)" }}
         />
       </div>
-      <div style={{ maxHeight: 260, overflowY: "auto" }}>
+      <div role="listbox" style={{ maxHeight: 260, overflowY: "auto" }}>
         <SelectOptionRows options={options} value={value} emptyMessage="No matches." onSelect={onSelect} />
       </div>
     </div>

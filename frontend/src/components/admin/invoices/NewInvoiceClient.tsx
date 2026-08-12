@@ -141,7 +141,7 @@ export default function NewInvoiceClient({ bundleId }: { bundleId: string }) {
         />
         <div className="mt-5 flex flex-col items-end gap-3">
           <div className="flex max-w-md gap-3 rounded-2xl p-4 text-sm" style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}><CheckCircle size={22} weight="duotone" style={{ color: "var(--color-sage)" }} /><span>Invoice lines, pricing, payment, and customer data stay independent from the order after creation.</span></div>
-          <button disabled={creating} className="inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}><Receipt size={18} weight="bold" /> {creating ? "Creating Invoice..." : "Create Invoice"}</button>
+          <button disabled={creating} aria-busy={creating} className="interactive-primary inline-flex items-center justify-center gap-2 rounded-2xl px-6 py-3 text-sm font-semibold disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}><Receipt size={18} weight="bold" /> {creating ? "Creating Invoice..." : "Create Invoice"}</button>
         </div>
       </form>
     </div>

@@ -34,6 +34,9 @@ export function SelectButton({
       id={id}
       disabled={disabled}
       onClick={onToggle}
+      aria-expanded={open}
+      aria-haspopup="listbox"
+      className="dropdown-trigger"
       style={{
         width: "100%",
         display: "flex",
@@ -96,23 +99,17 @@ function SelectOptionRow({
     <button
       type="button"
       onClick={() => onSelect(option.value)}
+      role="option"
+      aria-selected={selected}
+      className="dropdown-option"
       style={{
         width: "100%",
         display: "block",
         padding: "10px 16px",
         textAlign: "left",
         fontSize: "14px",
-        background: selected ? "var(--color-forest)" : "transparent",
-        color: selected ? "var(--color-cream)" : "var(--color-text)",
         border: "none",
         cursor: "pointer",
-        transition: "background 0.1s",
-      }}
-      onMouseEnter={(event) => {
-        if (!selected) event.currentTarget.style.background = "var(--color-cream)";
-      }}
-      onMouseLeave={(event) => {
-        if (!selected) event.currentTarget.style.background = "transparent";
       }}
     >
       {option.label}

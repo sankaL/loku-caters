@@ -153,7 +153,7 @@ export default function ContactPage() {
                     {/* Contact Form */}
                     <div className="md:w-2/3 animate-fade-up delay-200">
                         {isSuccess ? (
-                            <div className="bg-white p-12 rounded-3xl shadow-lg border border-[color:var(--color-border)] text-center h-full flex flex-col justify-center items-center">
+                            <div role="status" aria-live="polite" aria-atomic="true" className="bg-white p-12 rounded-3xl shadow-lg border border-[color:var(--color-border)] text-center h-full flex flex-col justify-center items-center">
                                 <div className="w-16 h-16 bg-[color:var(--color-success-bg)] text-[color:var(--color-success-text)] rounded-full flex items-center justify-center mb-6">
                                     <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                                         <polyline points="20 6 9 17 4 12"></polyline>
@@ -177,7 +177,7 @@ export default function ContactPage() {
                                 </h2>
 
                                 {errorDetails && (
-                                    <div className="mb-6 p-4 bg-[color:var(--color-error-bg)] text-[color:var(--color-error-text)] rounded-xl border border-[color:var(--color-error-border)] text-sm font-medium">
+                                    <div role="alert" aria-live="assertive" className="mb-6 p-4 bg-[color:var(--color-error-bg)] text-[color:var(--color-error-text)] rounded-xl border border-[color:var(--color-error-border)] text-sm font-medium">
                                         {errorDetails}
                                     </div>
                                 )}
@@ -198,7 +198,7 @@ export default function ContactPage() {
                                         <label id="listbox-label" className="text-sm font-semibold text-[color:var(--color-text)]">Subject *</label>
                                         <Listbox value={selectedSubject} onChange={setSelectedSubject} name="subject">
                                             <div className="relative">
-                                                <ListboxButton aria-labelledby="listbox-label" className="relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white transition-colors">
+                                                <ListboxButton aria-labelledby="listbox-label" className="dropdown-trigger interactive-secondary relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white">
                                                     <span className="block truncate">{selectedSubjectOption.label}</span>
                                                     <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
                                                         <svg className="h-5 w-5 text-[color:var(--color-muted)]" viewBox="0 0 20 20" fill="currentColor">
@@ -206,11 +206,11 @@ export default function ContactPage() {
                                                         </svg>
                                                     </span>
                                                 </ListboxButton>
-                                                <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
+                                                <ListboxOptions className="dropdown-surface absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
                                                     {subjects.map((subject) => (
                                                         <ListboxOption
                                                             key={subject.value}
-                                                            className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
+                                                            className="dropdown-option-soft group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)]"
                                                             value={subject.value}
                                                         >
                                                             <span className="block truncate font-medium group-data-[selected]:font-bold group-data-[selected]:text-[color:var(--color-forest)]">
@@ -245,7 +245,8 @@ export default function ContactPage() {
                                     <button
                                         type="submit"
                                         disabled={isSubmitting}
-                                        className="mt-2 w-full bg-[color:var(--color-forest)] text-white py-4 rounded-xl font-bold text-lg hover:bg-[color:var(--color-sage)] transition-colors disabled:opacity-70 disabled:cursor-not-allowed shadow-md"
+                                        aria-busy={isSubmitting}
+                                        className="interactive-primary mt-2 w-full bg-[color:var(--color-forest)] text-white py-4 rounded-xl font-bold text-lg hover:bg-[color:var(--color-sage)] disabled:opacity-70 disabled:cursor-not-allowed shadow-md"
                                     >
                                         {isSubmitting ? "Sending..." : "Send Message"}
                                     </button>

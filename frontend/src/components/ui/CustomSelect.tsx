@@ -28,6 +28,8 @@ function CustomSelectMenu({
   if (!open) return null;
   return (
     <div
+      role="listbox"
+      className="dropdown-surface"
       style={{
         position: "absolute",
         top: "calc(100% + 4px)",

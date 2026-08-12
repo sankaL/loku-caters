@@ -16,6 +16,7 @@ import {
   type InvoiceOrderOption,
 } from "@/lib/invoiceForm";
 import Modal from "@/components/ui/Modal";
+import AdminToast from "@/components/admin/AdminToast";
 import InvoiceFieldsEditor from "./InvoiceFieldsEditor";
 import InvoiceDocument from "./InvoiceDocument";
 
@@ -46,23 +47,6 @@ const INITIAL_STATE: InvoiceDetailState = {
   deleteOpen: false,
   toast: null,
 };
-
-function InvoiceToast({ toast }: { toast: InvoiceDetailState["toast"] }) {
-  if (!toast) return null;
-  const tone = toast.type === "success" ? "success" : "error";
-  return (
-    <div
-      className="fixed right-6 top-6 z-[130] rounded-2xl px-5 py-3 text-sm font-semibold shadow-xl"
-      style={{
-        background: `var(--color-${tone}-bg)`,
-        color: `var(--color-${tone}-text)`,
-        border: `1px solid var(--color-${tone}-border)`,
-      }}
-    >
-      {toast.message}
-    </div>
-  );
-}
 
 function InvoiceToolbar({
   invoice,
@@ -191,9 +175,10 @@ function InvoiceEditForm({
         sourceHelp="Changing this reference does not replace any invoice details or items."
       />
       <div className="mt-5 flex justify-end">
-        <button
-          disabled={saving}
-          className="rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
+          <button
+            disabled={saving}
+            aria-busy={saving}
+            className="interactive-primary rounded-xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60"
           style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
         >
           {saving ? "Saving..." : "Save Changes"}
@@ -386,7 +371,7 @@ export default function InvoiceDetailClient({ invoiceId }: { invoiceId: string }
 
   return (
     <div className="w-full px-4 py-6 sm:px-6 lg:px-8">
-      <InvoiceToast toast={toast} />
+      <AdminToast toast={toast} />
       <div className="mx-auto max-w-6xl">
         <InvoiceToolbar
           invoice={invoice}

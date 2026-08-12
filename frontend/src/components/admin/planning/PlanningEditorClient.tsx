@@ -27,6 +27,7 @@ import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import CustomSelect from "@/components/ui/CustomSelect";
 import Modal from "@/components/ui/Modal";
+import AdminToast from "@/components/admin/AdminToast";
 import { useAdminToast } from "@/hooks/useAdminToast";
 import { useObjectState } from "@/hooks/useObjectState";
 import {
@@ -1410,24 +1411,7 @@ function PlanningEditorView({ model }: { model: PlanningEditorModel }) {
 }
 
 function PlanningToast({ model }: { model: PlanningEditorModel }) {
-  const { toast } = model;
-  return (
-    <>
-      {toast && (
-        <div
-          className="fixed bottom-6 right-6 max-w-[360px] rounded-2xl px-5 py-3 text-sm font-semibold shadow-[0_24px_70px_-26px_rgba(28,28,26,0.62)]"
-          style={{
-            background: toast.type === "success" ? "var(--color-success-bg)" : "var(--color-error-bg)",
-            border: `1px solid ${toast.type === "success" ? "var(--color-success-border)" : "var(--color-error-border)"}`,
-            color: toast.type === "success" ? "var(--color-success-text)" : "var(--color-error-text)",
-            zIndex: 220,
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
-    </>
-  );
+  return <AdminToast toast={model.toast} />;
 }
 
 function PlanningHeader({ model }: { model: PlanningEditorModel }) {
