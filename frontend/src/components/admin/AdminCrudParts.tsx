@@ -10,7 +10,7 @@ export function AdminCrudPageHeader({ title, description, actionLabel, onAction 
         <h1 className="text-2xl font-bold mb-1" style={{ color: "var(--color-forest)", fontFamily: "var(--font-serif)" }}>{title}</h1>
         <p className="text-sm" style={{ color: "var(--color-muted)" }}>{description}</p>
       </div>
-      <button onClick={onAction} className="px-4 py-2.5 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all hover:bg-[color:var(--color-forest-hover)]" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
+      <button onClick={onAction} className="interactive-primary flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>
         {actionLabel}
       </button>
@@ -99,7 +99,7 @@ function AdminBulkDeleteButton({ onClick, buttonStyle }: { onClick: () => void; 
 
 export function AdminDeleteIconButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} title="Delete" className="inline-flex cursor-pointer items-center rounded-lg border bg-white px-2 py-1.5" style={{ borderColor: "var(--color-border)", color: "var(--color-muted)" }}>
+    <button onClick={onClick} title="Delete" aria-label="Delete" className="interactive-danger interactive-icon inline-flex rounded-lg border bg-white" style={{ borderColor: "var(--color-border)", color: "var(--color-muted)" }}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14H6L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4h6v2" /></svg>
     </button>
   );
@@ -124,7 +124,7 @@ export function AdminSearchInput({ value, onChange, placeholder }: { value: stri
 
 export function AdminClearFiltersButton({ onClick }: { onClick: () => void }) {
   return (
-    <button onClick={onClick} className="inline-flex cursor-pointer items-center gap-1.5 rounded-xl border bg-white px-3 py-2 text-[13px]" style={{ borderColor: "var(--color-border)", color: "var(--color-muted)" }}>
+    <button onClick={onClick} className="interactive-secondary inline-flex items-center gap-1.5 rounded-xl border bg-white px-3 py-2 text-[13px]" style={{ borderColor: "var(--color-border)", color: "var(--color-muted)" }}>
       <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
       Clear
     </button>
@@ -247,9 +247,9 @@ export function AdminPagination({ page, totalPages, onPageChange }: { page: numb
   };
   return (
     <div className="mt-4 flex items-center justify-center gap-2">
-      <button onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page === 1} style={{ ...buttonStyle, color: page === 1 ? "var(--color-border)" : "var(--color-text)", cursor: page === 1 ? "not-allowed" : "pointer" }}>Previous</button>
+      <button className="interactive-secondary" onClick={() => onPageChange(Math.max(1, page - 1))} disabled={page === 1} style={{ ...buttonStyle, color: page === 1 ? "var(--color-border)" : "var(--color-text)", cursor: page === 1 ? "not-allowed" : "pointer" }}>Previous</button>
       <span className="text-[13px]" style={{ color: "var(--color-muted)" }}>Page {page} of {totalPages}</span>
-      <button onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page === totalPages} style={{ ...buttonStyle, color: page === totalPages ? "var(--color-border)" : "var(--color-text)", cursor: page === totalPages ? "not-allowed" : "pointer" }}>Next</button>
+      <button className="interactive-secondary" onClick={() => onPageChange(Math.min(totalPages, page + 1))} disabled={page === totalPages} style={{ ...buttonStyle, color: page === totalPages ? "var(--color-border)" : "var(--color-text)", cursor: page === totalPages ? "not-allowed" : "pointer" }}>Next</button>
     </div>
   );
 }
@@ -257,8 +257,8 @@ export function AdminPagination({ page, totalPages, onPageChange }: { page: numb
 export function AdminModalActions({ saving, onCancel, onSave }: { saving: boolean; onCancel: () => void; onSave: () => void }) {
   return (
     <div className="flex gap-3 justify-end pt-2">
-      <button onClick={onCancel} className="px-4 py-2.5 rounded-xl text-sm font-medium" style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}>Cancel</button>
-      <button onClick={onSave} disabled={saving} className="px-4 py-2.5 rounded-xl text-sm font-semibold transition-all disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>{saving ? "Saving..." : "Save"}</button>
+      <button onClick={onCancel} className="interactive-secondary rounded-xl px-4 py-2.5 text-sm font-medium" style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}>Cancel</button>
+      <button onClick={onSave} disabled={saving} aria-busy={saving} className="interactive-primary rounded-xl px-4 py-2.5 text-sm font-semibold disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>{saving ? "Saving..." : "Save"}</button>
     </div>
   );
 }

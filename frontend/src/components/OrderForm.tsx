@@ -626,7 +626,8 @@ function ImageOrderPickerItem({ item, model }: { item: Item; model: OrderFormMod
                       <div
                         key={item.id}
                         role="button"
-                        tabIndex={0}
+                        tabIndex={inCart ? -1 : 0}
+                        aria-disabled={inCart}
                         onClick={() => {
                           if (!inCart) changeQty(item.id, 1);
                         }}
@@ -636,7 +637,7 @@ function ImageOrderPickerItem({ item, model }: { item: Item; model: OrderFormMod
                             changeQty(item.id, 1);
                           }
                         }}
-                        className="group flex min-h-[22rem] flex-col overflow-hidden rounded-2xl transition-all active:scale-[0.99]"
+                        className="interactive-card group flex min-h-[22rem] flex-col overflow-hidden rounded-2xl"
                         style={{
                           border: `1px solid ${inCart ? "var(--color-sage)" : "var(--color-border)"}`,
                           background: inCart ? "rgba(114,145,82,0.12)" : "white",
@@ -970,7 +971,8 @@ function OrderFormView({ model }: { model: OrderFormModel }) {
           <button
             type="submit"
             disabled={submitting || quoteLoading || selectedLines.length === 0}
-            className="w-full py-3 rounded-xl text-sm font-semibold transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+            aria-busy={submitting || quoteLoading}
+            className="interactive-primary w-full rounded-xl py-3 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
             style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
           >
             {submitting ? "Submitting..." : quoteLoading ? "Refreshing Deals..." : "Submit Pre-Order"}
@@ -1099,7 +1101,7 @@ function OrderDeals({ model }: { model: OrderFormModel }) {
               </div>
 
               {quoteError && (
-                <p className="text-sm px-5 md:px-6 pb-3" style={{ color: "var(--color-error-border)" }}>
+                <p role="status" aria-live="polite" className="text-sm px-5 md:px-6 pb-3" style={{ color: "var(--color-error-text)" }}>
                   {quoteError}
                 </p>
               )}

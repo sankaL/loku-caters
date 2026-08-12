@@ -2,14 +2,17 @@
 
 import { useEffect, useCallback, useMemo, useRef, type SetStateAction } from "react";
 import { useRouter } from "next/navigation";
+import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
+import { FunnelSimple } from "@phosphor-icons/react";
 import { useObjectState } from "@/hooks/useObjectState";
 import { API_URL, CURRENCY, fetchEventConfig, EventConfig, type Item, type Location } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import { getApiErrorMessage } from "@/lib/apiError";
 import Modal from "@/components/ui/Modal";
-import SearchableSelect from "@/components/ui/SearchableSelect";
+import SingleSelectDropdown from "@/components/ui/SingleSelectDropdown";
 import ItemQuantityPicker from "@/components/admin/orders/ItemQuantityPicker";
 import BundleEditModal from "@/components/admin/orders/BundleEditModal";
+import AdminToast from "@/components/admin/AdminToast";
 import {
   getMinimumOrderQuantity,
   linesFromQuantities,
@@ -363,19 +366,6 @@ function SortIcon({ active, dir }: { active: boolean; dir: "asc" | "desc" }) {
     </svg>
   );
 }
-
-const dropdownStyle: React.CSSProperties = {
-  appearance: "none" as const,
-  WebkitAppearance: "none" as const,
-  background: "white",
-  color: "var(--color-text)",
-  border: "1px solid var(--color-border)",
-  borderRadius: "0.75rem",
-  padding: "0.5rem 2rem 0.5rem 0.75rem",
-  fontSize: "0.875rem",
-  cursor: "pointer",
-  outline: "none",
-};
 
 function SelectChevron() {
   return (
@@ -2804,32 +2794,13 @@ function AdminOrdersToolbar({ model }: { model: AdminOrdersModel }) {
 }
 
 function AdminOrdersToast({ model }: { model: AdminOrdersModel }) {
-  const {
-    toast,
-  } = model;
-  return (
-    <>
-      {/* Toast */}
-      {toast && (
-        <div
-          className="fixed top-6 right-6 z-50 px-5 py-3 rounded-xl text-sm font-medium shadow-lg"
-          style={{
-            background: toast.type === "success" ? "var(--color-success-bg)" : "var(--color-error-bg)",
-            color: toast.type === "success" ? "var(--color-success-text)" : "var(--color-error-text)",
-            border: `1px solid ${toast.type === "success" ? "var(--color-success-border)" : "var(--color-error-border)"}`,
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
-    </>
-  );
+  return <AdminToast toast={model.toast} />;
 }
 
 function AdminOrdersHeader({ model }: { model: AdminOrdersModel }) {
   const {
     reminderMenuRef, setShowReminderMenu, showReminderMenu, openRemindModal,
-    openPaymentRemindModal, setShowAddOrderChoiceModal, setBulkImportRows, setShowBulkImportModal,
+    openPaymentRemindModal, setShowAddOrderChoiceModal,
   } = model;
   return (
     <>
@@ -2896,27 +2867,12 @@ function AdminOrdersHeader({ model }: { model: AdminOrdersModel }) {
           <button
             onClick={() => setShowAddOrderChoiceModal(true)}
             className="px-4 py-2 rounded-xl text-sm font-semibold transition-all flex items-center gap-2"
-            style={{ background: "var(--color-accent)", color: "var(--color-text)", border: "1px solid var(--color-accent)" }}
+            style={{ background: "var(--color-accent)", color: "white", border: "1px solid var(--color-accent)" }}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
               <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
             </svg>
             Add Order
-          </button>
-          <button
-            onClick={() => {
-              setBulkImportRows([]);
-              setShowBulkImportModal(true);
-            }}
-            className="px-4 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-2"
-            style={{ background: "white", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-            Bulk Import
           </button>
         </div>
       </div>
@@ -2931,79 +2887,23 @@ function AdminOrdersFilters({ model }: { model: AdminOrdersModel }) {
     eventFilter, setEventFilter, search, setSearch,
     fetchOrders,
   } = model;
+  const statusOptions = [
+    { value: "all", label: "All Statuses" },
+    ...Object.entries(STATUS_STYLES).map(([value, status]) => ({ value, label: status.label })),
+  ];
+  const paymentOptions = [
+    { value: "all", label: "All Payments" },
+    { value: "paid", label: "Paid" },
+    { value: "unpaid", label: "Unpaid" },
+  ];
+  const locationOptions = [
+    { value: "all", label: "All Locations" },
+    ...locationFilterOptions.map((location) => ({ value: location, label: location })),
+  ];
   return (
     <>
       {/* Filters + search + actions */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        {/* Status dropdown */}
-        <div className="relative w-full sm:w-auto">
-          <select
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            style={{ ...dropdownStyle, width: "100%" }}
-          >
-            <option value="all">All Statuses</option>
-            {Object.entries(STATUS_STYLES).map(([val, s]) => (
-              <option key={val} value={val}>{s.label}</option>
-            ))}
-          </select>
-          <SelectChevron />
-        </div>
-
-        {/* Payment dropdown */}
-        <div className="relative w-full sm:w-auto">
-          <select
-            value={paymentFilter}
-            onChange={(e) => setPaymentFilter(e.target.value)}
-            style={{ ...dropdownStyle, width: "100%" }}
-          >
-            <option value="all">All Payments</option>
-            <option value="paid">Paid</option>
-            <option value="unpaid">Unpaid</option>
-          </select>
-          <SelectChevron />
-        </div>
-
-        {/* Location dropdown */}
-        <div className="relative w-full sm:w-auto">
-          <select
-            value={locationFilter}
-            onChange={(e) => setLocationFilter(e.target.value)}
-            style={{ ...dropdownStyle, width: "100%" }}
-          >
-            <option value="all">All Locations</option>
-            {locationFilterOptions.map((loc) => (
-              <option key={loc} value={loc}>{loc}</option>
-            ))}
-          </select>
-          <SelectChevron />
-        </div>
-
-        {/* Event dropdown (searchable) */}
-        <div className="w-full sm:w-[320px]">
-          <SearchableSelect
-            options={eventOptions}
-            value={eventFilter}
-            onChange={setEventFilter}
-            placeholder="All Events"
-            searchPlaceholder="Search events..."
-          />
-        </div>
-
-        {/* Clear filters */}
-        {(filter !== "all" || paymentFilter !== "all" || eventFilter !== "all" || locationFilter !== "all" || search) && (
-          <button
-            onClick={() => { setFilter("all"); setPaymentFilter("all"); setEventFilter("all"); setLocationFilter("all"); setSearch(""); }}
-            className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
-            style={{ background: "var(--color-error-bg)", color: "var(--color-error-text)", border: "1px solid var(--color-error-border)" }}
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-            Clear filters
-          </button>
-        )}
-
         {/* Search */}
         <div className="relative w-full sm:flex-1 sm:min-w-48">
           <svg
@@ -3042,6 +2942,59 @@ function AdminOrdersFilters({ model }: { model: AdminOrdersModel }) {
             </button>
           )}
         </div>
+
+        <Popover className="relative w-full sm:w-auto">
+          <PopoverButton
+            className="flex w-full items-center justify-center gap-2 rounded-xl border bg-white px-4 py-2 text-sm font-semibold focus:outline-none focus:ring-2 sm:w-auto"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-forest)" }}
+          >
+            <FunnelSimple size={16} weight="bold" />
+            Filters
+            {[filter, paymentFilter, locationFilter, eventFilter].filter((value) => value !== "all").length > 0 && (
+              <span className="rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums" style={{ background: "var(--color-accent)", color: "var(--color-forest)" }}>
+                {[filter, paymentFilter, locationFilter, eventFilter].filter((value) => value !== "all").length}
+              </span>
+            )}
+          </PopoverButton>
+          <PopoverPanel
+            anchor="bottom end"
+            className="z-[70] mt-2 w-[min(92vw,560px)] rounded-2xl border bg-white p-4 shadow-lg"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold" style={{ color: "var(--color-muted)" }}>
+                Status
+                <SingleSelectDropdown options={statusOptions} value={filter} onChange={setFilter} ariaLabel="Filter by status" />
+              </label>
+              <label className="text-xs font-semibold" style={{ color: "var(--color-muted)" }}>
+                Payment
+                <SingleSelectDropdown options={paymentOptions} value={paymentFilter} onChange={setPaymentFilter} ariaLabel="Filter by payment" />
+              </label>
+              <label className="text-xs font-semibold" style={{ color: "var(--color-muted)" }}>
+                Location
+                <SingleSelectDropdown options={locationOptions} value={locationFilter} onChange={setLocationFilter} ariaLabel="Filter by location" />
+              </label>
+              <label className="text-xs font-semibold" style={{ color: "var(--color-muted)" }}>
+                Event
+                <SingleSelectDropdown options={eventOptions} value={eventFilter} onChange={setEventFilter} ariaLabel="Filter by event" />
+              </label>
+            </div>
+          </PopoverPanel>
+        </Popover>
+
+        {/* Clear filters */}
+        {(filter !== "all" || paymentFilter !== "all" || eventFilter !== "all" || locationFilter !== "all" || search) && (
+          <button
+            onClick={() => { setFilter("all"); setPaymentFilter("all"); setEventFilter("all"); setLocationFilter("all"); setSearch(""); }}
+            className="px-3 py-2 rounded-xl text-sm font-medium transition-all flex items-center gap-1.5 shrink-0"
+            style={{ background: "var(--color-error-bg)", color: "var(--color-error-text)", border: "1px solid var(--color-error-border)" }}
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+            Clear filters
+          </button>
+        )}
 
         <button
           onClick={() => {
@@ -4513,7 +4466,7 @@ function AdminOrdersSinglePaymentReminderDialog({ model }: { model: AdminOrdersM
 function AdminOrdersAddOrderChoiceDialog({ model }: { model: AdminOrdersModel }) {
   const {
     showAddOrderChoiceModal, setShowAddOrderChoiceModal, openEventAddOrderModal, openRandomAddOrderModal,
-    randomEventLabel,
+    randomEventLabel, setBulkImportRows, setShowBulkImportModal,
   } = model;
   return (
     <>
@@ -4532,7 +4485,7 @@ function AdminOrdersAddOrderChoiceDialog({ model }: { model: AdminOrdersModel })
             <p className="text-sm mb-6" style={{ color: "var(--color-muted)" }}>
               Choose whether this order belongs to a normal event or the reserved random requests bucket.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <button
                 type="button"
                 onClick={openEventAddOrderModal}
@@ -4553,6 +4506,21 @@ function AdminOrdersAddOrderChoiceDialog({ model }: { model: AdminOrdersModel })
                 <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-forest)" }}>Random</p>
                 <p className="text-xs" style={{ color: "var(--color-muted)" }}>
                   Use freeform pickup details and manual line pricing for the {randomEventLabel}.
+                </p>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddOrderChoiceModal(false);
+                  setBulkImportRows([]);
+                  setShowBulkImportModal(true);
+                }}
+                className="rounded-2xl p-5 text-left transition-all"
+                style={{ background: "white", border: "1px solid var(--color-border)" }}
+              >
+                <p className="text-sm font-semibold mb-1" style={{ color: "var(--color-forest)" }}>Bulk Import</p>
+                <p className="text-xs" style={{ color: "var(--color-muted)" }}>
+                  Upload a CSV file to create multiple event orders at once.
                 </p>
               </button>
             </div>

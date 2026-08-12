@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     reply_to_email: str | None = None
     email_enabled: bool = True
     email_request_timeout_seconds: int = 15
+    notification_emails: str = ""
     frontend_url: str = "http://localhost:3000"
     dev_mode: bool = False
     rate_limit_enabled: bool = True
@@ -73,6 +74,15 @@ class Settings(BaseSettings):
             for email in self.admin_emails.split(",")
             if email.strip()
         }
+
+    def get_notification_email_recipients(self) -> list[str]:
+        return list(
+            dict.fromkeys(
+                email.strip().lower()
+                for email in self.notification_emails.split(",")
+                if email.strip()
+            )
+        )
 
 
 settings = Settings()

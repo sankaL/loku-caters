@@ -86,7 +86,8 @@ export default function AdminLoginPage() {
                 type="button"
                 onClick={handleDevLogin}
                 disabled={loading}
-                className="w-full py-3 rounded-2xl text-sm font-semibold tracking-wide transition-all active:scale-[0.98] disabled:opacity-60"
+                aria-busy={loading}
+                className="interactive-primary w-full py-3 rounded-2xl text-sm font-semibold tracking-wide disabled:opacity-60"
                 style={{ background: "var(--color-sage)", color: "white" }}
               >
                 {loading ? "Signing in..." : "Sign in as Dev Admin"}
@@ -137,7 +138,7 @@ export default function AdminLoginPage() {
             </div>
 
             {error && (
-              <div className="rounded-xl px-4 py-3 text-sm font-medium text-red-700 bg-red-50 border border-red-200">
+              <div role="alert" aria-live="assertive" className="rounded-xl px-4 py-3 text-sm font-medium text-red-700 bg-red-50 border border-red-200">
                 {error}
               </div>
             )}
@@ -145,14 +146,9 @@ export default function AdminLoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full py-3.5 rounded-2xl text-sm font-semibold tracking-wide transition-all active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
+              aria-busy={loading}
+              className="interactive-primary w-full py-3.5 rounded-2xl text-sm font-semibold tracking-wide disabled:opacity-60 disabled:cursor-not-allowed"
               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
-              onMouseEnter={(e) => {
-                if (!loading) (e.currentTarget as HTMLButtonElement).style.background = "#1e3d18";
-              }}
-              onMouseLeave={(e) => {
-                (e.currentTarget as HTMLButtonElement).style.background = "var(--color-forest)";
-              }}
             >
               {loading ? "Signing in..." : "Sign In"}
             </button>

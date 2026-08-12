@@ -82,7 +82,7 @@ function ReviewForm({
         How was your experience?
       </h2>
       {error && (
-        <div className="mb-6 p-4 bg-[color:var(--color-error-bg)] text-[color:var(--color-error-text)] rounded-xl border border-[color:var(--color-error-border)] text-sm font-medium">
+        <div role="alert" aria-live="assertive" className="mb-6 p-4 bg-[color:var(--color-error-bg)] text-[color:var(--color-error-text)] rounded-xl border border-[color:var(--color-error-border)] text-sm font-medium">
           {error}
         </div>
       )}
@@ -127,7 +127,8 @@ function ReviewForm({
         <button
           type="submit"
           disabled={submitting}
-          className="mt-2 w-full bg-[color:var(--color-forest)] text-white py-4 rounded-xl font-bold text-lg hover:bg-[color:var(--color-sage)] transition-colors disabled:opacity-70 disabled:cursor-not-allowed shadow-md"
+          aria-busy={submitting}
+          className="interactive-primary mt-2 w-full bg-[color:var(--color-forest)] text-white py-4 rounded-xl font-bold text-lg hover:bg-[color:var(--color-sage)] disabled:opacity-70 disabled:cursor-not-allowed shadow-md"
         >
           {submitting ? "Submitting..." : "Submit Review"}
         </button>

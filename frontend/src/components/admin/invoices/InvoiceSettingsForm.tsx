@@ -87,7 +87,7 @@ export default function InvoiceSettingsForm(props: InvoiceSettingsFormProps) {
       <PaymentDetails form={props.form} onChange={props.onChange} />
       <div className="flex justify-end gap-2">
         <button type="button" onClick={props.onCancel} className="rounded-2xl border bg-white px-5 py-2.5 text-sm font-semibold" style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}>Cancel</button>
-        <button disabled={props.saving} className="inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
+        <button disabled={props.saving} aria-busy={props.saving} className="interactive-primary inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
           <FloppyDisk size={18} /> {props.saving ? "Saving..." : "Save Settings"}
         </button>
       </div>

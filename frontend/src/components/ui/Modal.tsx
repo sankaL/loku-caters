@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useId } from "react";
 import ReactDOM from "react-dom";
 
 interface ModalProps {
@@ -24,6 +24,8 @@ export default function Modal({
   size = "md",
   zIndex = 130,
 }: ModalProps) {
+  const titleId = useId();
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -47,6 +49,7 @@ export default function Modal({
 
   return ReactDOM.createPortal(
     <div
+      className="drawer-backdrop"
       style={{
         position: "fixed",
         inset: 0,
@@ -62,7 +65,10 @@ export default function Modal({
       }}
     >
       <div
-        className="p-6 md:p-8"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className="modal-surface p-6 md:p-8"
         style={{
           background: "white",
           borderRadius: "24px",
@@ -76,6 +82,7 @@ export default function Modal({
         onMouseDown={(e) => e.stopPropagation()}
       >
         <h2
+          id={titleId}
           className="text-xl font-bold mb-3"
           style={{ color: titleColor, fontFamily: "var(--font-serif)" }}
         >

@@ -61,7 +61,7 @@ export default function CateringRequestClient() {
     if (isSuccess) {
         return (
             <main className="flex-1 bg-[color:var(--color-cream)] flex items-center justify-center p-6 mt-10">
-                <div className="max-w-xl mx-auto text-center bg-white p-12 rounded-3xl border border-[color:var(--color-border)] shadow-xl animate-scale-in">
+                <div role="status" aria-live="polite" aria-atomic="true" className="max-w-xl mx-auto text-center bg-white p-12 rounded-3xl border border-[color:var(--color-border)] shadow-xl animate-scale-in">
                     <div className="w-20 h-20 bg-[color:var(--color-success-bg)] text-[color:var(--color-success-text)] rounded-full flex items-center justify-center mx-auto mb-6">
                         <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
                             <polyline points="20 6 9 17 4 12"></polyline>
@@ -104,7 +104,7 @@ export default function CateringRequestClient() {
                     {/* Form Side */}
                     <div className="lg:w-3/5 bg-white p-8 md:p-12 rounded-3xl shadow-xl border border-[color:var(--color-border)] animate-fade-up delay-100">
                         {errorDetails && (
-                            <div className="mb-8 p-4 bg-[color:var(--color-error-bg)] text-[color:var(--color-error-text)] rounded-xl border border-[color:var(--color-error-border)] flex items-start gap-3">
+                            <div role="alert" aria-live="assertive" className="mb-8 p-4 bg-[color:var(--color-error-bg)] text-[color:var(--color-error-text)] rounded-xl border border-[color:var(--color-error-border)] flex items-start gap-3">
                                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="mt-0.5"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>
                                 <p className="text-sm font-medium">{errorDetails}</p>
                             </div>
@@ -150,7 +150,7 @@ export default function CateringRequestClient() {
                                     <label id="event-type-label" className="text-sm font-semibold text-[color:var(--color-text)]">Event Type *</label>
                                     <Listbox value={selectedEventType} onChange={setSelectedEventType} name="event_type">
                                         <div className="relative">
-                                            <ListboxButton aria-labelledby="event-type-label" className="relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white transition-colors">
+                                            <ListboxButton aria-labelledby="event-type-label" className="dropdown-trigger interactive-secondary relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white">
                                                 <span className="block truncate">{selectedEventType.name}</span>
                                                 <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
                                                     <svg className="h-5 w-5 text-[color:var(--color-muted)]" viewBox="0 0 20 20" fill="currentColor">
@@ -158,11 +158,11 @@ export default function CateringRequestClient() {
                                                     </svg>
                                                 </span>
                                             </ListboxButton>
-                                            <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
+                                            <ListboxOptions className="dropdown-surface absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
                                                 {CATERING_EVENT_TYPES.map((type, idx) => (
                                                     <ListboxOption
                                                         key={idx}
-                                                        className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
+                                                        className="dropdown-option-soft group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)]"
                                                         value={type}
                                                     >
                                                         <span className="block truncate font-medium group-data-[selected]:font-bold group-data-[selected]:text-[color:var(--color-forest)]">
@@ -184,7 +184,7 @@ export default function CateringRequestClient() {
                                     <label id="budget-range-label" className="text-sm font-semibold text-[color:var(--color-text)]">Budget Range (Optional)</label>
                                     <Listbox value={selectedBudgetRange} onChange={setSelectedBudgetRange} name="budget_range">
                                         <div className="relative">
-                                            <ListboxButton aria-labelledby="budget-range-label" className="relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white transition-colors">
+                                            <ListboxButton aria-labelledby="budget-range-label" className="dropdown-trigger interactive-secondary relative w-full cursor-pointer rounded-xl bg-[color:var(--color-cream)] py-3 pl-3 pr-10 text-left border border-[color:var(--color-border)] focus:outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:bg-white">
                                                 <span className="block truncate">{selectedBudgetRange.name}</span>
                                                 <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
                                                     <svg className="h-5 w-5 text-[color:var(--color-muted)]" viewBox="0 0 20 20" fill="currentColor">
@@ -192,11 +192,11 @@ export default function CateringRequestClient() {
                                                     </svg>
                                                 </span>
                                             </ListboxButton>
-                                            <ListboxOptions className="absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
+                                            <ListboxOptions className="dropdown-surface absolute mt-2 max-h-60 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-[#0000000d] focus:outline-none z-10 border border-[color:var(--color-border)]">
                                                 {CATERING_BUDGET_RANGES.map((range, idx) => (
                                                     <ListboxOption
                                                         key={idx}
-                                                        className="group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)] transition-colors"
+                                                        className="dropdown-option-soft group relative cursor-pointer select-none py-3 pl-10 pr-4 data-[focus]:bg-[color:var(--color-cream-dark)] data-[focus]:text-[color:var(--color-forest)] text-[color:var(--color-muted)]"
                                                         value={range}
                                                     >
                                                         <span className="block truncate font-medium group-data-[selected]:font-bold group-data-[selected]:text-[color:var(--color-forest)]">
@@ -223,7 +223,8 @@ export default function CateringRequestClient() {
                             <button
                                 type="submit"
                                 disabled={isSubmitting}
-                                className="mt-4 w-full bg-[color:var(--color-forest)] text-white py-4 rounded-xl font-bold text-lg hover:bg-[color:var(--color-sage)] transition-colors disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md"
+                                aria-busy={isSubmitting}
+                                className="interactive-primary mt-4 w-full bg-[color:var(--color-forest)] text-white py-4 rounded-xl font-bold text-lg hover:bg-[color:var(--color-sage)] disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md"
                             >
                                 {isSubmitting ? (
                                     <>

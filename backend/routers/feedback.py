@@ -1,11 +1,15 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Feedback
 from schemas import FeedbackCreate, FeedbackResponse, normalize_feedback_create
+from services.email import send_new_feedback_notification
 
 router = APIRouter(prefix="/api/feedback", tags=["feedback"])
+logger = logging.getLogger(__name__)
 
 
 @router.post("", response_model=FeedbackResponse, status_code=201)
@@ -22,6 +26,12 @@ def create_feedback(feedback_in: FeedbackCreate, db: Session = Depends(get_db)):
     db.add(feedback)
     db.commit()
     db.refresh(feedback)
+    try:
+        send_new_feedback_notification(normalized)
+    except Exception:
+        logger.exception(
+            "Failed to send new feedback notification for feedback %s", feedback.id
+        )
     return FeedbackResponse(success=True, feedback_id=str(feedback.id))
 
 

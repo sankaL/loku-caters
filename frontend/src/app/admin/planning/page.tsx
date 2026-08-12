@@ -447,7 +447,7 @@ export default function EventPlanningPage() {
                 <span className="sr-only">Filter by status</span>
                 <Listbox value={statusFilter} onChange={(value) => updateState({ statusFilter: value })}>
                   <ListboxButton
-                    className="relative flex w-full items-center gap-3 rounded-xl border bg-white py-2 pl-9 pr-9 text-left text-sm outline-none transition-all data-[focus]:border-[color:var(--color-sage)] data-[focus]:ring-2 data-[focus]:ring-[color:var(--color-sage)] sm:w-48"
+                    className="dropdown-trigger interactive-secondary relative flex w-full items-center gap-3 rounded-xl border bg-white py-2 pl-9 pr-9 text-left text-sm outline-none data-[focus]:border-[color:var(--color-sage)] data-[focus]:ring-2 data-[focus]:ring-[color:var(--color-sage)] sm:w-48"
                     style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
                   >
                     <FunnelSimple
@@ -464,14 +464,14 @@ export default function EventPlanningPage() {
                   </ListboxButton>
                   <ListboxOptions
                     anchor="bottom"
-                    className="z-50 mt-2 w-48 rounded-xl border bg-white p-1 shadow-[0_18px_40px_-24px_rgba(28,28,26,0.35)] outline-none"
+                    className="dropdown-surface z-50 mt-2 w-48 rounded-xl border bg-white p-1 shadow-[0_18px_40px_-24px_rgba(28,28,26,0.35)] outline-none"
                     style={{ borderColor: "var(--color-border)" }}
                   >
                     {statusFilterOptions.map((option) => (
                       <ListboxOption
                         key={option.value}
                         value={option.value}
-                        className="flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm font-medium data-[focus]:bg-[color:var(--color-cream)]"
+                        className="dropdown-option-soft flex cursor-pointer items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm font-medium data-[focus]:bg-[color:var(--color-cream)]"
                         style={{ color: "var(--color-text)" }}
                       >
                         <span>{option.label}</span>
@@ -513,7 +513,7 @@ export default function EventPlanningPage() {
               type="button"
               onClick={() => updateState({ modalOpen: false })}
               disabled={creating}
-              className="rounded-2xl px-5 py-2.5 text-sm font-semibold transition-all active:scale-[0.98]"
+              className="interactive-secondary rounded-2xl px-5 py-2.5 text-sm font-semibold"
               style={{ background: "var(--color-cream)", color: "var(--color-text)", border: "1px solid var(--color-border)" }}
             >
               Cancel
@@ -522,7 +522,8 @@ export default function EventPlanningPage() {
               type="button"
               onClick={handleCreatePlan}
               disabled={creating || !selectedEventId}
-              className="inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold transition-all active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+              aria-busy={creating}
+              className="interactive-primary inline-flex items-center gap-2 rounded-2xl px-5 py-2.5 text-sm font-semibold disabled:cursor-not-allowed disabled:opacity-60"
               style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
             >
               <Plus size={17} weight="bold" />

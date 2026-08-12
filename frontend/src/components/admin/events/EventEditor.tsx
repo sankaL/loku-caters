@@ -950,8 +950,8 @@ function EventEditorToolbar({ mode, saving, onBack, onSave }: { mode: EditorMode
           <p className="text-sm mt-1" style={{ color: "var(--color-muted)" }}>Dedicated event setup with grouped combo rules, pricing controls, and event-level content.</p>
         </div>
         <div className="flex gap-3">
-          <button type="button" onClick={onBack} className="px-5 py-3 rounded-2xl text-sm font-medium" style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}>Cancel</button>
-          <button type="button" onClick={onSave} disabled={saving} className="px-6 py-3 rounded-2xl text-sm font-semibold disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
+          <button type="button" onClick={onBack} className="interactive-secondary px-5 py-3 rounded-2xl text-sm font-medium" style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}>Cancel</button>
+          <button type="button" onClick={onSave} disabled={saving} aria-busy={saving} className="interactive-primary px-6 py-3 rounded-2xl text-sm font-semibold disabled:opacity-60" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>
             {saving ? "Saving..." : mode === "edit" ? "Save Changes" : "Create Event"}
           </button>
         </div>

@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -15,6 +16,7 @@ from schemas import (
     OrderResponse,
 )
 from services.customers import sync_customer_from_contact
+from services.email import send_new_order_notification
 from services.pricing import (
     PricingLineInput,
     effective_minimum_order_quantity,
@@ -23,6 +25,7 @@ from services.pricing import (
 )
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
+logger = logging.getLogger(__name__)
 
 
 def _get_active_event(db: Session) -> Event:
@@ -321,15 +324,19 @@ def checkout_order(order_in: OrderCheckoutCreate, db: Session = Depends(get_db))
     for order in persisted_orders:
         db.refresh(order)
 
-    return OrderCheckoutResponse(
-        **_build_checkout_response(
-            group_id=group_id,
-            pricing=pricing,
-            event=event,
-            location=location,
-            persisted_orders=persisted_orders,
-        )
+    response_data = _build_checkout_response(
+        group_id=group_id,
+        pricing=pricing,
+        event=event,
+        location=location,
+        persisted_orders=persisted_orders,
     )
+    try:
+        send_new_order_notification(response_data["order"])
+    except Exception:
+        logger.exception("Failed to send new order notification for group %s", group_id)
+
+    return OrderCheckoutResponse(**response_data)
 
 
 @router.post("", response_model=OrderResponse, status_code=201)
@@ -396,4 +403,15 @@ def create_order(order_in: OrderCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(order)
 
-    return _legacy_order_response(order, event=event)
+    response = _legacy_order_response(order, event=event)
+    try:
+        send_new_order_notification(
+            {
+                **response.order,
+                "order_id": str(order.id),
+            }
+        )
+    except Exception:
+        logger.exception("Failed to send new order notification for order %s", order.id)
+
+    return response

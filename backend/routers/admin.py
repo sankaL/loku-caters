@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import date, datetime, timedelta, timezone
 import json
 import logging
@@ -47,6 +48,7 @@ from models import (
 from schemas import (
     CustomerUpdate,
     EventCreate,
+    EventDuplicateRequest,
     EventUpdate,
     ItemCreate,
     ItemUpdate,
@@ -1411,6 +1413,52 @@ def admin_create_event(
     db.commit()
     db.refresh(event)
     return _event_dict(event)
+
+
+@router.post("/events/{event_id}/duplicate", status_code=201)
+def admin_duplicate_event(
+    event_id: int,
+    body: EventDuplicateRequest,
+    db: Session = Depends(get_db),
+    _: dict = Depends(verify_admin_token),
+):
+    source = db.query(Event).filter(Event.id == event_id).first()
+    if source is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if _is_random_requests_event(source):
+        raise HTTPException(
+            status_code=400,
+            detail="Random Requests is a system event and cannot be duplicated",
+        )
+
+    duplicate = Event(
+        name=body.name,
+        event_date=body.event_date,
+        kind="event",
+        hero_header=source.hero_header,
+        hero_header_sage=source.hero_header_sage,
+        hero_subheader=source.hero_subheader,
+        promo_details=source.promo_details,
+        tooltip_enabled=source.tooltip_enabled,
+        tooltip_header=source.tooltip_header,
+        tooltip_body=source.tooltip_body,
+        tooltip_image_key=source.tooltip_image_key,
+        hero_side_image_key=source.hero_side_image_key,
+        etransfer_enabled=source.etransfer_enabled,
+        etransfer_email=source.etransfer_email,
+        is_active=False,
+        item_ids=deepcopy(source.item_ids or []),
+        location_ids=deepcopy(source.location_ids or []),
+        combo_deals=serialize_combo_deals(
+            normalize_combo_deals(deepcopy(source.combo_deals or []))
+        ),
+        pickup_date=None,
+        updated_at=datetime.now(timezone.utc),
+    )
+    db.add(duplicate)
+    db.commit()
+    db.refresh(duplicate)
+    return _event_dict(duplicate)
 
 
 @router.put("/random-requests/config")

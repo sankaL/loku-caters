@@ -213,11 +213,11 @@ function SuccessFeedbackModal({
   onRatingChange: (value: number) => void;
 }) {
   const actions = submitted ? (
-    <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-2xl text-sm font-semibold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>Close</button>
+    <button type="button" onClick={onClose} className="interactive-primary px-5 py-2.5 rounded-2xl text-sm font-semibold" style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}>Close</button>
   ) : (
     <>
-      <button type="button" onClick={onClose} className="px-5 py-2.5 rounded-2xl text-sm font-medium" style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}>Cancel</button>
-      <button type="button" onClick={onSubmit} disabled={submitting} className="px-5 py-2.5 rounded-2xl text-sm font-semibold" style={{ background: "var(--color-forest)", color: "var(--color-cream)", opacity: submitting ? 0.6 : 1 }}>{submitting ? "Sending..." : "Send"}</button>
+      <button type="button" onClick={onClose} className="interactive-secondary px-5 py-2.5 rounded-2xl text-sm font-medium" style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}>Cancel</button>
+      <button type="button" onClick={onSubmit} disabled={submitting} aria-busy={submitting} className="interactive-primary px-5 py-2.5 rounded-2xl text-sm font-semibold" style={{ background: "var(--color-forest)", color: "var(--color-cream)", opacity: submitting ? 0.6 : 1 }}>{submitting ? "Sending..." : "Send"}</button>
     </>
   );
   return (

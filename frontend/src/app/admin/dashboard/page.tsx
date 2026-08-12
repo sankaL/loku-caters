@@ -314,7 +314,7 @@ export default function DashboardPage() {
   });
 
   return (
-    <div style={{ padding: "32px", maxWidth: 1280, margin: "0 auto" }}>
+    <div style={{ width: "100%", padding: "clamp(20px, 2vw, 32px) clamp(16px, 2vw, 32px) 56px" }}>
       {/* Page header */}
       <div style={{ marginBottom: 28 }}>
         <h1

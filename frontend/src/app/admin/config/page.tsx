@@ -2,12 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { Popover, PopoverButton, PopoverPanel } from "@headlessui/react";
+import { Check, FunnelSimple, PencilSimple, Trash } from "@phosphor-icons/react";
 import { API_URL, CURRENCY } from "@/config/event";
 import { getAdminToken } from "@/lib/auth";
 import Modal from "@/components/ui/Modal";
 import AdminToast from "@/components/admin/AdminToast";
 import { useAdminToast } from "@/hooks/useAdminToast";
 import { loadAdminResource } from "@/lib/adminCrud";
+import { getApiErrorMessage } from "@/lib/apiError";
 
 interface ComboDeal {
   id: string;
@@ -41,6 +44,11 @@ interface RandomConfigForm {
   etransfer_email: string;
 }
 
+interface DuplicateEventForm {
+  name: string;
+  event_date: string;
+}
+
 const PAGE_SIZE = 10;
 
 function Spinner() {
@@ -54,31 +62,39 @@ function Spinner() {
 
 function EventToggle({ event, activating, onToggle }: { event: EventItem; activating: boolean; onToggle: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-1">
-      <button
-        role="switch"
-        aria-checked={event.is_active}
-        onClick={onToggle}
-        disabled={activating}
-        title={event.is_active ? "Deactivate event" : "Activate event"}
+    <button
+      role="switch"
+      aria-checked={event.is_active}
+      aria-label={event.is_active ? "Deactivate event" : "Activate event"}
+      onClick={onToggle}
+      disabled={activating}
+      title={event.is_active ? "Deactivate event" : "Activate event"}
+      className="relative h-9 w-[76px] shrink-0 rounded-xl transition-[background-color,border-color,opacity] active:scale-[0.97] disabled:cursor-not-allowed"
+      style={{
+        background: event.is_active ? "var(--color-forest)" : "var(--color-cream-dark)",
+        border: `1px solid ${event.is_active ? "var(--color-forest)" : "var(--color-border)"}`,
+        opacity: activating ? 0.55 : 1,
+      }}
+    >
+      <span
+        className="absolute top-1 h-7 w-7 rounded-lg transition-[left] duration-200"
         style={{
-          width: "44px",
-          height: "24px",
-          borderRadius: "12px",
-          background: event.is_active ? "var(--color-forest)" : "var(--color-border)",
-          border: "none",
-          cursor: activating ? "not-allowed" : "pointer",
-          position: "relative",
-          opacity: activating ? 0.5 : 1,
-          padding: 0,
+          left: event.is_active ? "43px" : "4px",
+          background: "white",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.18)",
+        }}
+      />
+      <span
+        className="absolute top-1/2 -translate-y-1/2 text-[11px] font-bold leading-none"
+        style={{
+          left: event.is_active ? "10px" : undefined,
+          right: event.is_active ? undefined : "11px",
+          color: event.is_active ? "var(--color-cream)" : "var(--color-muted)",
         }}
       >
-        <span style={{ position: "absolute", top: "2px", left: event.is_active ? "22px" : "2px", width: "20px", height: "20px", borderRadius: "50%", background: "var(--color-cream)", transition: "left 0.2s", boxShadow: "0 1px 3px rgba(0,0,0,0.25)" }} />
-      </button>
-      <span style={{ fontSize: "10px", color: event.is_active ? "var(--color-forest)" : "var(--color-muted)", fontWeight: 600 }}>
         {activating ? "..." : event.is_active ? "Live" : "Off"}
       </span>
-    </div>
+    </button>
   );
 }
 
@@ -87,6 +103,7 @@ function EventControls({
   deleting,
   activating,
   onEdit,
+  onDuplicate,
   onConfigure,
   onDelete,
   onToggle,
@@ -95,22 +112,58 @@ function EventControls({
   deleting: boolean;
   activating: boolean;
   onEdit: () => void;
+  onDuplicate: () => void;
   onConfigure: () => void;
   onDelete: () => void;
   onToggle: () => void;
 }) {
   const systemEvent = event.kind === "random_requests";
+  const deleteUnavailableReason = systemEvent
+    ? "System events cannot be deleted"
+    : "Deactivate this event before deleting it";
   return (
-    <div className="flex items-center gap-2 shrink-0" onClick={(clickEvent) => clickEvent.stopPropagation()}>
-      <button onClick={systemEvent ? onConfigure : onEdit} className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all" style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}>
-        {systemEvent ? "Edit Settings" : "Edit"}
+    <div className="grid w-full grid-cols-[40px_88px_40px_76px] items-center justify-end gap-2 self-stretch sm:w-[268px] sm:shrink-0 sm:self-auto" onClick={(clickEvent) => clickEvent.stopPropagation()}>
+      <button
+        type="button"
+        onClick={systemEvent ? onConfigure : onEdit}
+        className="interactive-secondary flex h-9 w-10 items-center justify-center rounded-xl"
+        style={{ border: "1px solid var(--color-border)", color: "var(--color-text)", background: "white" }}
+        aria-label={systemEvent ? "Edit system settings" : `Edit ${event.name}`}
+        title={systemEvent ? "Edit system settings" : "Edit event"}
+      >
+        <PencilSimple size={16} weight="bold" />
       </button>
-      {!event.is_active && !systemEvent && (
-        <button onClick={onDelete} disabled={deleting} className="px-3 py-1.5 rounded-xl text-xs font-medium transition-all disabled:opacity-60" style={{ background: "var(--color-error-bg)", color: "var(--color-error-text)" }}>
-          {deleting ? "..." : "Delete"}
+      {systemEvent ? (
+        <button type="button" disabled aria-label="Duplicate unavailable for system events" title="System events cannot be duplicated" className="flex h-9 w-full items-center justify-center rounded-xl text-xs font-medium" style={{ color: "var(--color-muted)", background: "var(--color-cream)", opacity: 0.48 }}>
+          Duplicate
+        </button>
+      ) : (
+        <button type="button" onClick={onDuplicate} className="interactive-secondary flex h-9 w-full items-center justify-center rounded-xl text-xs font-medium" style={{ color: "var(--color-forest)", background: "var(--color-cream)" }}>
+          Duplicate
         </button>
       )}
-      {systemEvent ? <span style={{ fontSize: "10px", color: "var(--color-muted)", fontWeight: 600 }}>System only</span> : <EventToggle event={event} activating={activating} onToggle={onToggle} />}
+      {!event.is_active && !systemEvent ? (
+        <button
+          type="button"
+          onClick={onDelete}
+          disabled={deleting}
+          className="interactive-danger flex h-9 w-10 items-center justify-center rounded-xl disabled:opacity-60"
+          style={{ background: "var(--color-error-bg)", color: "var(--color-error-text)" }}
+          aria-label={`Delete ${event.name}`}
+          title="Delete event"
+        >
+          {deleting ? "..." : <Trash size={16} weight="bold" />}
+        </button>
+      ) : (
+        <button type="button" disabled aria-label={deleteUnavailableReason} title={deleteUnavailableReason} className="flex h-9 w-10 items-center justify-center rounded-xl" style={{ color: "var(--color-muted)", background: "var(--color-cream)", opacity: 0.48 }}>
+          <Trash size={16} weight="bold" />
+        </button>
+      )}
+      {systemEvent ? (
+        <button type="button" disabled aria-label="Live status unavailable for system events" title="System events are always available" className="h-9 w-[76px] rounded-xl text-[11px] font-semibold" style={{ color: "var(--color-muted)", background: "var(--color-cream-dark)", border: "1px solid var(--color-border)", opacity: 0.62 }}>
+          System
+        </button>
+      ) : <EventToggle event={event} activating={activating} onToggle={onToggle} />}
     </div>
   );
 }
@@ -121,6 +174,7 @@ function EventRow({
   activating,
   onOpen,
   onEdit,
+  onDuplicate,
   onConfigure,
   onDelete,
   onToggle,
@@ -130,6 +184,7 @@ function EventRow({
   activating: boolean;
   onOpen: () => void;
   onEdit: () => void;
+  onDuplicate: () => void;
   onConfigure: () => void;
   onDelete: () => void;
   onToggle: () => void;
@@ -138,9 +193,9 @@ function EventRow({
   const revenue = new Intl.NumberFormat("en-CA", { style: "currency", currency: CURRENCY, maximumFractionDigits: 0 }).format(event.total_revenue ?? 0);
   return (
     <div className="rounded-2xl cursor-pointer transition-all hover:shadow-sm" style={{ background: "white", border: "1px solid var(--color-border)" }} onClick={onOpen}>
-      <div className="px-5 py-4 flex items-center gap-4">
+      <div className="grid gap-4 px-5 py-4 md:grid-cols-[minmax(0,1fr)_96px_72px_268px] md:items-center">
         <div className="flex flex-col gap-0.5 flex-1 min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-sm font-semibold truncate" style={{ color: "var(--color-forest)" }}>{event.name}</h2>
             <span className="shrink-0 px-2 py-0.5 rounded-full text-xs font-semibold" style={event.is_active ? { background: "var(--color-success-bg)", color: "var(--color-success-text)" } : { background: "var(--color-cream)", color: "var(--color-muted)" }}>
               {event.is_active ? "ACTIVE" : "INACTIVE"}
@@ -150,11 +205,9 @@ function EventRow({
           <span className="text-xs" style={{ color: "var(--color-muted)" }}>{event.event_date}</span>
           <span className="text-xs" style={{ color: "var(--color-muted)" }}>{event.combo_deals.length} combo{event.combo_deals.length === 1 ? "" : "s"} configured</span>
         </div>
-        <div className="hidden md:flex items-center gap-5 shrink-0">
-          <div><p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{revenue}</p><p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>revenue</p></div>
-          <div><p className="text-sm font-bold leading-tight" style={{ color: "var(--color-forest)" }}>{event.order_count ?? 0}</p><p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>orders</p></div>
-        </div>
-        <EventControls event={event} deleting={deleting} activating={activating} onEdit={onEdit} onConfigure={onConfigure} onDelete={onDelete} onToggle={onToggle} />
+        <div className="hidden md:block"><p className="text-sm font-bold leading-tight tabular-nums" style={{ color: "var(--color-forest)" }}>{revenue}</p><p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>revenue</p></div>
+        <div className="hidden md:block"><p className="text-sm font-bold leading-tight tabular-nums" style={{ color: "var(--color-forest)" }}>{event.order_count ?? 0}</p><p className="text-xs leading-tight" style={{ color: "var(--color-muted)" }}>orders</p></div>
+        <EventControls event={event} deleting={deleting} activating={activating} onEdit={onEdit} onDuplicate={onDuplicate} onConfigure={onConfigure} onDelete={onDelete} onToggle={onToggle} />
       </div>
     </div>
   );
@@ -168,6 +221,7 @@ function EventList({
   activating,
   onOpen,
   onEdit,
+  onDuplicate,
   onConfigure,
   onDelete,
   onToggle,
@@ -179,6 +233,7 @@ function EventList({
   activating: number | null;
   onOpen: (event: EventItem) => void;
   onEdit: (event: EventItem) => void;
+  onDuplicate: (event: EventItem) => void;
   onConfigure: (event: EventItem) => void;
   onDelete: (event: EventItem) => void;
   onToggle: (event: EventItem) => void;
@@ -203,6 +258,7 @@ function EventList({
           activating={activating === event.id}
           onOpen={() => onOpen(event)}
           onEdit={() => onEdit(event)}
+          onDuplicate={() => onDuplicate(event)}
           onConfigure={() => onConfigure(event)}
           onDelete={() => onDelete(event)}
           onToggle={() => onToggle(event)}
@@ -300,6 +356,119 @@ function EventToggleConfirmation({
   );
 }
 
+function DuplicateEventModal({
+  event,
+  form,
+  duplicating,
+  onClose,
+  onChange,
+  onSubmit,
+}: {
+  event: EventItem | null;
+  form: DuplicateEventForm;
+  duplicating: boolean;
+  onClose: () => void;
+  onChange: (patch: Partial<DuplicateEventForm>) => void;
+  onSubmit: () => void;
+}) {
+  const formIsValid = Boolean(form.name.trim() && form.event_date.trim());
+
+  return (
+    <Modal
+      isOpen={Boolean(event)}
+      onClose={onClose}
+      title="Duplicate event"
+      actions={(
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={duplicating}
+            className="rounded-xl px-4 py-2.5 text-sm font-medium transition-opacity disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ color: "var(--color-muted)" }}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            form="duplicate-event-form"
+            disabled={duplicating || !formIsValid}
+            className="rounded-xl px-5 py-2.5 text-sm font-semibold transition-transform active:scale-[0.97] disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ background: "var(--color-forest)", color: "var(--color-cream)" }}
+          >
+            {duplicating ? "Duplicating..." : "Duplicate Event"}
+          </button>
+        </>
+      )}
+    >
+      <form
+        id="duplicate-event-form"
+        className="space-y-5"
+        onSubmit={(submitEvent) => {
+          submitEvent.preventDefault();
+          if (formIsValid && !duplicating) onSubmit();
+        }}
+        onKeyDown={(keyEvent) => {
+          if (keyEvent.key !== "Enter") return;
+          keyEvent.preventDefault();
+          if (formIsValid && !duplicating) onSubmit();
+        }}
+      >
+        <div className="rounded-2xl p-4" style={{ background: "var(--color-cream)", border: "1px solid var(--color-border)" }}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: "var(--color-sage)" }}>
+            Copying from
+          </p>
+          <p className="mt-1 text-sm font-semibold" style={{ color: "var(--color-forest)" }}>
+            {event?.name}
+          </p>
+          <p className="mt-0.5 text-xs" style={{ color: "var(--color-muted)" }}>
+            {event?.event_date}
+          </p>
+        </div>
+
+        <p className="text-sm leading-relaxed" style={{ color: "var(--color-muted)" }}>
+          Menu items, pickup locations, combo deals, storefront content, images, and payment settings will be copied. The new event will remain inactive.
+        </p>
+
+        <div className="space-y-2">
+          <label htmlFor="duplicate-event-name" className="block text-sm font-medium" style={{ color: "var(--color-text)" }}>
+            Event Name
+          </label>
+          <input
+            id="duplicate-event-name"
+            type="text"
+            value={form.name}
+            onChange={(changeEvent) => onChange({ name: changeEvent.target.value })}
+            autoFocus
+            required
+            disabled={duplicating}
+            placeholder="May 2026 Batch"
+            className="w-full rounded-xl border bg-white px-4 py-3 text-sm transition-shadow focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
+          />
+        </div>
+
+        <div className="space-y-2">
+          <label htmlFor="duplicate-event-date" className="block text-sm font-medium" style={{ color: "var(--color-text)" }}>
+            Event Date
+          </label>
+          <input
+            id="duplicate-event-date"
+            type="text"
+            value={form.event_date}
+            onChange={(changeEvent) => onChange({ event_date: changeEvent.target.value })}
+            required
+            disabled={duplicating}
+            placeholder="May 31st, 2026"
+            className="w-full rounded-xl border bg-white px-4 py-3 text-sm transition-shadow focus:outline-none focus:ring-2 disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
+          />
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 function RandomSettingsModal({
   isOpen,
   form,
@@ -377,10 +546,14 @@ interface EventsPageState {
   events: EventItem[];
   loading: boolean;
   searchQuery: string;
+  eventFilters: string[];
   currentPage: number;
   activating: number | null;
   deleting: number | null;
   pendingToggle: PendingToggle | null;
+  duplicateEvent: EventItem | null;
+  duplicateForm: DuplicateEventForm;
+  duplicating: boolean;
   randomConfigModal: { isOpen: boolean; event: EventItem | null };
   randomConfigForm: RandomConfigForm;
   savingRandom: boolean;
@@ -390,10 +563,14 @@ const INITIAL_STATE: EventsPageState = {
   events: [],
   loading: true,
   searchQuery: "",
+  eventFilters: [],
   currentPage: 1,
   activating: null,
   deleting: null,
   pendingToggle: null,
+  duplicateEvent: null,
+  duplicateForm: { name: "", event_date: "" },
+  duplicating: false,
   randomConfigModal: { isOpen: false, event: null },
   randomConfigForm: { etransfer_enabled: false, etransfer_email: "" },
   savingRandom: false,
@@ -406,10 +583,14 @@ export default function AdminEventsPage() {
     events,
     loading,
     searchQuery,
+    eventFilters,
     currentPage,
     activating,
     deleting,
     pendingToggle,
+    duplicateEvent,
+    duplicateForm,
+    duplicating,
     randomConfigModal,
     randomConfigForm,
     savingRandom,
@@ -422,6 +603,12 @@ export default function AdminEventsPage() {
     setState((current) => ({
       ...current,
       randomConfigForm: { ...current.randomConfigForm, ...patch },
+    }));
+  }, []);
+  const updateDuplicateForm = useCallback((patch: Partial<EventsPageState["duplicateForm"]>) => {
+    setState((current) => ({
+      ...current,
+      duplicateForm: { ...current.duplicateForm, ...patch },
     }));
   }, []);
   const loadEvents = useCallback(async () => {
@@ -437,15 +624,24 @@ export default function AdminEventsPage() {
 
   const filteredEvents = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
-    return query ? events.filter((event) => event.name.toLowerCase().includes(query)) : events;
-  }, [events, searchQuery]);
+    const statusFilters = eventFilters.filter((filter) => filter === "active" || filter === "inactive");
+    const typeFilters = eventFilters.filter((filter) => filter === "standard" || filter === "system");
+    return events.filter((event) => {
+      const matchesQuery = !query || event.name.toLowerCase().includes(query);
+      const status = event.is_active ? "active" : "inactive";
+      const type = event.kind === "random_requests" ? "system" : "standard";
+      return matchesQuery
+        && (statusFilters.length === 0 || statusFilters.includes(status))
+        && (typeFilters.length === 0 || typeFilters.includes(type));
+    });
+  }, [eventFilters, events, searchQuery]);
 
   const totalPages = Math.max(1, Math.ceil(filteredEvents.length / PAGE_SIZE));
   const pagedEvents = filteredEvents.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
   useEffect(() => {
     updateState({ currentPage: 1 });
-  }, [searchQuery, updateState]);
+  }, [eventFilters, searchQuery, updateState]);
 
   useEffect(() => {
     updateState({ currentPage: Math.min(currentPage, totalPages) });
@@ -494,6 +690,55 @@ export default function AdminEventsPage() {
       showToast(`Failed to ${willActivate ? "activate" : "deactivate"} event`, "error");
     } finally {
       updateState({ activating: null });
+    }
+  }
+
+  function openDuplicateModal(event: EventItem) {
+    updateState({
+      duplicateEvent: event,
+      duplicateForm: { name: `Copy of ${event.name}`, event_date: "" },
+    });
+  }
+
+  function closeDuplicateModal() {
+    if (duplicating) return;
+    updateState({
+      duplicateEvent: null,
+      duplicateForm: { name: "", event_date: "" },
+    });
+  }
+
+  async function handleDuplicateEvent() {
+    if (!duplicateEvent || duplicating) return;
+    const name = duplicateForm.name.trim();
+    const eventDate = duplicateForm.event_date.trim();
+    if (!name || !eventDate) return;
+
+    updateState({ duplicating: true });
+    try {
+      const token = await getAdminToken();
+      if (!token) return;
+      const response = await fetch(`${API_URL}/api/admin/events/${duplicateEvent.id}/duplicate`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ name, event_date: eventDate }),
+      });
+      if (!response.ok) {
+        throw new Error(await getApiErrorMessage(response, "Failed to duplicate event"));
+      }
+      const createdEvent = await response.json() as EventItem;
+      updateState({
+        duplicateEvent: null,
+        duplicateForm: { name: "", event_date: "" },
+      });
+      router.push(`/admin/events/${createdEvent.id}/edit`);
+    } catch (duplicateError) {
+      showToast(duplicateError instanceof Error ? duplicateError.message : "Failed to duplicate event", "error");
+    } finally {
+      updateState({ duplicating: false });
     }
   }
 
@@ -557,15 +802,62 @@ export default function AdminEventsPage() {
         </button>
       </div>
 
-      <div className="mb-4">
+      <div className="mb-4 flex w-full items-center gap-2">
         <input
           type="text"
           value={searchQuery}
           onChange={(event) => updateState({ searchQuery: event.target.value })}
           placeholder="Search events by name..."
-          className="w-full sm:w-80 px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
+          className="min-w-0 flex-1 px-4 py-2.5 rounded-xl text-sm border bg-white focus:outline-none focus:ring-2 transition-all"
           style={{ borderColor: "var(--color-border)", color: "var(--color-text)" }}
         />
+        <Popover className="relative shrink-0">
+          <PopoverButton
+            className="flex items-center gap-2 rounded-xl border bg-white px-4 py-2.5 text-sm font-semibold focus:outline-none focus:ring-2"
+            style={{ borderColor: "var(--color-border)", color: "var(--color-forest)" }}
+          >
+            <FunnelSimple size={16} weight="bold" />
+            Filters{eventFilters.length > 0 ? ` (${eventFilters.length})` : ""}
+          </PopoverButton>
+          <PopoverPanel
+            anchor="bottom end"
+            className="z-[70] mt-2 w-64 rounded-2xl border bg-white p-3 shadow-lg"
+            style={{ borderColor: "var(--color-border)" }}
+          >
+            {[
+              { label: "Status", options: [["active", "Active"], ["inactive", "Inactive"]] },
+              { label: "Event type", options: [["standard", "Standard"], ["system", "System"]] },
+            ].map((group) => (
+              <div key={group.label} className="mb-3 last:mb-0">
+                <p className="mb-1 px-2 text-[11px] font-semibold uppercase tracking-wide" style={{ color: "var(--color-muted)" }}>{group.label}</p>
+                {group.options.map(([value, label]) => {
+                  const selected = eventFilters.includes(value);
+                  return (
+                    <button
+                      key={value}
+                      type="button"
+                      role="checkbox"
+                      aria-checked={selected}
+                      onClick={() => updateState({ eventFilters: selected ? eventFilters.filter((item) => item !== value) : [...eventFilters, value] })}
+                      className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-sm hover:bg-[var(--color-cream)]"
+                      style={{ color: "var(--color-text)" }}
+                    >
+                      <span className="flex h-4 w-4 items-center justify-center rounded border" style={{ borderColor: "var(--color-border)" }}>
+                        {selected && <Check size={12} weight="bold" style={{ color: "var(--color-forest)" }} />}
+                      </span>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
+            {eventFilters.length > 0 && (
+              <button type="button" onClick={() => updateState({ eventFilters: [] })} className="mt-1 w-full rounded-lg px-2 py-2 text-left text-xs font-semibold" style={{ color: "var(--color-error-text)" }}>
+                Clear filters
+              </button>
+            )}
+          </PopoverPanel>
+        </Popover>
       </div>
 
       <EventList
@@ -576,6 +868,7 @@ export default function AdminEventsPage() {
         activating={activating}
         onOpen={(event) => router.push(`/admin/events/${event.id}`)}
         onEdit={(event) => router.push(`/admin/events/${event.id}/edit`)}
+        onDuplicate={openDuplicateModal}
         onConfigure={(event) => updateState({
           randomConfigForm: {
             etransfer_enabled: event.etransfer_enabled,
@@ -592,6 +885,14 @@ export default function AdminEventsPage() {
         activating={activating !== null}
         onCancel={() => updateState({ pendingToggle: null })}
         onConfirm={handleToggleConfirm}
+      />
+      <DuplicateEventModal
+        event={duplicateEvent}
+        form={duplicateForm}
+        duplicating={duplicating}
+        onClose={closeDuplicateModal}
+        onChange={updateDuplicateForm}
+        onSubmit={handleDuplicateEvent}
       />
       <RandomSettingsModal
         isOpen={randomConfigModal.isOpen}

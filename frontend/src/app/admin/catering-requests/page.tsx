@@ -4,7 +4,9 @@ import { Fragment, useCallback, useEffect, useMemo, useState, type Dispatch, typ
 import { useRouter } from "next/navigation";
 import { API_URL } from "@/config/event";
 import { CompactMetricCard, CompactMetricRail, CompactMetricSkeletonRail, CompactMetricTotalCard } from "@/components/admin/CompactMetricRail";
+import AdminToast from "@/components/admin/AdminToast";
 import { AdminBulkTableFrame, AdminClearFiltersButton, AdminDateCell, AdminDeleteIconButton, AdminPagination, AdminRowCheckboxCell, AdminSearchInput, AdminSelectableTable, AdminTableEmptyState, buildAdminBulkStatusProps } from "@/components/admin/AdminCrudParts";
+import GroupedMultiFilterDropdown, { filterIncludes, parseMultiFilter, serializeMultiFilter } from "@/components/admin/GroupedMultiFilterDropdown";
 import Modal from "@/components/ui/Modal";
 import { usePendingStatusChange } from "@/hooks/usePendingStatusChange";
 import { useObjectState } from "@/hooks/useObjectState";
@@ -153,9 +155,12 @@ function rebuildCateringData(previous: CateringRequestsResponse, items: Catering
 function filterCateringRequests(data: CateringRequestsResponse | null, eventType: string, budget: string, status: string, search: string): CateringRequestItem[] {
   if (!data) return [];
   let items = data.items;
-  if (eventType !== "all") items = items.filter((item) => item.event_type === eventType);
-  if (budget !== "all") items = items.filter((item) => item.budget_range === budget);
-  if (status !== "all") items = items.filter((item) => item.status === status);
+  const eventTypes = parseMultiFilter(eventType);
+  const budgets = parseMultiFilter(budget);
+  const statuses = parseMultiFilter(status);
+  if (eventTypes.length > 0) items = items.filter((item) => eventTypes.includes(item.event_type));
+  if (budgets.length > 0) items = items.filter((item) => item.budget_range !== null && budgets.includes(item.budget_range));
+  if (statuses.length > 0) items = items.filter((item) => statuses.includes(item.status));
   return filterAdminItemsBySearch(items, search, (item) => {
     const searchableText = [
       item.full_name,
@@ -579,7 +584,7 @@ function CateringMetrics({ loading, data, averageGuests, statusFilter, onStatusF
     <CompactMetricRail>
       <CompactMetricTotalCard label="Total Requests" value={data.total} />
       {STATUS_OPTIONS.map((option) => {
-        const selected = statusFilter === option.value;
+        const selected = filterIncludes(statusFilter, option.value);
         return (
           <CompactMetricCard key={option.value} onClick={() => onStatusFilterChange(selected ? "all" : option.value)} selected={selected}>
             <p style={{ fontSize: 10, fontWeight: 600, color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>{option.label}</p>
@@ -611,24 +616,33 @@ function CateringFilters({ searchQuery, eventTypeFilter, budgetFilter, statusFil
   onClear: () => void;
 }) {
   const hasFilters = eventTypeFilter !== "all" || budgetFilter !== "all" || statusFilter !== "all" || Boolean(searchQuery.trim());
-  const selectStyle = { padding: "9px 12px", borderRadius: 12, border: "1px solid var(--color-border)", fontSize: 13, color: "var(--color-text)", background: "white", cursor: "pointer", outline: "none" };
+  const groups = [
+    { id: "eventType", label: "Event type", options: CATERING_EVENT_TYPES.map((option) => ({ value: option.id, label: option.name })) },
+    { id: "budget", label: "Budget", options: CATERING_BUDGET_RANGES.map((option) => ({ value: option.id, label: option.name })) },
+    { id: "status", label: "Status", options: STATUS_OPTIONS },
+  ];
+  const selections = {
+    eventType: parseMultiFilter(eventTypeFilter),
+    budget: parseMultiFilter(budgetFilter),
+    status: parseMultiFilter(statusFilter),
+  };
   return (
-    <div style={{ display: "flex", gap: 12, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
-      <AdminSearchInput value={searchQuery} onChange={onSearchChange} placeholder="Search name, contact, type, budget, requests, comments..." />
-      <select value={eventTypeFilter} onChange={(event) => onEventTypeChange(event.target.value)} style={selectStyle}>
-        <option value="all">All event types</option>
-        {CATERING_EVENT_TYPES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-      </select>
-      <select value={budgetFilter} onChange={(event) => onBudgetChange(event.target.value)} style={selectStyle}>
-        <option value="all">All budgets</option>
-        {CATERING_BUDGET_RANGES.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-      </select>
-      <select value={statusFilter} onChange={(event) => onStatusChange(event.target.value)} style={selectStyle}>
-        <option value="all">All statuses</option>
-        {STATUS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-      </select>
+    <div className="mb-4 flex flex-wrap items-center gap-3">
+      <div className="min-w-[320px] flex-[1_1_640px]">
+        <AdminSearchInput value={searchQuery} onChange={onSearchChange} placeholder="Search name, contact, type, budget, requests, comments..." />
+      </div>
+      <GroupedMultiFilterDropdown
+        groups={groups}
+        selections={selections}
+        onChange={(groupId, values) => {
+          const next = serializeMultiFilter(values);
+          if (groupId === "eventType") onEventTypeChange(next);
+          if (groupId === "budget") onBudgetChange(next);
+          if (groupId === "status") onStatusChange(next);
+        }}
+      />
       {hasFilters && <AdminClearFiltersButton onClick={onClear} />}
-      {!loading && <span style={{ fontSize: 13, color: "var(--color-muted)", marginLeft: "auto" }}>{resultCount} result{resultCount === 1 ? "" : "s"}</span>}
+      {!loading && <span className="ml-auto text-[13px]" style={{ color: "var(--color-muted)" }}>{resultCount} result{resultCount === 1 ? "" : "s"}</span>}
     </div>
   );
 }
@@ -686,7 +700,7 @@ export default function AdminCateringRequestsPage() {
   const btnPrimary = ADMIN_BUTTON_PRIMARY_STYLE;
 
   return (
-    <div style={{ padding: "clamp(20px, 2vw, 32px) clamp(16px, 1.25vw, 24px) 56px", maxWidth: 1320, margin: "0 auto" }}>
+    <div style={{ width: "100%", padding: "clamp(20px, 2vw, 32px) clamp(16px, 2vw, 32px) 56px" }}>
       <div style={{ marginBottom: 28 }}>
         <h1
           style={{
@@ -824,25 +838,7 @@ export default function AdminCateringRequestsPage() {
         <strong>{getStatusLabel(bulkStatusTarget)}</strong>?
       </Modal>
 
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            bottom: 24,
-            right: 24,
-            zIndex: 200,
-            padding: "12px 20px",
-            borderRadius: 12,
-            fontSize: 14,
-            fontWeight: 500,
-            color: "white",
-            background: toast.type === "success" ? "var(--color-forest)" : "var(--color-error-text)",
-            boxShadow: "0 4px 20px color-mix(in srgb, var(--color-text) 15%, transparent)",
-          }}
-        >
-          {toast.message}
-        </div>
-      )}
+      <AdminToast toast={toast} />
     </div>
   );
 }
