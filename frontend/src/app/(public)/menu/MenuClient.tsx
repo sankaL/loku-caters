@@ -3,27 +3,17 @@
 import { useState, useCallback, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import type { EventConfig } from "@/config/event";
+import type {
+    EventConfig,
+    CateringMenu,
+    ColdStarter,
+    DessertItem,
+    KidsDish,
+} from "@/config/event";
 import { CURRENCY } from "@/config/event";
 import EVENT_CONFIG from "@/config/event-config.json";
 
 /* ───────────────────────────── types ───────────────────────────── */
-
-interface MenuCard {
-    title: string;
-    image: string;
-    items: { label: string; value: string }[];
-    note?: string;
-}
-
-interface CateringMenu {
-    name: string;
-    subtitle: string;
-    price?: string;
-    priceNote?: string;
-    image: string;
-    cards: MenuCard[];
-}
 
 type AppetizerItem = EventConfig["flyer"]["appetizers"][number];
 type TrayItem = EventConfig["flyer"]["trays"][number];
@@ -33,86 +23,11 @@ type TrayItem = EventConfig["flyer"]["trays"][number];
 const appetizers = EVENT_CONFIG.flyer.appetizers as AppetizerItem[];
 const trays = EVENT_CONFIG.flyer.trays as TrayItem[];
 
-const coldStarters = [
-    {
-        name: "Cheese Platter",
-        desc: "Selection of artisanal cheeses, crackers, and savory accompaniments.",
-        type: "cheese",
-    },
-    {
-        name: "Vegetable Dip",
-        desc: "Crisp garden vegetables paired with signature creamy herb dip.",
-        type: "dip",
-    },
-    {
-        name: "Assorted Cold Cuts",
-        desc: "Curated sliced cured deli meats and gourmet charcuterie cuts.",
-        type: "cuts",
-    },
-    {
-        name: "Charcuterie board",
-        desc: "Artful board of fine meats, cheeses, dried fruits, nuts, and crisps.",
-        type: "charcuterie",
-    },
-    {
-        name: "Finger Sandwiches",
-        desc: "Delicate crustless tea sandwiches with assorted gourmet fillings.",
-        type: "sandwiches",
-    },
-    {
-        name: "Assorted cold canape",
-        desc: "Bite-sized chilled canapes crafted for elegant mingling and events.",
-        type: "canape",
-    },
-];
-
-const desserts = [
-    {
-        name: "Pineapple Pudding",
-        note: "Classic tropical dessert infused with fresh pineapple sweetness.",
-        type: "pudding",
-    },
-    {
-        name: "Fruit Trifle",
-        note: "Layered sponge cake, rich velvety custard, and fresh fruits.",
-        type: "trifle",
-    },
-    {
-        name: "Fresh Fruit Salad",
-        note: "Refreshing medley of freshly cut seasonal tropical fruits.",
-        type: "fruitSalad",
-    },
-    {
-        name: "Fresh Fruit Platter",
-        note: "Artfully arranged seasonal sliced fruits perfect for sharing.",
-        type: "fruitPlatter",
-    },
-    {
-        name: "Cream Caramel",
-        note: "Silky smooth baked egg custard with a rich amber caramel glaze.",
-        type: "creamCaramel",
-    },
-    {
-        name: "Watalappan",
-        note: "Authentic steamed coconut custard sweetened with kitul jaggery and warm spices (Based on availability).",
-        type: "watalappan",
-    },
-];
-
-const kidsDishes = [
-    {
-        name: "Pasta with Chicken and Rose Sauce",
-        desc: "Tender pasta tossed with chicken breast in a creamy tomato sauce.",
-    },
-    {
-        name: "Spaghetti and Meat balls with Tomato Sauce",
-        desc: "Classic spaghetti with savory meatballs in rich tomato sauce.",
-    },
-    {
-        name: "Chicken Fingers with Ketchup",
-        desc: "Crispy golden breaded chicken tenders served with ketchup.",
-    },
-];
+const signatureDishes = EVENT_CONFIG.menu.signatureDishes;
+const cateringMenus = EVENT_CONFIG.menu.cateringMenus as CateringMenu[];
+const coldStarters = EVENT_CONFIG.menu.coldStarters as ColdStarter[];
+const desserts = EVENT_CONFIG.menu.desserts as DessertItem[];
+const kidsDishes = EVENT_CONFIG.menu.kidsDishes as KidsDish[];
 
 function formatPrice(price: number): string {
     return new Intl.NumberFormat("en-CA", {
@@ -239,254 +154,6 @@ function DessertIcon({ type }: { type: string }) {
     }
 }
 
-/* ─────────────────────── catering menus data ──────────────────── */
-
-const cateringMenus: CateringMenu[] = [
-    {
-        name: "Standard Menu",
-        subtitle: "Classic Sri Lankan catering for every occasion",
-        price: "$19",
-        priceNote: "per person (min. 30 persons)",
-        image: "/assets/food/menu/standard-menu.png",
-        cards: [
-            {
-                title: "Option 1",
-                image: "/assets/food/menu/standard-menu.png",
-                items: [
-                    { label: "Rice", value: "Tempered Yellow Rice" },
-                    { label: "Chicken", value: "Chicken Curry" },
-                    { label: "Fish", value: "Fish Ambulthiyal" },
-                    {
-                        label: "Lentils / Sides",
-                        value: "Dhal Fry or Devilled Potato",
-                    },
-                    { label: "Vegetables", value: "Beans" },
-                    { label: "Pickle", value: "Brinjal Moju" },
-                ],
-                note: "Beef, mutton, pork and shrimp options available upon request. Additional charges apply.",
-            },
-            {
-                title: "Option 2",
-                image: "/assets/food/menu/standard-menu.png",
-                items: [
-                    { label: "Rice", value: "Fried Rice" },
-                    { label: "Chicken", value: "Devilled Chicken" },
-                    { label: "Fish", value: "Fish Curry" },
-                    { label: "Sides", value: "Cashew Curry" },
-                    { label: "Vegetables", value: "Vegetable Chop Suey" },
-                    { label: "Condiments", value: "Papadam" },
-                ],
-                note: "Beef, mutton, pork and shrimp options available upon request. Additional charges apply.",
-            },
-            {
-                title: "Option 3",
-                image: "/assets/food/menu/standard-menu.png",
-                items: [
-                    { label: "Rice", value: "Ghee Rice" },
-                    { label: "Chicken", value: "Baked Chicken Curry" },
-                    { label: "Fish", value: "Devilled Fish" },
-                    { label: "Lentils", value: "Dhal Fry" },
-                    { label: "Vegetables", value: "Beans Curry, Polos Curry" },
-                ],
-                note: "Beef, mutton, pork and shrimp options available upon request. Additional charges apply.",
-            },
-        ],
-    },
-    {
-        name: "Buffet Style Menu 1",
-        subtitle: "An elegant buffet with curated selections",
-        price: "$23",
-        priceNote: "per person (min. 30 persons)",
-        image: "/assets/food/menu/buffet-1.png",
-        cards: [
-            {
-                title: "Main Spread",
-                image: "/assets/food/menu/buffet-1.png",
-                items: [
-                    { label: "Salad", value: "Garden Salad" },
-                    { label: "Rice", value: "Fried Rice" },
-                    { label: "Chicken", value: "Oven Baked Chicken Curry" },
-                    { label: "Prawn", value: "Spicy Garlic Onion Prawn" },
-                    {
-                        label: "Vegetables (select 3)",
-                        value: "Dhal Tempered, Potato White Curry, Cashew Curry, Green Bean Curry, or Brinjal Pahi",
-                    },
-                    { label: "Condiments", value: "Papadam" },
-                    { label: "Dessert", value: "Cream Caramel" },
-                ],
-                note: "Beef, mutton, and pork options available upon request. Additional charges apply.",
-            },
-        ],
-    },
-    {
-        name: "Buffet Style Menu 2",
-        subtitle: "A lavish spread with more variety",
-        price: "$27",
-        priceNote: "per person (min. 30 persons)",
-        image: "/assets/food/menu/buffet-2.png",
-        cards: [
-            {
-                title: "Full Spread",
-                image: "/assets/food/menu/buffet-2.png",
-                items: [
-                    { label: "Salads", value: "Garden Salad, Egg Salad" },
-                    { label: "Rice", value: "Yellow Rice" },
-                    { label: "Chicken", value: "Oven Baked Chicken Curry" },
-                    { label: "Prawn", value: "Spicy Garlic Onion Prawn" },
-                    { label: "Fish", value: "Fish Curry" },
-                    { label: "Sides", value: "Fried Potato, Cashew Curry" },
-                    { label: "Pickle", value: "Brinjal Moju" },
-                    { label: "Dessert", value: "Cream Caramel" },
-                ],
-                note: "Beef, mutton, and pork options available upon request. Additional charges apply.",
-            },
-        ],
-    },
-    {
-        name: "Classic Curry Menu",
-        subtitle: "Build your own classic curry experience",
-        price: "$29.50",
-        priceNote: "per person (min. 30 persons)",
-        image: "/assets/food/menu/classic-curry.png",
-        cards: [
-            {
-                title: "Salads & Rice",
-                image: "/assets/food/menu/classic-curry.png",
-                items: [
-                    {
-                        label: "Salads (select 2)",
-                        value: "Garden Salad, Beet Salad, Potato Salad, or Cucumber Onion Yogurt",
-                    },
-                    {
-                        label: "Rice / Noodles (select 2)",
-                        value: "Fried Rice, Yellow Rice, Brown Rice, or Vegetable Egg Noodle",
-                    },
-                ],
-            },
-            {
-                title: "Proteins",
-                image: "/assets/food/menu/classic-curry.png",
-                items: [
-                    {
-                        label: "Chicken (select 1)",
-                        value: "Devilled Chicken, Chicken Stir-fry, or Oven Baked Chicken Curry",
-                    },
-                    {
-                        label: "Fish (select 1)",
-                        value: "Fish Ambulthiyal, White Fish Curry, Spicy Mustard Fish Curry, or Fish Korma",
-                    },
-                    {
-                        label: "Prawn (select 1)",
-                        value: "Garlic Prawn, Brown Prawn Curry, or Fried Prawn",
-                    },
-                ],
-            },
-            {
-                title: "Vegetables & Desserts",
-                image: "/assets/food/menu/desserts.png",
-                items: [
-                    {
-                        label: "Vegetables (select 3)",
-                        value: "Dhal Curry, Brinjal Moju, Brinjal Pahi, Mixed Vegetable Curry, Bean Curry, Potato Curry, Potato Tempered, Cauliflower and Potato Masala, Cashew Curry, Cabbage Mallum, Pineapple Curry, Kola Mallum, or Dhal and Spinach Tempered",
-                    },
-                    { label: "Condiments (select 1)", value: "Papadam or Pickle" },
-                    {
-                        label: "Dessert",
-                        value: "Fruit Platter or Cream Caramel",
-                    },
-                ],
-                note: "Beef, mutton, and pork options available upon request. Additional charges apply.",
-            },
-        ],
-    },
-    {
-        name: "International Buffet",
-        subtitle: "A fusion of Sri Lankan and international cuisine",
-        price: "$39",
-        priceNote: "per person (min. 35 persons)",
-        image: "/assets/food/menu/international-buffet.png",
-        cards: [
-            {
-                title: "Salads & Starches",
-                image: "/assets/food/menu/international-buffet.png",
-                items: [
-                    {
-                        label: "Salad with Dressing (select 2)",
-                        value: "Potato Salad, Garden Salad, Beet Salad, Apple Coleslaw, Cucumber and Tomato Yogurt, Pasta Salad, or Caesar Salad",
-                    },
-                    {
-                        label: "Rice / Noodles / Pasta / Potatoes (select 2)",
-                        value: "Fried Rice, Yellow Rice, Plain Buttered Rice, Fried Noodles, Pasta with Tomato Sauce, Penne Pasta with Tomato Sauce, Spaghetti with Mushroom Sauce, Roasted Herb Potato, or Lyonnais Potato (with onion)",
-                    },
-                ],
-            },
-            {
-                title: "Proteins",
-                image: "/assets/food/menu/international-buffet.png",
-                items: [
-                    {
-                        label: "Chicken (select 1)",
-                        value: "Chicken Stir-fry, Chicken with Cashew, Chicken Red Wine Sauce, Chicken Mushroom Sauce, Red Chicken Curry with Lemongrass, Chicken Korma, or Chicken Masala",
-                    },
-                    {
-                        label: "Fish (select 1)",
-                        value: "Fish with White Wine Sauce, Devilled Fish, Fish Curry, Fish Masala, Fish with Mandarin Sauce, or Sweet and Sour Fish",
-                    },
-                    {
-                        label: "Prawn (select 1)",
-                        value: "Prawn Provencal, Prawn Teriyaki, Prawn Stir-fry, Prawn with White Wine Sauce, Prawn Kadi, Prawn Curry, Prawn Telata, or Prawn Sweet and Sour",
-                    },
-                ],
-            },
-            {
-                title: "Vegetables & Desserts",
-                image: "/assets/food/menu/desserts.png",
-                items: [
-                    {
-                        label: "Vegetables (select 3)",
-                        value: "Garden Vegetable, Buttered Broccoli, Glazed Carrot, Mixed Vegetable Curry, Vegetable Chop Suey, Steam Vegetable, Bean Curry, Polos Maluwa, Cashew Curry, Brinjal Moju, Dhal Tempered, Dhal and Spinach Tempered, or Cauliflower and Potato Masala",
-                    },
-                    { label: "Condiments", value: "Papadam and Pickle" },
-                    {
-                        label: "Dessert (select 2)",
-                        value: "Fresh Fruit Salad, Cream Caramel, or Fruit Trifle",
-                    },
-                ],
-            },
-        ],
-    },
-    {
-        name: "Set Menu",
-        subtitle: "Table d'Hote - fine dining experience",
-        price: "Market Price",
-        priceNote: "(Price will vary according to market price)",
-        image: "/assets/food/menu/set-menu.png",
-        cards: [
-            {
-                title: "Full Course",
-                image: "/assets/food/menu/set-menu.png",
-                items: [
-                    {
-                        label: "Salad",
-                        value: "Garden Spring Vegetable Salad with Mango Vinaigrette",
-                    },
-                    {
-                        label: "Meat (select 1)",
-                        value: "Roasted Beef Strip Loin with Mushroom Sauce or Pepper Sauce, or Oven Baked Salmon Fillet with White Wine Sauce or Caper Butter Sauce",
-                    },
-                    {
-                        label: "Accompaniment",
-                        value: "Mashed Potato or Herb Roasted Potato",
-                    },
-                    { label: "Vegetable", value: "Buttered Vegetable Medley" },
-                    { label: "Dessert", value: "Orange Cream Caramel" },
-                ],
-                note: "Price will vary according to market price.",
-            },
-        ],
-    },
-];
-
 /* ─────────────────── catering menu modal component ────────────── */
 
 function CateringMenuModal({
@@ -578,7 +245,7 @@ function CateringMenuModal({
 
                         {/* menu name overlay */}
                         <div className="absolute bottom-4 left-6 right-6">
-                            <p className="text-[#c4a96a] text-xs uppercase tracking-[0.2em] font-semibold mb-1">
+                            <p className="text-[color:var(--color-gold)] text-xs uppercase tracking-[0.2em] font-semibold mb-1">
                                 {menu.name}
                             </p>
                             <h3
@@ -593,11 +260,11 @@ function CateringMenuModal({
                     {/* menu items */}
                     <div className="px-6 md:px-8 py-6 max-h-[50vh] overflow-y-auto custom-scrollbar">
                         {/* price badge */}
-                        {menu.price && currentCard === 0 && (
+                        {(menu.price != null || menu.priceNote) && currentCard === 0 && (
                             <div className="flex items-center justify-center mb-6">
-                                <span className="inline-flex items-center gap-2 bg-[#c4a96a]/15 border border-[#c4a96a]/30 text-[#c4a96a] px-5 py-2 rounded-full text-sm font-semibold tracking-wide">
+                                <span className="inline-flex items-center gap-2 bg-[color:var(--color-gold)]/15 border border-[color:var(--color-gold)]/30 text-[color:var(--color-gold)] px-5 py-2 rounded-full text-sm font-semibold tracking-wide">
                                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v12M9 9h6M9 15h4"/></svg>
-                                    {menu.price} {menu.priceNote}
+                                    {menu.price != null ? formatPrice(menu.price) : "Market Price"} {menu.priceNote}
                                 </span>
                             </div>
                         )}
@@ -605,7 +272,7 @@ function CateringMenuModal({
                         <div className="space-y-4">
                             {card.items.map((item, idx) => (
                                 <div key={idx} className="border-b border-white/10 pb-4 last:border-0 last:pb-0">
-                                    <p className="text-[#c4a96a] text-xs uppercase tracking-[0.15em] font-semibold mb-1.5">
+                                    <p className="text-[color:var(--color-gold)] text-xs uppercase tracking-[0.15em] font-semibold mb-1.5">
                                         {item.label}
                                     </p>
                                     <p className="text-white/85 text-sm leading-relaxed">
@@ -617,8 +284,8 @@ function CateringMenuModal({
 
                         {/* note */}
                         {card.note && (
-                            <div className="mt-5 pt-4 border-t border-[#c4a96a]/20">
-                                <p className="text-[#c4a96a]/70 text-xs italic leading-relaxed text-center">
+                            <div className="mt-5 pt-4 border-t border-[color:var(--color-gold)]/20">
+                                <p className="text-[color:var(--color-gold)]/70 text-xs italic leading-relaxed text-center">
                                     {card.note}
                                 </p>
                             </div>
@@ -633,7 +300,7 @@ function CateringMenuModal({
                             className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                                 total <= 1
                                     ? "opacity-0 pointer-events-none"
-                                    : "bg-white/10 hover:bg-[#c4a96a]/30 text-white"
+                                    : "bg-white/10 hover:bg-[color:var(--color-gold)]/30 text-white"
                             }`}
                             aria-label="Previous card"
                         >
@@ -650,7 +317,7 @@ function CateringMenuModal({
                                     onClick={() => setCurrentCard(idx)}
                                     className={`transition-all duration-300 rounded-full ${
                                         idx === currentCard
-                                            ? "w-6 h-2 bg-[#c4a96a]"
+                                            ? "w-6 h-2 bg-[color:var(--color-gold)]"
                                             : "w-2 h-2 bg-white/25 hover:bg-white/40"
                                     }`}
                                     aria-label={`Go to card ${idx + 1}`}
@@ -664,7 +331,7 @@ function CateringMenuModal({
                             className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${
                                 total <= 1
                                     ? "opacity-0 pointer-events-none"
-                                    : "bg-white/10 hover:bg-[#c4a96a]/30 text-white"
+                                    : "bg-white/10 hover:bg-[color:var(--color-gold)]/30 text-white"
                             }`}
                             aria-label="Next card"
                         >
@@ -782,7 +449,7 @@ export default function MenuClient({
                         <div className="mt-10 flex justify-center">
                             <Link
                                 href="/orders"
-                                className="inline-flex items-center gap-2 bg-[#8B5E3C] text-white px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-forest)] transition-all duration-300 shadow-[0_4px_14px_0_rgba(139,94,60,0.39)] hover:scale-105"
+                                className="inline-flex items-center gap-2 bg-[color:var(--color-bark)] text-white px-8 py-3.5 rounded-full font-bold text-lg hover:bg-[color:var(--color-forest)] transition-all duration-300 shadow-[0_4px_14px_0_rgba(139,94,60,0.39)] hover:scale-105"
                             >
                                 We have an event running right now. Order here!
                                 <svg
@@ -833,11 +500,11 @@ export default function MenuClient({
                                     <span className="bg-[color:var(--color-sage)] text-white text-[10px] uppercase tracking-[0.15em] font-bold px-3 py-1.5 rounded-full shadow-lg">
                                         Signature
                                     </span>
-                                    <span className="bg-[#8B5E3C] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
-                                        $23
+                                    <span className="bg-[color:var(--color-bark)] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
+                                        {formatPrice(signatureDishes.lamprais.price)}
                                     </span>
                                     <span className="bg-[color:var(--color-forest)] text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg">
-                                        Min. 20 packets
+                                        {signatureDishes.lamprais.minOrder}
                                     </span>
                                 </div>
                             </div>
@@ -909,11 +576,11 @@ export default function MenuClient({
                                     <span className="bg-[color:var(--color-sage)] text-white text-[10px] uppercase tracking-[0.15em] font-bold px-3 py-1.5 rounded-full shadow-lg">
                                         Signature
                                     </span>
-                                    <span className="bg-[#8B5E3C] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
-                                        $18
+                                    <span className="bg-[color:var(--color-bark)] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
+                                        {formatPrice(signatureDishes.chickenBiryani.price)}
                                     </span>
                                     <span className="bg-[color:var(--color-forest)] text-white text-xs font-semibold px-3 py-1.5 rounded-full shadow-lg">
-                                        Min. 25 persons
+                                        {signatureDishes.chickenBiryani.minOrder}
                                     </span>
                                 </div>
                             </div>
@@ -1062,13 +729,17 @@ export default function MenuClient({
                                     <div className="absolute inset-0 bg-gradient-to-t from-black/50 to-transparent" />
 
                                     {/* price badge */}
-                                    {menu.price && (
-                                        <span className="absolute top-3 right-3 bg-[#8B5E3C] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
-                                            {menu.price}
-                                            {menu.price !== "Market Price" && (
-                                                <span className="font-normal opacity-80">
-                                                    /person
-                                                </span>
+                                    {(menu.price != null || menu.priceNote) && (
+                                        <span className="absolute top-3 right-3 bg-[color:var(--color-bark)] text-white text-xs font-bold px-3 py-1.5 rounded-full shadow-lg">
+                                            {menu.price != null ? (
+                                                <>
+                                                    {formatPrice(menu.price)}
+                                                    <span className="font-normal opacity-80">
+                                                        /person
+                                                    </span>
+                                                </>
+                                            ) : (
+                                                "Market Price"
                                             )}
                                         </span>
                                     )}
@@ -1130,7 +801,7 @@ export default function MenuClient({
                                 className="group bg-white rounded-3xl border border-[color:var(--color-border)] p-6 shadow-sm hover:shadow-lg transition-all duration-300 hover:-translate-y-1 flex flex-col justify-between"
                             >
                                 <div>
-                                    <div className="w-12 h-12 rounded-2xl bg-[#c4a96a]/15 text-[#8B5E3C] group-hover:bg-[#8B5E3C] group-hover:text-white transition-colors duration-300 flex items-center justify-center mb-4">
+                                    <div className="w-12 h-12 rounded-2xl bg-[color:var(--color-gold)]/15 text-[color:var(--color-bark)] group-hover:bg-[color:var(--color-bark)] group-hover:text-white transition-colors duration-300 flex items-center justify-center mb-4">
                                         <DessertIcon type={dessert.type} />
                                     </div>
                                     <h3
@@ -1244,7 +915,7 @@ export default function MenuClient({
                         className="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
                         onClick={() => setIsLampraisModalOpen(false)}
                     />
-                    <div className="relative bg-[#F9F7F1] rounded-3xl shadow-2xl overflow-y-auto max-h-[90vh] max-w-4xl w-full z-10 animate-scale-in">
+                    <div className="relative bg-[color:var(--color-cream)] rounded-3xl shadow-2xl overflow-y-auto max-h-[90vh] max-w-4xl w-full z-10 animate-scale-in">
                         <button
                             onClick={() => setIsLampraisModalOpen(false)}
                             className="absolute top-4 right-4 z-20 w-10 h-10 bg-black/40 hover:bg-black/60 text-white rounded-full flex items-center justify-center transition-colors backdrop-blur-md"
