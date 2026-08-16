@@ -37,10 +37,10 @@
         "image": "/assets/food/flyer/patties.jpeg",
         "minOrder": 10,
         "varieties": [
-          { "name": "Vegetable", "price": 1.25 },
-          { "name": "Fish", "price": 1.25 },
-          { "name": "Chicken", "price": 1.5 },
-          { "name": "Mutton", "price": 1.75 }
+          { "name": "Vegetable", "price": 1.5 },
+          { "name": "Fish", "price": 1.5 },
+          { "name": "Chicken", "price": 1.75 },
+          { "name": "Mutton", "price": 2.0 }
         ]
       },
       {
@@ -51,6 +51,14 @@
         "varieties": [
           { "name": "Vegetable", "price": 1.1 },
           { "name": "Fish", "price": 1.25 }
+        ]
+      },
+      {
+        "name": "Vegetable Roti",
+        "image": "/assets/food/flyer/vegetable-roti.webp",
+        "minOrder": 10,
+        "varieties": [
+          { "name": "Vegetable", "price": 2.0 }
         ]
       }
     ],

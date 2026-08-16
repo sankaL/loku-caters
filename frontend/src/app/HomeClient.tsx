@@ -144,7 +144,7 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               { title: "Traditional Lamprais", desc: "A fragrant mixed meat curry, frikkadel, blachan, and seeni sambal, wrapped and baked in a banana leaf.", image: "/assets/food/lamprais.jpg" },
-              { title: "Chicken Biryani with Raita", desc: "Aromatic basmati rice cooked with rich spices, tender chicken, and served with cooling raita.", image: "/assets/food/chicken-biryani.jpg" },
+              { title: "Chicken Biryani with Raita", desc: "Aromatic basmati rice cooked with rich spices, tender chicken, and served with cooling raita.", image: "/assets/food/chicken-biryani.webp" },
               { title: "Fish Rolls", desc: "Crispy, golden-fried rolls filled with a savory mix of spiced fish and potatoes. A classic Sri Lankan short eat.", image: "/assets/food/rolls2.jpg" },
             ].map((dish, idx) => (
               <div
