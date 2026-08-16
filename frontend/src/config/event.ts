@@ -51,6 +51,44 @@ export interface Location {
   timeSlots: string[];
 }
 
+export interface MenuCard {
+  title: string;
+  image: string;
+  items: { label: string; value: string }[];
+  note?: string;
+}
+
+export interface CateringMenu {
+  name: string;
+  subtitle: string;
+  price: number | null;
+  priceNote?: string;
+  image: string;
+  cards: MenuCard[];
+}
+
+export interface SignatureDish {
+  price: number;
+  minOrder: string;
+}
+
+export interface ColdStarter {
+  name: string;
+  desc: string;
+  type: string;
+}
+
+export interface DessertItem {
+  name: string;
+  note: string;
+  type: string;
+}
+
+export interface KidsDish {
+  name: string;
+  desc: string;
+}
+
 export interface EventConfig {
   event: {
     id?: number | null;
@@ -89,6 +127,16 @@ export interface EventConfig {
       size: string;
       price: number;
     }[];
+  };
+  menu?: {
+    signatureDishes: {
+      lamprais: SignatureDish;
+      chickenBiryani: SignatureDish;
+    };
+    cateringMenus: CateringMenu[];
+    coldStarters: ColdStarter[];
+    desserts: DessertItem[];
+    kidsDishes: KidsDish[];
   };
 }
 
