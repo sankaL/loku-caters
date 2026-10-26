@@ -1,12 +1,173 @@
 {
-  "event": {
-    "date": "February 28th, 2026",
-    "pickup_date": "2026-02-28"
-  },
   "currency": "CAD",
-  "hero_header": "",
-  "hero_subheader": "",
-  "promo_details": null,
+  "active_event": {
+    "is_active": false,
+    "event": {
+      "date": "Sep 26th, 2026"
+    },
+    "hero_header": "We're Making",
+    "hero_header_sage": "Lamprais.",
+    "hero_subheader": "We're making a fresh batch and we'd love for you to have some.",
+    "promo_details": "Check out our new combo deals!",
+    "tooltip_enabled": true,
+    "tooltip_header": "What is Lamprais?",
+    "tooltip_body": "Lamprais is a beloved Sri Lankan dish of rice cooked in stock, served with a variety of curries and accompaniments, all wrapped and baked in a banana leaf.",
+    "tooltip_image_path": "/assets/img/tooltip/lamprais-how-its-made-compressed.png",
+    "hero_side_image_path": "/assets/img/hero-side/lamprais-side.png",
+    "etransfer_enabled": true,
+    "etransfer_email": "jlokuliyana@yahoo.com",
+    "combo_deals": [
+      {
+        "id": "ce30376d-c6d2-4d10-8cc7-1e21fbb9c0f5",
+        "name": "Main w/ Apps",
+        "enabled": true,
+        "sort_order": 0,
+        "requirement_groups": [
+          {
+            "id": "6938fa12-9e97-4cd6-b256-98e6196d57d9",
+            "name": "Main",
+            "item_ids": [
+              "7917985e-952c-4980-baac-10e4b9c7f450",
+              "31524945-77ee-4773-bc55-bd6f2cce3fab",
+              "1fa9723e-fc1b-4a63-b512-91ab95f569db",
+              "16523d38-a4da-4923-9844-e77b3ea81640"
+            ],
+            "min_quantity": 1
+          },
+          {
+            "id": "068edc1f-4bd3-4152-a43a-2e1851db89c1",
+            "name": "Apps",
+            "item_ids": [
+              "f5d63715-6e94-430a-8fc3-4b20d4adaa84",
+              "1659ae7b-0488-485e-86cc-b85c1db919f1",
+              "439f9840-147b-47de-9296-fef464dc5a0e",
+              "146a752f-85fa-4571-a40f-805f66bc9125",
+              "acff298f-37fa-4774-aac4-aed3aa9c5ce2"
+            ],
+            "min_quantity": 10
+          }
+        ],
+        "discount": {
+          "type": "percentage",
+          "amount": 10.0,
+          "applies_to": "group",
+          "target_group_id": "068edc1f-4bd3-4152-a43a-2e1851db89c1"
+        }
+      }
+    ],
+    "items": [
+      {
+        "id": "7917985e-952c-4980-baac-10e4b9c7f450",
+        "name": "Chicken Lamprais w/ Pork&Beef Cutlet",
+        "description": "Authentic Sri Lankan rice cooked in rich stock, wrapped in a banana leaf with fragrant accompaniments",
+        "price": 23.0,
+        "discounted_price": 20.0,
+        "minimum_order_quantity": 1,
+        "image_path": "/assets/food/client-menu/lamprais.webp"
+      },
+      {
+        "id": "31524945-77ee-4773-bc55-bd6f2cce3fab",
+        "name": "Lamprais - Vegetarian",
+        "description": "Tofu curry, veggie cutlets and fried egg",
+        "price": 20.0,
+        "discounted_price": null,
+        "minimum_order_quantity": 1,
+        "image_path": "/assets/food/client-menu/lamprais-veg.webp"
+      },
+      {
+        "id": "16523d38-a4da-4923-9844-e77b3ea81640",
+        "name": "Lamprais w/ Fish Curry",
+        "description": "Authentic Lamprais but with Fish curry instead of chicken curry",
+        "price": 25.0,
+        "discounted_price": 22.0,
+        "minimum_order_quantity": 1
+      },
+      {
+        "id": "1fa9723e-fc1b-4a63-b512-91ab95f569db",
+        "name": "Lamprais w/ Fish Cutlet",
+        "description": "Authentic Sri Lankan rice cooked in rich stock, wrapped in a banana leaf with fragrant accompaniments - Fish Cutlet",
+        "price": 23.0,
+        "discounted_price": 20.0,
+        "minimum_order_quantity": 1,
+        "image_path": "/assets/food/client-menu/lamprais.webp"
+      },
+      {
+        "id": "1659ae7b-0488-485e-86cc-b85c1db919f1",
+        "name": "Pastries - Fish",
+        "description": "Flaky, golden pastry crescents generously filled with a savory, warmly spiced blend of fish, potatoes, and aromatic herbs.",
+        "price": 2.5,
+        "discounted_price": null,
+        "minimum_order_quantity": 5,
+        "image_path": "/assets/food/client-menu/pastries.webp"
+      },
+      {
+        "id": "f5d63715-6e94-430a-8fc3-4b20d4adaa84",
+        "name": "Cutlets - Fish",
+        "description": "Bite-sized, golden-fried spheres packed with a zesty, intensely seasoned mixture of fish, green chilies, and traditional spices.",
+        "price": 1.25,
+        "discounted_price": null,
+        "minimum_order_quantity": 10,
+        "image_path": "/assets/food/client-menu/cutlets.webp"
+      },
+      {
+        "id": "439f9840-147b-47de-9296-fef464dc5a0e",
+        "name": "Patties - Fish",
+        "description": "Sri Lankan Fish Patties are spicy fish empanadas with a fish filling and a perfectly flaky buttery crust! A classic Sri Lankan savory snack!",
+        "price": 1.5,
+        "discounted_price": null,
+        "minimum_order_quantity": 10,
+        "image_path": "/assets/food/client-menu/patties.webp"
+      },
+      {
+        "id": "146a752f-85fa-4571-a40f-805f66bc9125",
+        "name": "Rolls - Mutton",
+        "description": "A crispy, breadcrumb-coated crepe rolled tightly around a peppery, flavorful filling of spiced mutton and tender potatoes.",
+        "price": 3.5,
+        "discounted_price": null,
+        "minimum_order_quantity": 5,
+        "image_path": "/assets/food/client-menu/rolls.webp"
+      },
+      {
+        "id": "acff298f-37fa-4774-aac4-aed3aa9c5ce2",
+        "name": "Rolls - Fish",
+        "description": "A crispy, breadcrumb-coated crepe rolled tightly around a peppery, flavorful filling of spiced fish and tender potatoes.",
+        "price": 2.75,
+        "discounted_price": null,
+        "minimum_order_quantity": 5,
+        "image_path": "/assets/food/client-menu/rolls.webp"
+      }
+    ],
+    "locations": [
+      {
+        "id": "5635c3e7-7fbc-49dd-8061-ee798d81b117",
+        "name": "Welland",
+        "address": "78 Shoreview Dr, Welland, ON",
+        "timeSlots": [
+          "12:00 PM - 1:00 PM",
+          "1:00 PM - 2:00 PM",
+          "2:00 PM - 3:00 PM"
+        ]
+      },
+      {
+        "id": "e771b0f9-d2a0-41af-baf2-4a7e619d8be7",
+        "name": "Mississauga",
+        "address": "",
+        "timeSlots": [
+          "12:00 PM - 1:00 PM",
+          "1:00 PM - 2:00 PM"
+        ]
+      },
+      {
+        "id": "8eba36fb-559f-4a56-b3a2-67ef56159720",
+        "name": "Etobicoke",
+        "address": "",
+        "timeSlots": [
+          "12:00 PM - 1:00 PM",
+          "1:00 PM - 2:00 PM"
+        ]
+      }
+    ]
+  },
   "flyer": {
     "appetizers": [
       {
@@ -15,10 +176,22 @@
         "imagePosition": "center 30%",
         "minOrder": 10,
         "varieties": [
-          { "name": "Vegetable", "price": 2.25 },
-          { "name": "Fish", "price": 2.75 },
-          { "name": "Chicken", "price": 3.0 },
-          { "name": "Mutton", "price": 3.25 }
+          {
+            "name": "Vegetable",
+            "price": 2.25
+          },
+          {
+            "name": "Fish",
+            "price": 2.75
+          },
+          {
+            "name": "Chicken",
+            "price": 3.0
+          },
+          {
+            "name": "Mutton",
+            "price": 3.25
+          }
         ]
       },
       {
@@ -26,10 +199,22 @@
         "image": "/assets/food/flyer/pastries.jpeg",
         "minOrder": 10,
         "varieties": [
-          { "name": "Vegetable", "price": 2.5 },
-          { "name": "Fish", "price": 2.5 },
-          { "name": "Chicken", "price": 2.75 },
-          { "name": "Mutton", "price": 2.75 }
+          {
+            "name": "Vegetable",
+            "price": 2.5
+          },
+          {
+            "name": "Fish",
+            "price": 2.5
+          },
+          {
+            "name": "Chicken",
+            "price": 2.75
+          },
+          {
+            "name": "Mutton",
+            "price": 2.75
+          }
         ]
       },
       {
@@ -37,10 +222,22 @@
         "image": "/assets/food/flyer/patties.jpeg",
         "minOrder": 10,
         "varieties": [
-          { "name": "Vegetable", "price": 1.5 },
-          { "name": "Fish", "price": 1.5 },
-          { "name": "Chicken", "price": 1.75 },
-          { "name": "Mutton", "price": 2.0 }
+          {
+            "name": "Vegetable",
+            "price": 1.5
+          },
+          {
+            "name": "Fish",
+            "price": 1.5
+          },
+          {
+            "name": "Chicken",
+            "price": 1.75
+          },
+          {
+            "name": "Mutton",
+            "price": 2.0
+          }
         ]
       },
       {
@@ -49,8 +246,14 @@
         "imagePosition": "center 30%",
         "minOrder": 10,
         "varieties": [
-          { "name": "Vegetable", "price": 1.1 },
-          { "name": "Fish", "price": 1.25 }
+          {
+            "name": "Vegetable",
+            "price": 1.1
+          },
+          {
+            "name": "Fish",
+            "price": 1.25
+          }
         ]
       },
       {
@@ -58,7 +261,10 @@
         "image": "/assets/food/flyer/vegetable-roti.webp",
         "minOrder": 10,
         "varieties": [
-          { "name": "Vegetable", "price": 2.0 }
+          {
+            "name": "Vegetable",
+            "price": 2.0
+          }
         ]
       }
     ],
@@ -118,15 +324,30 @@
             "title": "Option 1",
             "image": "/assets/food/menu/standard-menu.png",
             "items": [
-              { "label": "Rice", "value": "Tempered Yellow Rice" },
-              { "label": "Chicken", "value": "Chicken Curry" },
-              { "label": "Fish", "value": "Fish Ambulthiyal" },
+              {
+                "label": "Rice",
+                "value": "Tempered Yellow Rice"
+              },
+              {
+                "label": "Chicken",
+                "value": "Chicken Curry"
+              },
+              {
+                "label": "Fish",
+                "value": "Fish Ambulthiyal"
+              },
               {
                 "label": "Lentils / Sides",
                 "value": "Dhal Fry or Devilled Potato"
               },
-              { "label": "Vegetables", "value": "Beans" },
-              { "label": "Pickle", "value": "Brinjal Moju" }
+              {
+                "label": "Vegetables",
+                "value": "Beans"
+              },
+              {
+                "label": "Pickle",
+                "value": "Brinjal Moju"
+              }
             ],
             "note": "Beef, mutton, pork and shrimp options available upon request. Additional charges apply."
           },
@@ -134,12 +355,30 @@
             "title": "Option 2",
             "image": "/assets/food/menu/standard-menu.png",
             "items": [
-              { "label": "Rice", "value": "Fried Rice" },
-              { "label": "Chicken", "value": "Devilled Chicken" },
-              { "label": "Fish", "value": "Fish Curry" },
-              { "label": "Sides", "value": "Cashew Curry" },
-              { "label": "Vegetables", "value": "Vegetable Chop Suey" },
-              { "label": "Condiments", "value": "Papadam" }
+              {
+                "label": "Rice",
+                "value": "Fried Rice"
+              },
+              {
+                "label": "Chicken",
+                "value": "Devilled Chicken"
+              },
+              {
+                "label": "Fish",
+                "value": "Fish Curry"
+              },
+              {
+                "label": "Sides",
+                "value": "Cashew Curry"
+              },
+              {
+                "label": "Vegetables",
+                "value": "Vegetable Chop Suey"
+              },
+              {
+                "label": "Condiments",
+                "value": "Papadam"
+              }
             ],
             "note": "Beef, mutton, pork and shrimp options available upon request. Additional charges apply."
           },
@@ -147,11 +386,26 @@
             "title": "Option 3",
             "image": "/assets/food/menu/standard-menu.png",
             "items": [
-              { "label": "Rice", "value": "Ghee Rice" },
-              { "label": "Chicken", "value": "Baked Chicken Curry" },
-              { "label": "Fish", "value": "Devilled Fish" },
-              { "label": "Lentils", "value": "Dhal Fry" },
-              { "label": "Vegetables", "value": "Beans Curry, Polos Curry" }
+              {
+                "label": "Rice",
+                "value": "Ghee Rice"
+              },
+              {
+                "label": "Chicken",
+                "value": "Baked Chicken Curry"
+              },
+              {
+                "label": "Fish",
+                "value": "Devilled Fish"
+              },
+              {
+                "label": "Lentils",
+                "value": "Dhal Fry"
+              },
+              {
+                "label": "Vegetables",
+                "value": "Beans Curry, Polos Curry"
+              }
             ],
             "note": "Beef, mutton, pork and shrimp options available upon request. Additional charges apply."
           }
@@ -168,16 +422,34 @@
             "title": "Main Spread",
             "image": "/assets/food/menu/buffet-1.png",
             "items": [
-              { "label": "Salad", "value": "Garden Salad" },
-              { "label": "Rice", "value": "Fried Rice" },
-              { "label": "Chicken", "value": "Oven Baked Chicken Curry" },
-              { "label": "Prawn", "value": "Spicy Garlic Onion Prawn" },
+              {
+                "label": "Salad",
+                "value": "Garden Salad"
+              },
+              {
+                "label": "Rice",
+                "value": "Fried Rice"
+              },
+              {
+                "label": "Chicken",
+                "value": "Oven Baked Chicken Curry"
+              },
+              {
+                "label": "Prawn",
+                "value": "Spicy Garlic Onion Prawn"
+              },
               {
                 "label": "Vegetables (select 3)",
                 "value": "Dhal Tempered, Potato White Curry, Cashew Curry, Green Bean Curry, or Brinjal Pahi"
               },
-              { "label": "Condiments", "value": "Papadam" },
-              { "label": "Dessert", "value": "Cream Caramel" }
+              {
+                "label": "Condiments",
+                "value": "Papadam"
+              },
+              {
+                "label": "Dessert",
+                "value": "Cream Caramel"
+              }
             ],
             "note": "Beef, mutton, and pork options available upon request. Additional charges apply."
           }
@@ -194,14 +466,38 @@
             "title": "Full Spread",
             "image": "/assets/food/menu/buffet-2.png",
             "items": [
-              { "label": "Salads", "value": "Garden Salad, Egg Salad" },
-              { "label": "Rice", "value": "Yellow Rice" },
-              { "label": "Chicken", "value": "Oven Baked Chicken Curry" },
-              { "label": "Prawn", "value": "Spicy Garlic Onion Prawn" },
-              { "label": "Fish", "value": "Fish Curry" },
-              { "label": "Sides", "value": "Fried Potato, Cashew Curry" },
-              { "label": "Pickle", "value": "Brinjal Moju" },
-              { "label": "Dessert", "value": "Cream Caramel" }
+              {
+                "label": "Salads",
+                "value": "Garden Salad, Egg Salad"
+              },
+              {
+                "label": "Rice",
+                "value": "Yellow Rice"
+              },
+              {
+                "label": "Chicken",
+                "value": "Oven Baked Chicken Curry"
+              },
+              {
+                "label": "Prawn",
+                "value": "Spicy Garlic Onion Prawn"
+              },
+              {
+                "label": "Fish",
+                "value": "Fish Curry"
+              },
+              {
+                "label": "Sides",
+                "value": "Fried Potato, Cashew Curry"
+              },
+              {
+                "label": "Pickle",
+                "value": "Brinjal Moju"
+              },
+              {
+                "label": "Dessert",
+                "value": "Cream Caramel"
+              }
             ],
             "note": "Beef, mutton, and pork options available upon request. Additional charges apply."
           }
@@ -254,7 +550,10 @@
                 "label": "Vegetables (select 3)",
                 "value": "Dhal Curry, Brinjal Moju, Brinjal Pahi, Mixed Vegetable Curry, Bean Curry, Potato Curry, Potato Tempered, Cauliflower and Potato Masala, Cashew Curry, Cabbage Mallum, Pineapple Curry, Kola Mallum, or Dhal and Spinach Tempered"
               },
-              { "label": "Condiments (select 1)", "value": "Papadam or Pickle" },
+              {
+                "label": "Condiments (select 1)",
+                "value": "Papadam or Pickle"
+              },
               {
                 "label": "Dessert",
                 "value": "Fruit Platter or Cream Caramel"
@@ -311,7 +610,10 @@
                 "label": "Vegetables (select 3)",
                 "value": "Garden Vegetable, Buttered Broccoli, Glazed Carrot, Mixed Vegetable Curry, Vegetable Chop Suey, Steam Vegetable, Bean Curry, Polos Maluwa, Cashew Curry, Brinjal Moju, Dhal Tempered, Dhal and Spinach Tempered, or Cauliflower and Potato Masala"
               },
-              { "label": "Condiments", "value": "Papadam and Pickle" },
+              {
+                "label": "Condiments",
+                "value": "Papadam and Pickle"
+              },
               {
                 "label": "Dessert (select 2)",
                 "value": "Fresh Fruit Salad, Cream Caramel, or Fruit Trifle"
@@ -343,8 +645,14 @@
                 "label": "Accompaniment",
                 "value": "Mashed Potato or Herb Roasted Potato"
               },
-              { "label": "Vegetable", "value": "Buttered Vegetable Medley" },
-              { "label": "Dessert", "value": "Orange Cream Caramel" }
+              {
+                "label": "Vegetable",
+                "value": "Buttered Vegetable Medley"
+              },
+              {
+                "label": "Dessert",
+                "value": "Orange Cream Caramel"
+              }
             ],
             "note": "Price will vary according to market price."
           }

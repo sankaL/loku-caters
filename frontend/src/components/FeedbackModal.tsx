@@ -3,7 +3,6 @@
 import { useState, type CSSProperties } from "react";
 import Modal from "@/components/ui/Modal";
 import CustomSelect from "@/components/ui/CustomSelect";
-import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 import { PRE_ORDER_REASON_OPTIONS } from "@/lib/feedbackOptions";
 
@@ -223,7 +222,7 @@ export default function FeedbackModal({
     setSubmitting(true);
     setServerError("");
     try {
-      const res = await fetch(`${API_URL}/api/feedback`, {
+      const res = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

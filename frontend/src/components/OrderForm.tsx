@@ -3,11 +3,12 @@
 
 import { useEffect, useMemo, useRef, type Dispatch, type SetStateAction } from "react";
 import ReactDOM from "react-dom";
-import { API_URL, CURRENCY, type ComboDeal, type Item, type Location } from "@/config/event";
+import { CURRENCY, type ComboDeal, type Item, type Location } from "@/config/event";
 import CustomSelect from "@/components/ui/CustomSelect";
 import DescriptionPopover from "@/components/ui/DescriptionPopover";
 import Modal from "@/components/ui/Modal";
 import { effectiveMinimumOrderQuantityForItem } from "@/lib/comboDealUtils";
+import { quoteCart } from "@/lib/pricing";
 import { useObjectState } from "@/hooks/useObjectState";
 
 export interface AppliedComboSummary {
@@ -284,48 +285,32 @@ function useOrderFormModel({ items, locations, comboDeals, onSuccess }: OrderFor
     };
   }, [pickerOpen, setState]);
 
+  // Quotes are priced in the browser from the same config the checkout route
+  // re-prices on the server, so there is no network round trip here.
   useEffect(() => {
-    const controller = new AbortController();
+    setState("quoteLoading", false);
     if (selectedLines.length === 0) {
       setState("quote", EMPTY_QUOTE);
-      setState("quoteLoading", false);
       setState("quoteError", "");
-      return () => controller.abort();
+      return;
     }
 
-    setState("quoteLoading", true);
-    setState("quoteError", "");
-    setState("quote", EMPTY_QUOTE);
-    const timeoutId = window.setTimeout(async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/orders/quote`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            lines: selectedLines.map(({ item, qty }) => ({ item_id: item.id, quantity: qty })),
-          }),
-          signal: controller.signal,
-        });
-        const data = await res.json();
-        if (!res.ok) {
-          const detail = Array.isArray(data?.detail) ? data.detail.map((entry: { msg: string }) => entry.msg).join(", ") : (data?.detail || "Failed to price cart");
-          throw new Error(detail);
-        }
-        setState("quote", data);
-      } catch (error) {
-        if ((error as Error).name === "AbortError") return;
-        setState("quote", EMPTY_QUOTE);
-        setState("quoteError", error instanceof Error ? error.message : "Failed to price cart");
-      } finally {
-        setState("quoteLoading", false);
-      }
-    }, 250);
-
-    return () => {
-      controller.abort();
-      window.clearTimeout(timeoutId);
-    };
-  }, [selectedLines, setState]);
+    try {
+      setState(
+        "quote",
+        quoteCart(
+          items,
+          comboDeals,
+          selectedLines.map(({ item, qty }, index) => ({ line_id: `${item.id}:${index}`, item_id: item.id, quantity: qty })),
+          CURRENCY
+        )
+      );
+      setState("quoteError", "");
+    } catch (error) {
+      setState("quote", EMPTY_QUOTE);
+      setState("quoteError", error instanceof Error ? error.message : "Failed to price cart");
+    }
+  }, [comboDeals, items, selectedLines, setState]);
 
   function changeQty(itemId: string, delta: number) {
     setQuantities((prev) => {
@@ -422,7 +407,7 @@ function useOrderFormModel({ items, locations, comboDeals, onSuccess }: OrderFor
     setSubmitting(true);
     setServerError("");
     try {
-      const res = await fetch(`${API_URL}/api/orders/checkout`, {
+      const res = await fetch("/api/orders/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

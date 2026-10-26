@@ -13,10 +13,8 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-Railway-4C46F5?style=for-the-badge&logo=railway" alt="Railway"/>
-  <img src="https://img.shields.io/badge/Python-3.12-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/TypeScript-5.0-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript"/>
   <img src="https://img.shields.io/badge/Next.js-15-000000?style=for-the-badge&logo=next.js" alt="Next.js"/>
-  <img src="https://img.shields.io/badge/PostgreSQL-Supabase-336791?style=for-the-badge&logo=postgresql" alt="PostgreSQL"/>
 </p>
 
 ---
@@ -87,114 +85,62 @@ Our signature Lamprais is a celebration of flavors, traditionally wrapped in a b
 
 ### Customer Experience
 
-- **Frictionless Pre-Ordering:** A single-page checkout flow optimized for mobile and desktop users.
-- **Smart Logistics:** Dynamic location selection with real-time pickup slots based on kitchen capacity.
-- **Order Notifications:** Automated transactional emails confirming order details and tracking status.
-- **Catering Coordinator:** Dedicated inquiries form for custom catering menu planning.
-- **Customer Reviews:** Native feedback system allowing verified buyers to share their dining experience.
+- **Frictionless Pre-Ordering:** A single-page checkout flow optimized for mobile and desktop users, with live combo deal pricing.
+- **Pickup Logistics:** Location and time slot selection driven by the event config.
+- **Owner Notifications:** Every order, catering request, and feedback submission is emailed to the owners through Resend, with reply-to set to the customer.
+- **Catering Coordinator:** Dedicated inquiry form for custom catering menu planning.
+- **Customer Reviews:** Curated reviews from `config/reviews.json`, plus a form for new ones.
 
-### Administrative Command Center
-
-- **Analytics Dashboard:** Real-time metrics on gross revenue, order volume, and menu performance.
-- **Lifecycle Management:** End-to-end order tracking from submission to pickup with payment reconciliation.
-- **Event Planner:** Dynamic creation and configuration of local pop-up events.
-- **Dynamic Inventory:** Live controls for managing menu items, active status, and custom pricing.
-- **E-Transfer Reconciliation:** Semi-automated payment tracking and verification workflow.
-- **Customer Directory:** Database of customer order history, lifetime value, and contact records.
+> This `frontend-only` branch runs without a backend, database, or admin portal to keep hosting cost low. The full version with the admin dashboard lives on `main`.
 
 ---
 
 ## Configuration-Driven Design
 
-Loku Caters features a config-driven architecture. All event details, menu configurations, location list, pickup windows, and pricing rules are defined in a single source of truth:
+All event details, menu items, pickup locations, time slots, combo deals, and pricing live in a single source of truth:
 
-- File: `config/event-config.json`
+- File: `config/event-config.json` (reviews: `config/reviews.json`)
 
-To apply changes to the running system, modify `config/event-config.json` and sync the configuration across the backend and frontend services using the project Makefile:
+To open or close pre-orders, edit `active_event` and sync the frontend copy:
 
 ```bash
 make sync-config
 ```
+
+See [Running a Pre-Order Event](docs/running-an-event.md) for the full walkthrough.
 
 ---
 
 ## Tech Stack
 
-The application is built with a modern, high-performance tech stack designed for speed, scalability, and ease of deployment.
-
-### Frontend
-- **Framework:** Next.js 15 (TypeScript, App Router)
-- **UI Library:** React 19
+- **Framework:** Next.js 15 (TypeScript, App Router), React 19
 - **Styling:** Tailwind CSS v4 with CSS custom properties
 - **Typography:** Playfair Display (headings) and Inter (body text) via Google Fonts
-- **Deployment:** Railway (Dockerized with standalone build output)
-
-### Backend
-- **Framework:** FastAPI (Python 3.12)
-- **Data Validation:** Pydantic v2 for robust runtime type checking
-- **Database ORM:** SQLAlchemy 2.0
-- **Database Driver:** pg8000 (Pure-Python driver, avoiding native compilation dependencies)
-- **Deployment:** Railway (Dockerized with Uvicorn server)
-
-### Infrastructure & Services
-- **Database:** Supabase (Managed PostgreSQL)
-- **Email Delivery:** Resend (Python SDK with try-except fallback safety)
-- **Hosting:** Railway (Separate frontend and backend services)
-- **Repository:** GitHub
+- **Data:** Static JSON config, no database
+- **Email:** Resend REST API called from Next.js route handlers
+- **Hosting:** Railway, one Docker service (standalone output, app sleeping enabled)
 
 ---
 
 ## Local Development Setup
 
-Follow these steps to run the application locally.
-
 ### Prerequisites
-- Python 3.12 or higher
-- Node.js 18 or higher
-- Docker (required for running the local dev database)
+- Node.js 20.19 or higher
 
-### Quick Start (Recommended)
-
-Start the entire stack (local PostgreSQL container, backend service, and frontend development server) with a single command:
+### Quick Start
 
 ```bash
-make dev
+cp .env-example .env   # add Resend credentials to send real notification emails
+make dev               # http://localhost:3000
 ```
-This command automatically runs:
-1. Docker Desktop on macOS when it is not already running
-2. Local PostgreSQL container on port `5433` (to avoid conflicts with system installations)
-3. Database migrations using Alembic
-4. Database seeding with comprehensive test data when the database is empty
-5. FastAPI backend on `http://127.0.0.1:8001` (logs are piped to `/tmp/loku-backend.log`)
-6. Next.js dev server on `http://localhost:3000`
 
-Local development runs with `DEV_MODE=true`, so admin authentication is disabled. Production continues to use Supabase authentication. Use `make dev-local` when you want to replace existing local data with a fresh comprehensive seed before starting the stack.
-
-### Useful Development Commands
-
-Refer to the project `Makefile` for full task automation:
+### Useful Commands
 
 ```bash
-# Sync configuration changes across frontend and backend
-make sync-config
-
-# Reset the local database (drop schema, run migrations, and re-seed)
-make db-reset
-
-# Seed the database with test data
-make db-seed
-
-# Stop background backend processes
-make stop
-
-# Tail live backend logs
-make logs-backend
-
-# Run backend tests with the Makefile-managed local environment
-make test-backend
+make sync-config   # copy config/*.json into the frontend
+make test          # pricing unit tests
+make build         # production build
 ```
-
-Production admin authentication pins tokens to `SUPABASE_URL`. Set `ADMIN_EMAILS` to the comma-separated administrator account list, and set `RATE_LIMIT_TRUSTED_PROXY_HOPS=1` for the Railway proxy topology. An empty allowlist fails closed unless `ALLOW_ALL_AUTHENTICATED_ADMINS=true` is explicitly set. The backend derives the Supabase project URL from the documented database URL when `SUPABASE_URL` is omitted, but the explicit value is preferred.
 
 ---
 
@@ -211,13 +157,9 @@ Our visual identity reflects the rich, natural heritage of Sri Lankan cuisine:
 
 ## Documentation Directory
 
-Explore the detailed technical documentation files:
-
+- [Running a Pre-Order Event](docs/running-an-event.md)
 - [Tech Stack Overview](docs/tech-stack.md)
-- [Database Schema](docs/database-schema.md)
 - [Menu Configuration](docs/menu.md)
-- [Order Flow States](docs/order-flow-states.md)
-- [Production Deployment Runbook](docs/prod-deployment-PLAN.md)
 
 ---
 

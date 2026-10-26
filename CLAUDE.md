@@ -2,41 +2,43 @@
 
 ## Project overview
 
-Single-page pre-order app for Loku Caters (authentic Sri Lankan Lamprais).
-- **Frontend**: Next.js 15 + React 19 + Tailwind CSS v4 — `frontend/`
-- **Backend**: FastAPI + SQLAlchemy + pg8000 — `backend/`
-- **Database**: Supabase (PostgreSQL)
-- **Email**: Resend
-- **Deployment**: Railway (two separate services)
+Customer-facing pre-order site for Loku Caters (authentic Sri Lankan Lamprais).
+This `frontend-only` branch has no backend, database or admin portal; `main`
+keeps the full FastAPI + Supabase version.
+- **App**: Next.js 15 + React 19 + Tailwind CSS v4 — `frontend/`
+- **Data**: static JSON in `config/` (event, menu, reviews)
+- **Email**: Resend REST API from Next.js route handlers in `frontend/src/app/api/`
+- **Deployment**: Railway, single service `loku-caters-frontend`, deploys from the `frontend-only` branch
 
-## Config sync — always do this after editing event-config.json
+## Config sync — always do this after editing config/*.json
 
 ```
-cp config/event-config.json frontend/src/config/event-config.json
-cp config/event-config.json backend/event-config.json
+make sync-config
 ```
 
 Never hardcode prices, currency, locations, or time slots in components or routes.
+See `docs/running-an-event.md` for opening and closing pre-orders.
 
 ## Critical rules
 
-- **Pricing is server-side only.** `backend/routers/orders.py` computes the total from config. Never trust the client.
-- **DB driver is pg8000.** Do not introduce psycopg2 — it needs native compilation.
+- **Pricing is server-side authoritative.** `frontend/src/app/api/orders/checkout/route.ts` re-prices the cart with `priceEventCart()` from config. Never trust client totals.
 - **Never use em dashes (`—`) or en dashes (`–`)** anywhere — copy, comments, config, or code.
-- **Currency** comes from `event_config.get_currency()` on the backend and `CURRENCY` from `@/config/event` on the frontend. Never hardcode `"CAD"` or any currency string.
-- **Email failures must not fail the order.** Always wrap `send_confirmation()` in try/except.
+- **Currency** comes from `CURRENCY` in `@/config/event`. Never hardcode `"CAD"` or any currency string.
+- **The notification email is the only record of a submission.** If Resend fails, return an error to the customer; never swallow it.
+- **Keep it cheap.** No new services, databases or always-on workers. Pages should stay statically prerendered.
 - **Never commit `.env` or `.env.local`.**
 
 ## Key files
 
 | File | Purpose |
 |---|---|
-| `config/event-config.json` | Source of truth for all business config |
-| `frontend/src/config/event.ts` | Re-exports config values for components |
-| `backend/event_config.py` | Loads config JSON for backend routes |
-| `backend/routers/orders.py` | Only order endpoint — computes price, saves, sends email |
-| `backend/services/email.py` | Resend HTML email template |
-| `backend/database.py` | SQLAlchemy engine with pg8000 URL transform |
+| `config/event-config.json` | Active event, items, locations, combo deals, menu, flyer |
+| `config/reviews.json` | Reviews shown on the site |
+| `frontend/src/config/event.ts` | Types and `getActiveEventConfig()` |
+| `frontend/src/lib/pricing.ts` | Cart and combo deal pricing (port of the old Python service) |
+| `frontend/src/lib/server/email.ts` | Resend notification email template |
+| `frontend/src/lib/server/http.ts` | Rate limiting and request validation helpers |
+| `frontend/railway.json` | Railway build and deploy settings |
 
 ## Design system
 
@@ -48,15 +50,6 @@ Never hardcode prices, currency, locations, or time slots in components or route
 ## Running locally
 
 ```bash
-# Backend
-cd backend && python3 -m uvicorn main:app --reload --port 8000
-
-# Frontend
-cd frontend && npm run dev
+make dev    # Next.js dev server, real Resend when .env has credentials
+make test   # pricing unit tests
 ```
-
-## Local Testing
-Use the makefile scripts for # Local dev (local Postgres container, DEV_MODE=true, real Resend) when testing
-
-## MUST FOLLOW after code change
-- if its a db change update database-schema.md

@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
-import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 import StarRating from "@/components/ui/StarRating";
 
@@ -40,7 +39,7 @@ export default function ContactPage() {
         }
 
         try {
-            const resp = await fetch(`${API_URL}/api/feedback`, {
+            const resp = await fetch("/api/feedback", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),

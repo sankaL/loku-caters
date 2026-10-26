@@ -1,0 +1,140 @@
+{
+  "currency": "CAD",
+  "event": {
+    "date": "Sep 26th, 2026"
+  },
+  "items": [
+    {
+      "id": "7917985e-952c-4980-baac-10e4b9c7f450",
+      "name": "Chicken Lamprais w/ Pork&Beef Cutlet",
+      "price": 23.0,
+      "discounted_price": 20.0,
+      "minimum_order_quantity": 1
+    },
+    {
+      "id": "31524945-77ee-4773-bc55-bd6f2cce3fab",
+      "name": "Lamprais - Vegetarian",
+      "price": 20.0,
+      "discounted_price": null,
+      "minimum_order_quantity": 1
+    },
+    {
+      "id": "16523d38-a4da-4923-9844-e77b3ea81640",
+      "name": "Lamprais w/ Fish Curry",
+      "price": 25.0,
+      "discounted_price": 22.0,
+      "minimum_order_quantity": 1
+    },
+    {
+      "id": "1fa9723e-fc1b-4a63-b512-91ab95f569db",
+      "name": "Lamprais w/ Fish Cutlet",
+      "price": 23.0,
+      "discounted_price": 20.0,
+      "minimum_order_quantity": 1
+    },
+    {
+      "id": "1659ae7b-0488-485e-86cc-b85c1db919f1",
+      "name": "Pastries - Fish",
+      "price": 2.5,
+      "discounted_price": null,
+      "minimum_order_quantity": 5
+    },
+    {
+      "id": "f5d63715-6e94-430a-8fc3-4b20d4adaa84",
+      "name": "Cutlets - Fish",
+      "price": 1.25,
+      "discounted_price": null,
+      "minimum_order_quantity": 10
+    },
+    {
+      "id": "439f9840-147b-47de-9296-fef464dc5a0e",
+      "name": "Patties - Fish",
+      "price": 1.5,
+      "discounted_price": null,
+      "minimum_order_quantity": 10
+    },
+    {
+      "id": "146a752f-85fa-4571-a40f-805f66bc9125",
+      "name": "Rolls - Mutton",
+      "price": 3.5,
+      "discounted_price": null,
+      "minimum_order_quantity": 5
+    },
+    {
+      "id": "acff298f-37fa-4774-aac4-aed3aa9c5ce2",
+      "name": "Rolls - Fish",
+      "price": 2.75,
+      "discounted_price": null,
+      "minimum_order_quantity": 5
+    }
+  ],
+  "locations": [
+    {
+      "id": "5635c3e7-7fbc-49dd-8061-ee798d81b117",
+      "name": "Welland",
+      "address": "78 Shoreview Dr, Welland, ON",
+      "timeSlots": [
+        "12:00 PM - 1:00 PM",
+        "1:00 PM - 2:00 PM",
+        "2:00 PM - 3:00 PM"
+      ]
+    },
+    {
+      "id": "e771b0f9-d2a0-41af-baf2-4a7e619d8be7",
+      "name": "Mississauga",
+      "address": "",
+      "timeSlots": [
+        "12:00 PM - 1:00 PM",
+        "1:00 PM - 2:00 PM"
+      ]
+    },
+    {
+      "id": "8eba36fb-559f-4a56-b3a2-67ef56159720",
+      "name": "Etobicoke",
+      "address": "",
+      "timeSlots": [
+        "12:00 PM - 1:00 PM",
+        "1:00 PM - 2:00 PM"
+      ]
+    }
+  ],
+  "combo_deals": [
+    {
+      "id": "ce30376d-c6d2-4d10-8cc7-1e21fbb9c0f5",
+      "name": "Main w/ Apps",
+      "enabled": true,
+      "sort_order": 0,
+      "requirement_groups": [
+        {
+          "id": "6938fa12-9e97-4cd6-b256-98e6196d57d9",
+          "name": "Main",
+          "item_ids": [
+            "7917985e-952c-4980-baac-10e4b9c7f450",
+            "31524945-77ee-4773-bc55-bd6f2cce3fab",
+            "1fa9723e-fc1b-4a63-b512-91ab95f569db",
+            "16523d38-a4da-4923-9844-e77b3ea81640"
+          ],
+          "min_quantity": 1
+        },
+        {
+          "id": "068edc1f-4bd3-4152-a43a-2e1851db89c1",
+          "name": "Apps",
+          "item_ids": [
+            "f5d63715-6e94-430a-8fc3-4b20d4adaa84",
+            "1659ae7b-0488-485e-86cc-b85c1db919f1",
+            "439f9840-147b-47de-9296-fef464dc5a0e",
+            "146a752f-85fa-4571-a40f-805f66bc9125",
+            "acff298f-37fa-4774-aac4-aed3aa9c5ce2"
+          ],
+          "min_quantity": 10
+        }
+      ],
+      "discount": {
+        "type": "percentage",
+        "amount": 10.0,
+        "applies_to": "group",
+        "target_group_id": "068edc1f-4bd3-4152-a43a-2e1851db89c1"
+      }
+    }
+  ]
+}

@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import StarRating from "@/components/ui/StarRating";
 import type { PublicReview } from "@/components/ui/ReviewTicker";
 import CustomerReviewsSection from "@/components/CustomerReviewsSection";
-import { API_URL } from "@/config/event";
+import { PUBLIC_REVIEWS } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 
 /* ---------- Main page ---------- */
@@ -150,22 +150,7 @@ export default function ReviewsClient() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
-  const [reviews, setReviews] = useState<PublicReview[]>([]);
-
-  useEffect(() => {
-    async function loadReviews() {
-      try {
-        const res = await fetch(`${API_URL}/api/feedback/reviews`);
-        if (res.ok) {
-          const data: PublicReview[] = await res.json();
-          setReviews(data);
-        }
-      } catch {
-        // Silently fail - reviews are secondary content
-      }
-    }
-    loadReviews();
-  }, []);
+  const reviews = PUBLIC_REVIEWS;
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -185,7 +170,7 @@ export default function ReviewsClient() {
     };
 
     try {
-      const resp = await fetch(`${API_URL}/api/feedback`, {
+      const resp = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

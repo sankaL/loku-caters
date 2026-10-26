@@ -1,22 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import Link from "next/link";
 import CustomerReviewsSection from "@/components/CustomerReviewsSection";
-import type { PublicReview } from "@/components/ui/ReviewTicker";
-import { API_URL } from "@/config/event";
+import { PUBLIC_REVIEWS } from "@/config/event";
 import type { EventConfig } from "@/config/event";
 
 export default function HomeClient({ eventConfig }: { eventConfig: EventConfig | null }) {
   const hasActiveEvent = Boolean(eventConfig);
-  const [reviews, setReviews] = useState<PublicReview[]>([]);
-
-  useEffect(() => {
-    fetch(`${API_URL}/api/feedback/reviews`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data: PublicReview[]) => setReviews(data))
-      .catch(() => {});
-  }, []);
 
   return (
     <main className="flex-1 flex flex-col bg-[color:var(--color-cream)]">
@@ -123,7 +113,7 @@ export default function HomeClient({ eventConfig }: { eventConfig: EventConfig |
       </section>
 
       <CustomerReviewsSection
-        reviews={reviews}
+        reviews={PUBLIC_REVIEWS}
         className="pb-24 px-6 bg-[color:var(--color-cream)]"
         showShareLink
       />

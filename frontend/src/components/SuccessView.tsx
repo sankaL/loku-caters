@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Modal from "@/components/ui/Modal";
 import StarRating from "@/components/ui/StarRating";
-import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 import type { CheckoutResult } from "@/components/OrderForm";
 
@@ -264,7 +263,7 @@ export default function SuccessView({ result }: SuccessViewProps) {
     setSubmitting(true);
     setServerError("");
     try {
-      const res = await fetch(`${API_URL}/api/feedback`, {
+      const res = await fetch("/api/feedback", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

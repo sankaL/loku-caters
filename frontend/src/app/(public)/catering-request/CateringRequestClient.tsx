@@ -3,7 +3,6 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Listbox, ListboxButton, ListboxOption, ListboxOptions } from '@headlessui/react';
-import { API_URL } from "@/config/event";
 import { captureEvent } from "@/lib/analytics";
 import { CATERING_BUDGET_RANGES, CATERING_EVENT_TYPES } from "@/lib/cateringRequestOptions";
 
@@ -33,7 +32,7 @@ export default function CateringRequestClient() {
         };
 
         try {
-            const resp = await fetch(`${API_URL}/api/catering-requests`, {
+            const resp = await fetch("/api/catering-requests", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),

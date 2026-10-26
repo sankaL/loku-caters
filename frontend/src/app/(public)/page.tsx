@@ -1,17 +1,11 @@
 import HomeClient from "@/app/HomeClient";
-import { fetchEventConfig } from "@/config/event";
+import { getActiveEventConfig } from "@/config/event";
 import { buildPageMetadata } from "@/config/metadata";
 
 export const metadata = buildPageMetadata("home");
 
-export default async function Home() {
-  let eventConfig = null;
-
-  try {
-    eventConfig = await fetchEventConfig();
-  } catch (err) {
-    console.error("Failed to load event config:", err);
-  }
+export default function Home() {
+  const eventConfig = getActiveEventConfig();
 
   return <HomeClient eventConfig={eventConfig} />;
 }

@@ -1,7 +1,9 @@
 import EVENT_CONFIG from "./event-config.json";
+import REVIEWS from "./reviews.json";
+import type { PublicReview } from "@/components/ui/ReviewTicker";
 
-export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 export const CURRENCY = EVENT_CONFIG.currency;
+export const PUBLIC_REVIEWS: PublicReview[] = REVIEWS;
 
 export interface Item {
   id: string;
@@ -140,18 +142,17 @@ export interface EventConfig {
   };
 }
 
-export async function fetchEventConfig(eventId?: number | null): Promise<EventConfig | null> {
-  const params = new URLSearchParams();
-  if (typeof eventId === "number" && Number.isFinite(eventId)) {
-    params.set("event_id", String(eventId));
-  }
-
-  const query = params.size > 0 ? `?${params.toString()}` : "";
-  const res = await fetch(`${API_URL}/api/config${query}`, { cache: "no-store" });
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const body = await res.text().catch(() => "unknown");
-    throw new Error(`Failed to load event configuration (${res.status}): ${body}`);
-  }
-  return res.json();
+/**
+ * Returns the current event from config/event-config.json, or null when
+ * `active_event.is_active` is false. Set it to true to open pre-orders.
+ */
+export function getActiveEventConfig(): EventConfig | null {
+  const activeEvent = EVENT_CONFIG.active_event;
+  if (!activeEvent?.is_active) return null;
+  return {
+    ...activeEvent,
+    currency: EVENT_CONFIG.currency,
+    flyer: EVENT_CONFIG.flyer,
+    menu: EVENT_CONFIG.menu,
+  } as EventConfig;
 }
