@@ -20,7 +20,7 @@ export async function middleware(request: NextRequest) {
     getTokenFromAuthCookies(request);
 
   if (!accessToken) {
-    return redirectToLogin();
+    return redirectToLogin(request);
   }
 
   try {
@@ -30,15 +30,16 @@ export async function middleware(request: NextRequest) {
     if (!decoded.exp || decoded.exp * 1000 < Date.now()) throw new Error("expired");
     return NextResponse.next();
   } catch {
-    return redirectToLogin();
+    return redirectToLogin(request);
   }
 }
 
-function redirectToLogin(): NextResponse {
-  return new NextResponse(null, {
-    status: 307,
-    headers: { Location: "/admin/login" },
-  });
+// Redirects need an absolute URL (a bare "/admin/login" throws ERR_INVALID_URL).
+// Build it from the proxy headers so it points at the public host, not the container.
+function redirectToLogin(request: NextRequest): NextResponse {
+  const host = request.headers.get("x-forwarded-host") ?? request.headers.get("host") ?? request.nextUrl.host;
+  const proto = request.headers.get("x-forwarded-proto")?.split(",")[0].trim() ?? request.nextUrl.protocol.replace(":", "");
+  return NextResponse.redirect(new URL("/admin/login", `${proto}://${host}`), 307);
 }
 
 function getTokenFromAuthCookies(request: NextRequest): string | undefined {
