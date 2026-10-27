@@ -2,7 +2,7 @@
 # Loku Caters -- Development Makefile (frontend-only)
 # ============================================================================
 
-.PHONY: sync-config check-config dev build test help
+.PHONY: sync-config check-config dev build test help deploy-full deploy-lite deploy-status
 
 LOCAL_FRONTEND_PORT = 3000
 
@@ -41,6 +41,18 @@ build: sync-config
 ## Run frontend unit tests
 test:
 	cd frontend && npm test
+
+## Deploy main (frontend + backend + admin) to Railway
+deploy-full:
+	./scripts/railway-mode.sh full
+
+## Deploy this frontend-only branch to Railway and stop the backend
+deploy-lite:
+	./scripts/railway-mode.sh lite
+
+## Show what Railway is running
+deploy-status:
+	./scripts/railway-mode.sh status
 
 ## Show available targets
 help:

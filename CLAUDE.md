@@ -8,7 +8,7 @@ keeps the full FastAPI + Supabase version.
 - **App**: Next.js 15 + React 19 + Tailwind CSS v4 — `frontend/`
 - **Data**: static JSON in `config/` (event, menu, reviews)
 - **Email**: Resend REST API from Next.js route handlers in `frontend/src/app/api/`
-- **Deployment**: Railway, single service `loku-caters-frontend`, deploys from the `frontend-only` branch
+- **Deployment**: Railway. `make deploy-lite` runs this branch on `loku-caters-frontend` and stops the backend; `make deploy-full` switches back to `main`. Nothing deploys on push.
 
 ## Config sync — always do this after editing config/*.json
 

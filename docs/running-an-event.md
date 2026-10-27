@@ -22,8 +22,8 @@ through Resend.
    - Hero and tooltip copy: `hero_header`, `hero_header_sage`,
      `hero_subheader`, `promo_details`, `tooltip_*`.
 2. Sync the frontend copy: `make sync-config`
-3. Commit and push to the `frontend-only` branch. Railway redeploys
-   automatically.
+3. Commit and push to the `frontend-only` branch, then run
+   `make deploy-lite` to deploy it.
 
 Close pre-orders by setting `is_active` back to `false` and redeploying.
 
@@ -58,3 +58,18 @@ and redeploy.
 | `REPLY_TO_EMAIL` | Fallback reply-to when no customer email is given |
 | `NEXT_PUBLIC_SITE_URL` | Canonical site URL (build time) |
 | `NEXT_PUBLIC_POSTHOG_KEY`, `NEXT_PUBLIC_POSTHOG_HOST` | Analytics (build time) |
+
+## Switching between the lite and full site
+
+`main` has the full site (backend, database, admin portal). This branch is the
+cheap lite site. Switch production with:
+
+```bash
+make deploy-full    # main on both services, frontend sleep off
+make deploy-lite    # this branch on the frontend, backend stopped
+make deploy-status  # what each service is running
+```
+
+Both deploy the latest commit of the branch on GitHub, so push first. The
+Supabase keep-alive cron runs in both modes. Orders placed in lite mode only
+exist as emails, so they will not appear in the admin portal.
