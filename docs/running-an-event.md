@@ -70,6 +70,8 @@ make deploy-lite    # this branch on the frontend, backend stopped
 make deploy-status  # what each service is running
 ```
 
+Full instructions: [switching-site-modes.md](switching-site-modes.md).
+
 Both deploy the latest commit of the branch on GitHub, so push first. The
 Supabase keep-alive cron runs in both modes. Orders placed in lite mode only
 exist as emails, so they will not appear in the admin portal.

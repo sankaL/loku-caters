@@ -158,6 +158,7 @@ Our visual identity reflects the rich, natural heritage of Sri Lankan cuisine:
 ## Documentation Directory
 
 - [Running a Pre-Order Event](docs/running-an-event.md)
+- [Switching Between the Full and Lite Site](docs/switching-site-modes.md)
 - [Tech Stack Overview](docs/tech-stack.md)
 - [Menu Configuration](docs/menu.md)
 
