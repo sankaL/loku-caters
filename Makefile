@@ -5,7 +5,8 @@
 .PHONY: sync-config restart-backend sync-and-restart dev \
         dev-local dev-backend dev-frontend \
         docker-ready db-up db-down db-api-roles db-migrate db-seed db-seed-if-empty db-reset test-backend quality-backend audit-backend \
-        stop stop-backend-port stop-frontend-port logs-backend help
+        stop stop-backend-port stop-frontend-port logs-backend help \
+        deploy-full deploy-lite deploy-status
 
 # ----------------------------------------------------------------------------
 # Local dev database (Docker, port 5433 to avoid conflicts with system Postgres)
@@ -235,6 +236,22 @@ logs-backend:
 	tail -f /tmp/loku-backend.log
 
 # ============================================================================
+# Railway production mode (see scripts/railway-mode.sh)
+# ============================================================================
+
+## Deploy main (frontend + backend + admin) to Railway
+deploy-full:
+	./scripts/railway-mode.sh full
+
+## Deploy frontend-only to Railway and stop the backend
+deploy-lite:
+	./scripts/railway-mode.sh lite
+
+## Show what Railway is running
+deploy-status:
+	./scripts/railway-mode.sh status
+
+# ============================================================================
 # Help
 # ============================================================================
 
@@ -249,6 +266,11 @@ help:
 	@echo "    make dev-frontend    Frontend only"
 	@echo "    make stop            Stop frontend and backend processes"
 	@echo "    make logs-backend    Tail backend log"
+	@echo ""
+	@echo "  RAILWAY PRODUCTION:"
+	@echo "    make deploy-full     Deploy main: frontend + backend + admin"
+	@echo "    make deploy-lite     Deploy frontend-only and stop the backend"
+	@echo "    make deploy-status   Show what each service is running"
 	@echo ""
 	@echo "  DATABASE:"
 	@echo "    make db-up           Start local Postgres container (port 5433)"
