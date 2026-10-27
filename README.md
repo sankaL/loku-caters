@@ -213,6 +213,7 @@ Our visual identity reflects the rich, natural heritage of Sri Lankan cuisine:
 
 Explore the detailed technical documentation files:
 
+- [Switching Between the Full and Lite Site](docs/switching-site-modes.md)
 - [Tech Stack Overview](docs/tech-stack.md)
 - [Database Schema](docs/database-schema.md)
 - [Menu Configuration](docs/menu.md)
