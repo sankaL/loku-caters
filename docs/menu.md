@@ -32,13 +32,13 @@
 
 ## Catering Style Menus
 
-### Standard Menu - $19.00 (Minimum order: 30 persons)
+### Standard Menu - $20.00 (Minimum order: 30 persons)
 * **1. Menu A:** Tempered Yellow Rice, Chicken Curry, Fish Ambulthiyal, Dhal Fry or Devilled Potato, Beans, and Brinjal Moju.
 * **2. Menu B:** Fried Rice, Devilled Chicken, Fish Curry, Cashew Curry, Vegetable Chop Suey, and Papadam.
 * **3. Menu C:** Ghee Rice, Baked Chicken Curry, Devilled Fish, Dhal Fry, Beans Curry, and Polos Curry.
 * *Beef, mutton, pork and shrimp options available upon request. Additional charges apply.*
 
-### Buffet Style 1 - $23.00 (Minimum Order: 30 persons)
+### Buffet Style 1 - $24.00 (Minimum Order: 30 persons)
 * **Menu:** Garden Salad, Fried Rice, Oven Baked Chicken Curry, Spicy Garlic Onion Prawn, Vegetables (Select 3: Dhal Tempered, Potato White Curry, Cashew Curry, Green Bean Curry, Brinjal Pahi), Papadam, and Cream Caramel.
 * *Beef, mutton, and pork options available upon request. Additional charges apply.*
 
