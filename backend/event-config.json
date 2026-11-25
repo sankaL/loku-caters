@@ -110,7 +110,7 @@
       {
         "name": "Standard Menu",
         "subtitle": "Classic Sri Lankan catering for every occasion",
-        "price": 19,
+        "price": 20,
         "priceNote": "per person (min. 30 persons)",
         "image": "/assets/food/menu/standard-menu.png",
         "cards": [
@@ -160,7 +160,7 @@
       {
         "name": "Buffet Style Menu 1",
         "subtitle": "An elegant buffet with curated selections",
-        "price": 23,
+        "price": 24,
         "priceNote": "per person (min. 30 persons)",
         "image": "/assets/food/menu/buffet-1.png",
         "cards": [
